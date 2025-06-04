@@ -5,14 +5,17 @@
     "start": "nodemon server.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "mongoose": "^7.0.0",
+    "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
-    "dotenv": "^16.0.3",
-    "jsonwebtoken": "^9.0.0",
-    "bcrypt": "^5.1.0"
+    "dompurify": "^3.1.7",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "express-rate-limit": "^7.4.1",
+    "jsdom": "^25.0.1",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.7.3"
   },
   "devDependencies": {
-    "nodemon": "^3.0.0"
+    "nodemon": "^3.1.7"
   }
 }
