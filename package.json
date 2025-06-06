@@ -5,9 +5,9 @@
     "start": "nodemon server.js"
   },
   "dependencies": {
-    "bcryptjs": "^3.0.2",
+    "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
-    "dompurify": "^3.1.7",
+    "dompurify": "^3.2.6",
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
     "express-rate-limit": "^7.4.1",
