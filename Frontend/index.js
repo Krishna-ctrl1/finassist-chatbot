@@ -417,7 +417,12 @@ function logout() {
 
 // Sidebar functions
 function toggleSidebar() {
+  console.log("Toggling sidebar...");
   elements.sidebar.classList.toggle("active");
+  
+  // Log current state for debugging
+  const isActive = elements.sidebar.classList.contains("active");
+  console.log(`Sidebar is now ${isActive ? 'open' : 'closed'}`);
 }
 
 // Chat history functions
