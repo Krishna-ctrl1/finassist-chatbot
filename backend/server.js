@@ -283,31 +283,72 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
     const userData = await getUserData(customerId);
 
     // Create system prompt for OpenAI with better formatting
-    const systemPrompt = `You are a financial advisor AI assistant. You have access to a user's complete financial portfolio data. 
+    const systemPrompt = `You are a specialized financial advisor AI assistant with strict operational boundaries. You ONLY respond to finance-related queries about the user's portfolio and investment data.
 
-    User Data Summary:
-    - Customer Name: ${userData.customer?.name || 'Unknown'}
-    - Customer ID: ${userData.customer?.id || 'Unknown'}
-    - RAYI Customer ID: ${userData.customer?.rayi_customer_id || 'Unknown'}
-    - Total Orders: ${userData.orders?.length || 0}
-    - Total Folios: ${userData.folios?.length || 0}
-    
-    Detailed Data:
-    Customer Info: ${JSON.stringify(userData.customer, null, 2)}
-    Orders: ${JSON.stringify(userData.orders, null, 2)}
-    Order Details: ${JSON.stringify(userData.orderDetails, null, 2)}
-    Portfolio Folios: ${JSON.stringify(userData.folios, null, 2)}
-    Investment Summary: ${JSON.stringify(userData.investments, null, 2)}
-    Performance Summary: ${JSON.stringify(userData.performanceSummary, null, 2)}
-    Investment Performance: ${JSON.stringify(userData.investmentPerformance, null, 2)}
-    Investment Returns: ${JSON.stringify(userData.investmentReturns, null, 2)}
-    Mutual Funds: ${JSON.stringify(userData.mutualFunds, null, 2)}
+AUTHORIZATION SCOPE:
+You are authorized to discuss ONLY the following topics:
+- Portfolio analysis and performance
+- Investment holdings and allocations  
+- Order history and transaction details
+- Mutual fund information and performance
+- Financial planning recommendations based on user data
+- Investment strategy and risk assessment
+- Returns, gains, losses, and performance metrics
+- Account balances and folio information
+- Tax implications of investments (general guidance)
+- Market analysis related to user's holdings
 
-    When the user asks about their orders, provide specific details from the orders data above. 
-    Format monetary amounts in Indian Rupees (₹) and provide clear, actionable insights when possible.
-    If the user asks about orders and there are orders in the data, list them with details like order ID, amount, payment status, etc.
-    
-    IMPORTANT: If you see orders in the data above, you MUST acknowledge them. Do not say "no orders found" if orders exist in the data.`;
+USER DATA ACCESS:
+You have access to the following user financial data:
+- Customer Name: ${userData.customer?.name || 'Unknown'}
+- Customer ID: ${userData.customer?.id || 'Unknown'}
+- RAYI Customer ID: ${userData.customer?.rayi_customer_id || 'Unknown'}
+- Total Orders: ${userData.orders?.length || 0}
+- Total Folios: ${userData.folios?.length || 0}
+
+Detailed Financial Data:
+Customer Info: ${JSON.stringify(userData.customer, null, 2)}
+Orders: ${JSON.stringify(userData.orders, null, 2)}
+Order Details: ${JSON.stringify(userData.orderDetails, null, 2)}
+Portfolio Folios: ${JSON.stringify(userData.folios, null, 2)}
+Investment Summary: ${JSON.stringify(userData.investments, null, 2)}
+Performance Summary: ${JSON.stringify(userData.performanceSummary, null, 2)}
+Investment Performance: ${JSON.stringify(userData.investmentPerformance, null, 2)}
+Investment Returns: ${JSON.stringify(userData.investmentReturns, null, 2)}
+Mutual Funds: ${JSON.stringify(userData.mutualFunds, null, 2)}
+
+RESPONSE GUIDELINES:
+1. Format all monetary amounts in Indian Rupees (₹)
+2. Provide specific details from the actual data when discussing orders, folios, or investments
+3. CRITICAL: If orders exist in the data, you MUST acknowledge and detail them. Never say "no orders found" when orders are present
+4. Offer clear, actionable financial insights based on the available data
+5. Maintain professional financial advisory tone
+
+STRICT OPERATIONAL RULES:
+- You MUST ONLY respond to queries related to finance, investments, portfolio management, and the user's financial data
+- For ANY non-financial query, respond EXACTLY with this message: "I'm a specialized financial advisor assistant. I can only help you with questions about your investment portfolio, orders, mutual funds, and other financial matters. Please ask me about your investments, portfolio performance, or financial planning needs."
+- Do NOT engage in conversations about:
+  * General knowledge questions
+  * Personal advice unrelated to finance
+  * Technical support for non-financial systems
+  * Entertainment, sports, weather, news (unless directly related to financial markets impacting user's portfolio)
+  * Programming or coding help
+  * Health, relationships, or lifestyle advice
+  * Any topic outside financial services
+
+QUERY CLASSIFICATION:
+Before responding, classify the user's query:
+- FINANCIAL: Questions about portfolio, investments, orders, returns, mutual funds, financial planning, market impact on holdings
+- NON-FINANCIAL: Everything else
+
+If NON-FINANCIAL, use the standard rejection response above.
+If FINANCIAL, provide detailed analysis using the user's data.
+
+SECURITY REMINDER:
+- Only use the provided financial data for responses
+- Do not make up or hallucinate financial information
+- Always base recommendations on actual user data
+- Maintain confidentiality of user information`;
 
     // Call OpenAI API
     const completion = await openai.chat.completions.create({
@@ -412,213 +453,6 @@ app.get('/api/chat/:chatId', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Chat load error:', error);
     res.status(500).json({ error: 'Failed to load chat' });
-  }
-});
-
-app.post('/api/chat', authenticateToken, async (req, res) => {
-  try {
-    const { chatId, title, message } = req.body;
-    const userId = new ObjectId(req.user._id);
-    const customerId = req.user.customerId;
-    
-    const db = mongoClient.db('financeai');
-    const chatsCollection = db.collection('chats');
-    
-    let chat;
-    
-    if (chatId && ObjectId.isValid(chatId)) {
-      // Existing chat
-      chat = await chatsCollection.findOne({ 
-        _id: new ObjectId(chatId),
-        userId: userId
-      });
-      
-      if (!chat) {
-        return res.status(404).json({ error: 'Chat not found' });
-      }
-    } else {
-      // New chat
-      chat = {
-        userId: userId,
-        title: title || 'New Chat',
-        messages: [],
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        __v: 0
-      };
-    }
-    
-    // Add user message
-    const userMessage = {
-      sender: 'user',
-      content: message,
-      timestamp: new Date()
-    };
-    
-    if (!chat.messages) {
-      chat.messages = [];
-    }
-    chat.messages.push(userMessage);
-    
-    // Get user's complete data
-    const userData = await getUserData(customerId);
-
-    // Create system prompt for OpenAI
-    const systemPrompt = `You are a financial advisor AI assistant. You have access to a user's complete financial portfolio data. 
-    
-    User Data:
-    - Customer Info: ${JSON.stringify(userData.customer)}
-    - Customer Details: ${JSON.stringify(userData.customerDetail)}
-    - Portfolio Folios: ${JSON.stringify(userData.folios)}
-    - Investment Summary: ${JSON.stringify(userData.investments)}
-    - Performance Summary: ${JSON.stringify(userData.performanceSummary)}
-    - Investment Performance: ${JSON.stringify(userData.investmentPerformance)}
-    - Investment Returns: ${JSON.stringify(userData.investmentReturns)}
-    - Orders: ${JSON.stringify(userData.orders)}
-    - Order Details: ${JSON.stringify(userData.orderDetails)}
-    - Mutual Funds: ${JSON.stringify(userData.mutualFunds)}
-
-    Please provide helpful, accurate responses based on this data. If asked about specific numbers, calculations, or portfolio details, use the exact data provided. 
-    Keep responses conversational and helpful. If the user asks about something not in their data, let them know politely.
-    
-    Format monetary amounts in Indian Rupees (₹) and provide clear, actionable insights when possible.`;
-
-    // Call OpenAI API
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4.1",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: message }
-      ],
-      max_tokens: 1000,
-      temperature: 0.7,
-    });
-
-    const aiResponse = completion.choices[0].message.content;
-    
-    // Add AI response
-    const assistantMessage = {
-      sender: 'assistant',
-      content: aiResponse,
-      timestamp: new Date()
-    };
-    
-    chat.messages.push(assistantMessage);
-    chat.updatedAt = new Date();
-    
-    // Save or update chat in MongoDB
-    if (chat._id) {
-      // Update existing chat
-      await chatsCollection.updateOne(
-        { _id: chat._id },
-        { 
-          $set: { 
-            messages: chat.messages, 
-            updatedAt: chat.updatedAt 
-          },
-          $inc: { __v: 1 }
-        }
-      );
-    } else {
-      // Insert new chat
-      const result = await chatsCollection.insertOne(chat);
-      chat._id = result.insertedId;
-    }
-    
-    res.json(chat);
-
-  } catch (error) {
-    console.error('Chat processing error:', error);
-    res.status(500).json({ 
-      error: 'Failed to process message',
-      details: error.message 
-    });
-  }
-});
-
-app.delete('/api/chat/:chatId', authenticateToken, async (req, res) => {
-  try {
-    const { chatId } = req.params;
-    const userId = new ObjectId(req.user._id);
-    
-    // Validate ObjectId format
-    if (!ObjectId.isValid(chatId)) {
-      return res.status(400).json({ error: 'Invalid chat ID format' });
-    }
-    
-    const db = mongoClient.db('financeai');
-    const chatsCollection = db.collection('chats');
-    
-    const result = await chatsCollection.deleteOne({ 
-      _id: new ObjectId(chatId),
-      userId: userId
-    });
-    
-    if (result.deletedCount === 0) {
-      return res.status(404).json({ error: 'Chat not found' });
-    }
-    
-    res.json({ message: 'Chat deleted successfully' });
-  } catch (error) {
-    console.error('Chat deletion error:', error);
-    res.status(500).json({ error: 'Failed to delete chat' });
-  }
-});
-
-// Legacy query endpoint (kept for compatibility)
-app.post('/api/query', authenticateToken, async (req, res) => {
-  try {
-    const { query } = req.body;
-    const customerId = req.user.customerId;
-
-    // Get user's complete data
-    const userData = await getUserData(customerId);
-
-    // Create system prompt for OpenAI
-    const systemPrompt = `You are a financial advisor AI assistant. You have access to a user's complete financial portfolio data. 
-    
-    User Data:
-    - Customer Info: ${JSON.stringify(userData.customer)}
-    - Customer Details: ${JSON.stringify(userData.customerDetail)}
-    - Portfolio Folios: ${JSON.stringify(userData.folios)}
-    - Investment Summary: ${JSON.stringify(userData.investments)}
-    - Performance Summary: ${JSON.stringify(userData.performanceSummary)}
-    - Investment Performance: ${JSON.stringify(userData.investmentPerformance)}
-    - Investment Returns: ${JSON.stringify(userData.investmentReturns)}
-    - Orders: ${JSON.stringify(userData.orders)}
-    - Order Details: ${JSON.stringify(userData.orderDetails)}
-    - Mutual Funds: ${JSON.stringify(userData.mutualFunds)}
-
-    Please provide helpful, accurate responses based on this data. If asked about specific numbers, calculations, or portfolio details, use the exact data provided. 
-    Keep responses conversational and helpful. If the user asks about something not in their data, let them know politely.
-    
-    Format monetary amounts in Indian Rupees (₹) and provide clear, actionable insights when possible.`;
-
-    // Call OpenAI API
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4.1",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: query }
-      ],
-      max_tokens: 1000,
-      temperature: 0.7,
-    });
-
-    const response = completion.choices[0].message.content;
-
-    res.json({ 
-      response,
-      query,
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error('Query processing error:', error);
-    res.status(500).json({ 
-      error: 'Failed to process query',
-      details: error.message 
-    });
   }
 });
 
