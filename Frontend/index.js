@@ -21,12 +21,15 @@ const elements = {
   sidebar: document.getElementById("sidebar"),
 };
 
-// Debounce utility
+// Debounce utility function
 function debounce(fn, ms) {
   let timeout;
-  return (...args) => {
+  return function(...args) {
+    const self = this;
     clearTimeout(timeout);
-    timeout = setTimeout(() => fn(...args), ms);
+    timeout = setTimeout(function() {
+      fn.apply(self, args);
+    }, ms);
   };
 }
 
@@ -40,18 +43,25 @@ document.addEventListener("DOMContentLoaded", function () {
 
 function setupEventListeners() {
   // Auto-resize textarea
-  elements.messageInput.addEventListener("input", function () {
-    this.style.height = "auto";
-    this.style.height = Math.min(this.scrollHeight, 100) + "px";
-  });
+  if (elements.messageInput) {
+    elements.messageInput.addEventListener("input", function () {
+      this.style.height = "auto";
+      this.style.height = Math.min(this.scrollHeight, 120) + "px";
+      
+      // Enable/disable send button based on input
+      updateSendButtonState();
+    });
+  }
 
   // Send message on Enter (but allow Shift+Enter for new lines)
-  elements.messageInput.addEventListener("keydown", function (e) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  });
+  if (elements.messageInput) {
+    elements.messageInput.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+  }
 
   // Form submissions
   if (elements.loginForm) {
@@ -78,9 +88,11 @@ function setupEventListeners() {
     if (signupPassword) signupPassword.addEventListener("input", validateSignupForm);
   }
 
-  // Close sidebar when clicking outside
+  // Close sidebar when clicking outside or on overlay
   document.addEventListener("click", function (e) {
     const toggleBtn = document.querySelector(".sidebar-toggle");
+    const overlay = document.getElementById("sidebarOverlay");
+    
     if (
       elements.sidebar && elements.sidebar.classList.contains("active") &&
       !elements.sidebar.contains(e.target) &&
@@ -89,6 +101,16 @@ function setupEventListeners() {
       elements.sidebar.classList.remove("active");
     }
   });
+  
+  // Handle overlay click
+  const overlay = document.getElementById("sidebarOverlay");
+  if (overlay) {
+    overlay.addEventListener("click", function() {
+      if (elements.sidebar) {
+        elements.sidebar.classList.remove("active");
+      }
+    });
+  }
 
   // Send button click handler
   if (elements.sendBtn) {
@@ -182,6 +204,9 @@ const validateSignupForm = debounce(() => {
 // Utility function to sanitize user input
 function sanitizeInput(input) {
   if (!input) return '';
+  if (typeof input !== 'string') {
+    input = String(input);
+  }
   const div = document.createElement("div");
   div.textContent = input;
   return div.innerHTML;
@@ -329,32 +354,93 @@ function setButtonLoading(button, isLoading, text) {
   
   if (isLoading) {
     button.disabled = true;
-    button.innerHTML = `<i class="fas fa-spinner fa-spin" aria-label="Loading"></i> ${text}`;
+    button.classList.add('btn-loading');
+    button.setAttribute('data-original-text', button.textContent);
+    button.innerHTML = text;
   } else {
     button.disabled = false;
+    button.classList.remove('btn-loading');
     const iconClass = button === elements.loginBtn ? "fa-sign-in-alt" : "fa-user-plus";
     button.innerHTML = `<i class="fas ${iconClass}" style="margin-right: 8px;"></i> ${text}`;
   }
 }
 
+// Update send button state based on input
+function updateSendButtonState() {
+  if (!elements.sendBtn || !elements.messageInput) return;
+  
+  const hasText = elements.messageInput.value.trim().length > 0;
+  const isCurrentlyDisabled = elements.sendBtn.disabled;
+  
+  elements.sendBtn.disabled = !hasText;
+  
+  // Animate button state changes
+  if (hasText && isCurrentlyDisabled) {
+    // Animate to enabled state
+    elements.sendBtn.style.transition = 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)';
+    elements.sendBtn.style.opacity = '1';
+    elements.sendBtn.style.transform = 'scale(1)';
+    elements.sendBtn.style.boxShadow = '0 4px 12px rgba(16, 163, 127, 0.3)';
+  } else if (!hasText && !isCurrentlyDisabled) {
+    // Animate to disabled state
+    elements.sendBtn.style.transition = 'all 0.2s ease-out';
+    elements.sendBtn.style.opacity = '0.5';
+    elements.sendBtn.style.transform = 'scale(0.9)';
+    elements.sendBtn.style.boxShadow = 'none';
+  }
+}
+
 function showNotification(message, type = "info") {
-  // Create notification element
-  const notification = document.createElement("div");
-  notification.className = `notification ${type}`;
-  notification.innerHTML = `
-    <div class="notification-content">
-      <i class="fas ${type === 'success' ? 'fa-check-circle' : type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle'}"></i>
-      <span>${sanitizeInput(message)}</span>
-    </div>
-  `;
-  
-  // Add to DOM
-  document.body.appendChild(notification);
-  
-  // Remove after delay
-  setTimeout(() => {
-    notification.remove();
-  }, 5000);
+  try {
+    // Create notification element
+    const notification = document.createElement("div");
+    notification.className = `notification ${type}`;
+    
+    const iconClass = type === 'success' ? 'fa-check-circle' : 
+                     type === 'error' ? 'fa-exclamation-circle' : 
+                     type === 'warning' ? 'fa-exclamation-triangle' : 
+                     'fa-info-circle';
+    
+    notification.innerHTML = `
+      <div class="notification-content">
+        <i class="fas ${iconClass}"></i>
+        <span>${sanitizeInput(message)}</span>
+      </div>
+    `;
+    
+    // Add to DOM
+    document.body.appendChild(notification);
+    
+    // Add haptic feedback on mobile
+    if ('vibrate' in navigator && window.innerWidth <= 768) {
+      try {
+        if (type === 'error') {
+          navigator.vibrate([100, 50, 100]); // Error pattern
+        } else if (type === 'success') {
+          navigator.vibrate(100); // Success vibration
+        }
+      } catch (vibrateError) {
+        console.warn('Vibration not supported:', vibrateError);
+      }
+    }
+    
+    // Remove after delay with exit animation
+    setTimeout(() => {
+      if (notification.parentNode) {
+        notification.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
+        notification.style.opacity = '0';
+        notification.style.transform = 'translateX(100px) scale(0.9)';
+        
+        setTimeout(() => {
+          if (notification.parentNode) {
+            notification.parentNode.removeChild(notification);
+          }
+        }, 400);
+      }
+    }, 4000);
+  } catch (error) {
+    console.error('Failed to show notification:', error);
+  }
 }
 
 function switchToSignup() {
@@ -389,15 +475,58 @@ function showAuthScreen() {
 
 function showChatScreen(user) {
   currentUser = user;
-  if (elements.authScreen) elements.authScreen.style.display = "none";
-  if (elements.chatScreen) elements.chatScreen.style.display = "flex";
   
-  // Update user info in header
-  if (elements.userName) elements.userName.textContent = sanitizeInput(user.name);
-  if (elements.userInitials) elements.userInitials.textContent = sanitizeInput(user.name.charAt(0).toUpperCase());
+  // Smooth transition from auth to chat
+  if (elements.authScreen) {
+    elements.authScreen.style.opacity = '0';
+    elements.authScreen.style.transform = 'scale(0.95)';
+    
+    setTimeout(() => {
+      elements.authScreen.style.display = "none";
+      if (elements.chatScreen) {
+        elements.chatScreen.style.display = "flex";
+        elements.chatScreen.style.opacity = '0';
+        elements.chatScreen.style.transform = 'scale(1.05)';
+        
+        // Animate in the chat screen
+        requestAnimationFrame(() => {
+          elements.chatScreen.style.transition = 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)';
+          elements.chatScreen.style.opacity = '1';
+          elements.chatScreen.style.transform = 'scale(1)';
+        });
+      }
+    }, 200);
+  }
+  
+  // Update user info in header with animation
+  if (elements.userName) {
+    elements.userName.style.opacity = '0';
+    elements.userName.textContent = sanitizeInput(user.name);
+    setTimeout(() => {
+      elements.userName.style.transition = 'opacity 0.3s ease';
+      elements.userName.style.opacity = '1';
+    }, 100);
+  }
+  
+  if (elements.userInitials) {
+    elements.userInitials.style.transform = 'scale(0)';
+    elements.userInitials.textContent = sanitizeInput(user.name.charAt(0).toUpperCase());
+    setTimeout(() => {
+      elements.userInitials.style.transition = 'transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)';
+      elements.userInitials.style.transform = 'scale(1)';
+    }, 200);
+  }
   
   // Reset chat area to welcome state
   resetChatArea();
+  
+  // Initialize send button state
+  updateSendButtonState();
+  
+  // Focus input on desktop with delay for animation
+  if (window.innerWidth > 768 && elements.messageInput) {
+    setTimeout(() => elements.messageInput.focus(), 600);
+  }
 }
 
 function resetChatArea() {
@@ -475,11 +604,49 @@ function logout() {
 function toggleSidebar() {
   console.log("Toggling sidebar...");
   if (elements.sidebar) {
-    elements.sidebar.classList.toggle("active");
+    const isActive = elements.sidebar.classList.contains("active");
+    const toggleBtn = document.querySelector('.sidebar-toggle');
+    
+    // Add visual feedback to toggle button
+    if (toggleBtn) {
+      toggleBtn.style.transform = 'scale(0.9) rotate(180deg)';
+      setTimeout(() => {
+        toggleBtn.style.transform = isActive ? 'scale(1) rotate(0deg)' : 'scale(1) rotate(180deg)';
+      }, 100);
+    }
+    
+    if (isActive) {
+      elements.sidebar.classList.remove("active");
+      // Remove overlay
+      const overlay = document.getElementById('sidebarOverlay');
+      if (overlay) {
+        overlay.style.opacity = '0';
+        overlay.style.visibility = 'hidden';
+      }
+    } else {
+      elements.sidebar.classList.add("active");
+      
+      // Show overlay on mobile
+      if (window.innerWidth <= 768) {
+        document.body.style.overflow = 'hidden';
+        const overlay = document.getElementById('sidebarOverlay');
+        if (overlay) {
+          overlay.style.opacity = '1';
+          overlay.style.visibility = 'visible';
+        }
+      }
+    }
     
     // Log current state for debugging
-    const isActive = elements.sidebar.classList.contains("active");
-    console.log(`Sidebar is now ${isActive ? 'open' : 'closed'}`);
+    console.log(`Sidebar is now ${!isActive ? 'open' : 'closed'}`);
+  }
+}
+
+// Close sidebar and restore body scroll
+function closeSidebar() {
+  if (elements.sidebar) {
+    elements.sidebar.classList.remove("active");
+    document.body.style.overflow = '';
   }
 }
 
@@ -517,59 +684,82 @@ async function loadChatHistory() {
 function renderChatHistory(chats) {
   if (!elements.chatHistory) return;
   
-  elements.chatHistory.innerHTML = "";
+  // Fade out existing content
+  elements.chatHistory.style.opacity = '0';
+  elements.chatHistory.style.transform = 'translateY(20px)';
   
-  if (chats.length === 0) {
-    elements.chatHistory.innerHTML = `
-      <div class="chat-history-empty">
-        <p>No chat history yet. Start a conversation!</p>
-      </div>
-    `;
-    return;
-  }
-
-  chats.forEach((chat) => {
-    const chatItem = document.createElement("div");
-    chatItem.className = `chat-history-item ${chat._id === currentChatId ? "active" : ""}`;
-    chatItem.setAttribute("tabindex", "0");
+  setTimeout(() => {
+    elements.chatHistory.innerHTML = "";
     
-    // Get preview text from first user message
-    const firstUserMessage = chat.messages.find(msg => msg.sender === 'user');
-    const preview = firstUserMessage ? firstUserMessage.content : "New chat";
+    if (chats.length === 0) {
+      elements.chatHistory.innerHTML = `
+        <div class="chat-history-empty stagger-animation">
+          <p>No chat history yet. Start a conversation!</p>
+        </div>
+      `;
+    } else {
+      chats.forEach((chat, index) => {
+        const chatItem = document.createElement("div");
+        chatItem.className = `chat-history-item ${chat._id === currentChatId ? "active" : ""}`;
+        chatItem.setAttribute("tabindex", "0");
+        chatItem.style.animationDelay = `${index * 0.05}s`;
+        
+        // Get preview text from first user message
+        const firstUserMessage = chat.messages.find(msg => msg.sender === 'user');
+        const preview = firstUserMessage ? firstUserMessage.content : "New chat";
+        
+        chatItem.innerHTML = `
+          <div class="chat-history-content">
+            <h4>${sanitizeInput(chat.title || preview)}</h4>
+            <p>${sanitizeInput(preview.length > 50 ? preview.substring(0, 47) + "..." : preview)}</p>
+            <span class="chat-date">${formatDate(chat.updatedAt || chat.createdAt)}</span>
+          </div>
+          <button class="delete-chat-btn" data-chat-id="${chat._id}" aria-label="Delete chat">
+            <i class="fas fa-trash-alt"></i>
+          </button>
+        `;
+        
+        // Click handlers with haptic feedback on mobile
+        chatItem.onclick = (e) => {
+          if (!e.target.closest(".delete-chat-btn")) {
+            // Add visual feedback
+            chatItem.style.transform = 'scale(0.98)';
+            setTimeout(() => {
+              chatItem.style.transform = '';
+              loadChat(chat._id);
+            }, 100);
+          }
+        };
+        
+        chatItem.onkeydown = (e) => {
+          if (e.key === "Enter" && !e.target.closest(".delete-chat-btn")) {
+            loadChat(chat._id);
+          }
+        };
+        
+        // Delete button handler
+        const deleteBtn = chatItem.querySelector(".delete-chat-btn");
+        deleteBtn.onclick = (e) => {
+          e.stopPropagation();
+          // Add visual feedback
+          deleteBtn.style.transform = 'scale(1.2) rotate(5deg)';
+          setTimeout(() => {
+            deleteBtn.style.transform = '';
+            deleteChat(chat._id);
+          }, 150);
+        };
+        
+        elements.chatHistory.appendChild(chatItem);
+      });
+    }
     
-    chatItem.innerHTML = `
-      <div class="chat-history-content">
-        <h4>${sanitizeInput(chat.title || preview)}</h4>
-        <p>${sanitizeInput(preview.length > 50 ? preview.substring(0, 47) + "..." : preview)}</p>
-        <span class="chat-date">${formatDate(chat.updatedAt || chat.createdAt)}</span>
-      </div>
-      <button class="delete-chat-btn" data-chat-id="${chat._id}" aria-label="Delete chat">
-        <i class="fas fa-trash-alt"></i>
-      </button>
-    `;
-    
-    // Click handlers
-    chatItem.onclick = (e) => {
-      if (!e.target.closest(".delete-chat-btn")) {
-        loadChat(chat._id);
-      }
-    };
-    
-    chatItem.onkeydown = (e) => {
-      if (e.key === "Enter" && !e.target.closest(".delete-chat-btn")) {
-        loadChat(chat._id);
-      }
-    };
-    
-    // Delete button handler
-    const deleteBtn = chatItem.querySelector(".delete-chat-btn");
-    deleteBtn.onclick = (e) => {
-      e.stopPropagation();
-      deleteChat(chat._id);
-    };
-    
-    elements.chatHistory.appendChild(chatItem);
-  });
+    // Fade in new content
+    requestAnimationFrame(() => {
+      elements.chatHistory.style.transition = 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)';
+      elements.chatHistory.style.opacity = '1';
+      elements.chatHistory.style.transform = 'translateY(0)';
+    });
+  }, 100);
 }
 
 function formatDate(dateString) {
@@ -619,7 +809,7 @@ async function loadChat(chatId) {
     });
     
     scrollToBottom();
-    if (elements.sidebar) elements.sidebar.classList.remove("active");
+    closeSidebar(); // Use the new function to properly close sidebar
     
     // Update active state in sidebar
     document.querySelectorAll('.chat-history-item').forEach(item => {
@@ -692,18 +882,25 @@ function appendMessage(sender, message, animate = true) {
   `;
   
   if (animate) {
-    messageDiv.style.opacity = '0';
-    messageDiv.style.transform = 'translateY(20px)';
+    // More sophisticated animation based on sender
+    if (sender === 'user') {
+      messageDiv.style.opacity = '0';
+      messageDiv.style.transform = 'translateX(50px) scale(0.9)';
+    } else {
+      messageDiv.style.opacity = '0';
+      messageDiv.style.transform = 'translateX(-50px) scale(0.9) rotateX(15deg)';
+    }
   }
   
   elements.chatMessages.appendChild(messageDiv);
   
   if (animate) {
-    setTimeout(() => {
-      messageDiv.style.transition = 'all 0.3s ease';
+    // Trigger animation with physics-based easing
+    requestAnimationFrame(() => {
+      messageDiv.style.transition = 'all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)';
       messageDiv.style.opacity = '1';
-      messageDiv.style.transform = 'translateY(0)';
-    }, 10);
+      messageDiv.style.transform = 'translateX(0) scale(1) rotateX(0deg)';
+    });
   }
   
   scrollToBottom();
@@ -718,11 +915,7 @@ function formatMessage(message) {
     .replace(/\*(.*?)\*/g, '<em>$1</em>'); // Italic text
 }
 
-function scrollToBottom() {
-  if (elements.chatMessages) {
-    elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
-  }
-}
+// This function is now defined above in the resize handler section
 
 async function sendMessage() {
   if (!elements.messageInput || !authToken) return;
@@ -730,24 +923,61 @@ async function sendMessage() {
   const message = elements.messageInput.value.trim();
   if (!message) return;
 
-  // Remove welcome elements if present
+  // Remove welcome elements with animation if present
   if (elements.chatMessages) {
     const welcomeCard = elements.chatMessages.querySelector(".welcome-card");
     const quickActions = elements.chatMessages.querySelector(".quick-actions");
-    if (welcomeCard) welcomeCard.remove();
-    if (quickActions) quickActions.remove();
+    
+    if (welcomeCard) {
+      welcomeCard.style.transition = 'all 0.4s ease-out';
+      welcomeCard.style.opacity = '0';
+      welcomeCard.style.transform = 'translateY(-20px) scale(0.95)';
+      setTimeout(() => welcomeCard.remove(), 400);
+    }
+    
+    if (quickActions) {
+      quickActions.style.transition = 'all 0.4s ease-out';
+      quickActions.style.opacity = '0';
+      quickActions.style.transform = 'translateY(-20px) scale(0.95)';
+      setTimeout(() => quickActions.remove(), 400);
+    }
   }
 
-  // Add user message
+  // Add user message with enhanced animation
   appendMessage("user", message);
   
-  // Clear input and reset height
-  elements.messageInput.value = "";
-  elements.messageInput.style.height = "48px";
+  // Animate input clearing
+  elements.messageInput.style.transition = 'all 0.2s ease-out';
+  elements.messageInput.style.transform = 'scale(0.98)';
   
-  // Disable send button and show typing indicator
-  if (elements.sendBtn) elements.sendBtn.disabled = true;
-  if (elements.typingIndicator) elements.typingIndicator.style.display = "flex";
+  setTimeout(() => {
+    elements.messageInput.value = "";
+    elements.messageInput.style.height = "auto";
+    elements.messageInput.style.transform = 'scale(1)';
+    updateSendButtonState();
+  }, 100);
+  
+  // Animate send button to loading state
+  if (elements.sendBtn) {
+    elements.sendBtn.disabled = true;
+    elements.sendBtn.style.transform = 'scale(0.9)';
+    setTimeout(() => {
+      elements.sendBtn.style.transform = 'scale(1)';
+    }, 100);
+  }
+  
+  // Show typing indicator with animation
+  if (elements.typingIndicator) {
+    elements.typingIndicator.style.display = "flex";
+    elements.typingIndicator.style.opacity = '0';
+    elements.typingIndicator.style.transform = 'translateY(20px) scale(0.9)';
+    
+    requestAnimationFrame(() => {
+      elements.typingIndicator.style.transition = 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)';
+      elements.typingIndicator.style.opacity = '1';
+      elements.typingIndicator.style.transform = 'translateY(0) scale(1)';
+    });
+  }
 
   try {
     // Generate title for new chats
@@ -785,9 +1015,9 @@ async function sendMessage() {
     if (lastAiResponse) {
       setTimeout(() => {
         appendMessage("bot", lastAiResponse.content);
-      }, 500);
+      }, 800); // Slightly longer delay for better UX
     }
-
+    
     // Reload chat history to update sidebar
     loadChatHistory();
     
@@ -796,8 +1026,27 @@ async function sendMessage() {
     appendMessage("bot", "Sorry, I'm having trouble processing your request right now. Please try again in a moment.");
     showNotification("Failed to send message", "error");
   } finally {
-    if (elements.typingIndicator) elements.typingIndicator.style.display = "none";
-    if (elements.sendBtn) elements.sendBtn.disabled = false;
+    // Hide typing indicator with animation
+    if (elements.typingIndicator) {
+      elements.typingIndicator.style.transition = 'all 0.3s ease-out';
+      elements.typingIndicator.style.opacity = '0';
+      elements.typingIndicator.style.transform = 'translateY(20px) scale(0.9)';
+      
+      setTimeout(() => {
+        elements.typingIndicator.style.display = "none";
+      }, 300);
+    }
+    
+    // Re-enable send button with animation
+    if (elements.sendBtn) {
+      elements.sendBtn.style.transition = 'all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)';
+      elements.sendBtn.disabled = false;
+      elements.sendBtn.style.transform = 'scale(1.05)';
+      
+      setTimeout(() => {
+        elements.sendBtn.style.transform = 'scale(1)';
+      }, 200);
+    }
   }
 }
 
@@ -818,11 +1067,251 @@ function startNewChat() {
     item.classList.remove('active');
   });
   
-  // Close sidebar on mobile
-  if (elements.sidebar) elements.sidebar.classList.remove("active");
+  // Close sidebar properly
+  closeSidebar();
+  
+  // Focus input on desktop
+  if (window.innerWidth > 768 && elements.messageInput) {
+    setTimeout(() => elements.messageInput.focus(), 100);
+  }
   
   showNotification("New chat started", "success");
 }
+
+// Handle window resize for responsive behavior
+const handleWindowResize = debounce(function() {
+  // Close sidebar on resize to larger screen
+  if (window.innerWidth > 768 && elements.sidebar) {
+    elements.sidebar.classList.remove('active');
+    document.body.style.overflow = '';
+    
+    // Hide overlay
+    const overlay = document.getElementById('sidebarOverlay');
+    if (overlay) {
+      overlay.style.opacity = '0';
+      overlay.style.visibility = 'hidden';
+    }
+    
+    // Reset toggle button
+    const toggleBtn = document.querySelector('.sidebar-toggle');
+    if (toggleBtn) {
+      toggleBtn.style.transform = 'scale(1) rotate(0deg)';
+    }
+  }
+}, 150);
+
+window.addEventListener('resize', handleWindowResize);
+
+// Add smooth scrolling to messages
+function scrollToBottom() {
+  if (elements.chatMessages && elements.chatMessages.scrollTo) {
+    elements.chatMessages.scrollTo({
+      top: elements.chatMessages.scrollHeight,
+      behavior: 'smooth'
+    });
+  } else if (elements.chatMessages) {
+    // Fallback for older browsers
+    elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+  }
+}
+
+// Enhanced focus management for better UX
+function enhanceFocusManagement() {
+  // Add focus rings for keyboard navigation
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Tab') {
+      document.body.classList.add('keyboard-navigation');
+    }
+  });
+  
+  document.addEventListener('mousedown', function() {
+    document.body.classList.remove('keyboard-navigation');
+  });
+}
+
+// Initialize enhanced features
+document.addEventListener('DOMContentLoaded', function() {
+  enhanceFocusManagement();
+  
+  // Add intersection observer for element animations
+  if ('IntersectionObserver' in window) {
+    const observerOptions = {
+      threshold: 0.1,
+      rootMargin: '50px'
+    };
+    
+    const observer = new IntersectionObserver(function(entries) {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('animate-in');
+        }
+      });
+    }, observerOptions);
+    
+    // Observe elements for animation with error handling
+    setTimeout(() => {
+      try {
+        document.querySelectorAll('.message, .quick-action, .chat-history-item').forEach(el => {
+          if (el && observer) {
+            observer.observe(el);
+          }
+        });
+      } catch (error) {
+        console.warn('Failed to observe elements for animation:', error);
+      }
+    }, 1000);
+  }
+});
+
+// Enhanced mobile optimizations
+function initializeMobileOptimizations() {
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  
+  if (isMobile) {
+    // Prevent zoom on input focus
+    const viewport = document.querySelector('meta[name="viewport"]');
+    if (viewport) {
+      viewport.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
+    }
+    
+    // Add mobile-specific class for CSS targeting
+    document.body.classList.add('mobile-device');
+    
+    // Improve scroll performance
+    document.body.style.webkitOverflowScrolling = 'touch';
+    
+    // Add touch feedback for buttons
+    addTouchFeedback();
+    
+    // Handle keyboard appearance on mobile
+    handleMobileKeyboard();
+  }
+}
+
+function addTouchFeedback() {
+  const interactiveElements = document.querySelectorAll(
+    '.send-btn, .auth-btn, .quick-action, .chat-history-item, .new-chat-btn, .logout-btn, .sidebar-toggle'
+  );
+  
+  interactiveElements.forEach(element => {
+    element.addEventListener('touchstart', function() {
+      this.style.transform = 'scale(0.98)';
+      this.style.transition = 'transform 0.1s ease';
+    }, { passive: true });
+    
+    element.addEventListener('touchend', function() {
+      setTimeout(() => {
+        this.style.transform = '';
+        this.style.transition = '';
+      }, 100);
+    }, { passive: true });
+  });
+}
+
+function handleMobileKeyboard() {
+  const inputElements = [elements.messageInput].filter(Boolean);
+  
+  inputElements.forEach(input => {
+    input.addEventListener('focus', () => {
+      // Scroll input into view when keyboard appears
+      setTimeout(() => {
+        if (input.scrollIntoView) {
+          input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 300);
+    });
+  });
+  
+  // Handle viewport height changes due to virtual keyboard
+  let initialViewportHeight = window.innerHeight;
+  
+  const handleResize = () => {
+    const currentHeight = window.innerHeight;
+    const heightDifference = initialViewportHeight - currentHeight;
+    
+    // If height decreased significantly, keyboard is probably open
+    if (heightDifference > 150) {
+      document.body.classList.add('keyboard-open');
+    } else {
+      document.body.classList.remove('keyboard-open');
+    }
+  };
+  
+  window.addEventListener('resize', handleResize);
+}
+
+// Initialize mobile optimizations
+document.addEventListener('DOMContentLoaded', () => {
+  try {
+    initializeMobileOptimizations();
+  } catch (error) {
+    console.warn('Failed to initialize mobile optimizations:', error);
+  }
+});
+
+
+// Performance optimizations
+function initializePerformanceOptimizations() {
+  // Use requestIdleCallback for non-critical operations
+  if ('requestIdleCallback' in window) {
+    requestIdleCallback(() => {
+      // Preload animations
+      const style = document.createElement('style');
+      style.textContent = '.preload-animations * { transition: none !important; animation: none !important; }';
+      document.head.appendChild(style);
+      
+      // Remove preload class after DOM is ready
+      setTimeout(() => {
+        document.body.classList.remove('preload-animations');
+        if (style.parentNode) {
+          style.parentNode.removeChild(style);
+        }
+      }, 100);
+    });
+  }
+  
+  // Optimize images and assets loading
+  if ('loading' in HTMLImageElement.prototype) {
+    const images = document.querySelectorAll('img[data-src]');
+    images.forEach(img => {
+      img.src = img.dataset.src;
+    });
+  }
+}
+
+// Progressive enhancement for modern features
+function initializeProgressiveEnhancements() {
+  // Service Worker registration (if available)
+  if ('serviceWorker' in navigator) {
+    // Could register SW here for offline functionality
+  }
+  
+  // Web App Manifest support
+  if ('share' in navigator) {
+    // Could add native sharing functionality
+  }
+  
+  // Improved error handling with user feedback
+  window.addEventListener('error', (event) => {
+    console.error('Application error:', event.error);
+    showNotification('Something went wrong. Please refresh the page.', 'error');
+  });
+  
+  window.addEventListener('unhandledrejection', (event) => {
+    console.error('Unhandled promise rejection:', event.reason);
+    showNotification('Connection issue detected. Please check your internet.', 'warning');
+  });
+}
+
+// Initialize all enhancements
+document.addEventListener('DOMContentLoaded', () => {
+  try {
+    initializePerformanceOptimizations();
+    initializeProgressiveEnhancements();
+  } catch (error) {
+    console.warn('Failed to initialize enhancements:', error);
+  }
+});
 
 // Make functions globally available for onclick handlers
 window.switchToSignup = switchToSignup;
@@ -831,3 +1320,4 @@ window.logout = logout;
 window.toggleSidebar = toggleSidebar;
 window.sendQuickMessage = sendQuickMessage;
 window.startNewChat = startNewChat;
+window.closeSidebar = closeSidebar;
