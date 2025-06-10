@@ -56,11 +56,11 @@ app.use('/api/auth', authLimiter);
 
 // Middleware
 app.use(cors({
-    origin: 'http://localhost:3000', // Adjust if your frontend runs on a different port
+    origin: 'http://localhost:3000',
     methods: ['GET', 'POST', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
-app.use(express.json()); // Parse JSON request bodies
+app.use(express.json());
 
 // JWT middleware for authentication
 const authenticateToken = (req, res, next) => {
@@ -89,25 +89,21 @@ app.post('/api/auth/login', async (req, res) => {
             return res.status(400).json({ message: 'Email and password are required' });
         }
 
-        // Get database and collection
         const db = mongoClient.db('financeai');
         const customersCollection = db.collection('customer');
 
-        // Find customer by email
         const customer = await customersCollection.findOne({ email: email.toLowerCase() });
         
         if (!customer) {
             return res.status(401).json({ message: 'Invalid email or password' });
         }
 
-        // Compare password with hashed password
         const isPasswordValid = await bcrypt.compare(password, customer.password);
         
         if (!isPasswordValid) {
             return res.status(401).json({ message: 'Invalid email or password' });
         }
 
-        // Generate JWT token
         const token = jwt.sign(
             { 
                 _id: customer._id,
@@ -122,7 +118,6 @@ app.post('/api/auth/login', async (req, res) => {
             { expiresIn: '24h' }
         );
 
-        // Return success response
         res.json({
             message: 'Login successful',
             token,
@@ -143,16 +138,15 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-// Function to get all user data
+// Function to get all user data with enhanced error handling
 async function getUserData(customerId) {
   try {
     const db = mongoClient.db('financeai');
     
-    console.log('Fetching data for customerId:', customerId, 'Type:', typeof customerId); // Debug log
+    console.log('Fetching data for customerId:', customerId, 'Type:', typeof customerId);
     
-    // Ensure customerId is a number for consistency
     const numericCustomerId = parseInt(customerId);
-    console.log('Converted to numeric customerId:', numericCustomerId); // Debug log
+    console.log('Converted to numeric customerId:', numericCustomerId);
     
     const [
       customer,
@@ -164,14 +158,34 @@ async function getUserData(customerId) {
       investmentReturns,
       orders
     ] = await Promise.all([
-      db.collection('customer').findOne({ id: numericCustomerId }),
-      db.collection('customer_detail').findOne({ customer_id: numericCustomerId }),
-      db.collection('customer_folio').find({ customer_id: numericCustomerId }).toArray(),
-      db.collection('customer_investment_perf_summary').findOne({ customer_id: numericCustomerId }),
-      db.collection('customer_investment_performance').find({ customer_id: numericCustomerId }).toArray(),
-      db.collection('customer_investment_returns').find({ customer_id: numericCustomerId }).toArray(),
-      // Make sure you're using the correct collection name - check if it's 'order' or 'orders'
-      db.collection('order').find({ customer_id: numericCustomerId }).toArray()
+      db.collection('customer').findOne({ id: numericCustomerId }).catch(err => {
+        console.error('Error fetching customer:', err);
+        return null;
+      }),
+      db.collection('customer_detail').findOne({ customer_id: numericCustomerId }).catch(err => {
+        console.error('Error fetching customer detail:', err);
+        return null;
+      }),
+      db.collection('customer_folio').find({ customer_id: numericCustomerId }).toArray().catch(err => {
+        console.error('Error fetching folios:', err);
+        return [];
+      }),
+      db.collection('customer_investment_perf_summary').findOne({ customer_id: numericCustomerId }).catch(err => {
+        console.error('Error fetching investment summary:', err);
+        return null;
+      }),
+      db.collection('customer_investment_performance').find({ customer_id: numericCustomerId }).toArray().catch(err => {
+        console.error('Error fetching investment performance:', err);
+        return [];
+      }),
+      db.collection('customer_investment_returns').find({ customer_id: numericCustomerId }).toArray().catch(err => {
+        console.error('Error fetching investment returns:', err);
+        return [];
+      }),
+      db.collection('order').find({ customer_id: numericCustomerId }).toArray().catch(err => {
+        console.error('Error fetching orders:', err);
+        return [];
+      })
     ]);
 
     console.log('Raw query results:');
@@ -179,49 +193,119 @@ async function getUserData(customerId) {
     console.log('- Orders query result:', orders); 
     console.log('- Orders count:', orders?.length || 0);
 
-    // Get order details for user's orders
-    const orderDetails = orders && orders.length > 0 ? 
-      await db.collection('order_detail').find({ 
+    let orderDetails = [];
+    if (orders && orders.length > 0) {
+      orderDetails = await db.collection('order_detail').find({ 
         order_id: { $in: orders.map(o => o.id) } 
-      }).toArray() : [];
+      }).toArray().catch(err => {
+        console.error('Error fetching order details:', err);
+        return [];
+      });
+    }
 
-    // Get mutual fund details for user's investments
     const mfIds = [...new Set([
-      ...folios.map(f => f.mf_id),
-      ...investmentReturns.map(r => r.mf_id)
-    ])].filter(id => id); // Remove undefined values
+      ...(folios || []).map(f => f?.mf_id),
+      ...(investmentReturns || []).map(r => r?.mf_id)
+    ])].filter(id => id);
     
-    const mutualFunds = mfIds.length > 0 ? 
-      await db.collection('mutual_fund').find({
+    let mutualFunds = [];
+    if (mfIds.length > 0) {
+      mutualFunds = await db.collection('mutual_fund').find({
         $or: [
           { id: { $in: mfIds } },
           { scheme_code: { $in: mfIds } }
         ]
-      }).toArray() : [];
+      }).toArray().catch(err => {
+        console.error('Error fetching mutual funds:', err);
+        return [];
+      });
+    }
 
     console.log('Final data summary:', {
       customerFound: !!customer,
       ordersCount: orders?.length || 0,
       foliosCount: folios?.length || 0,
       orderDetailsCount: orderDetails?.length || 0
-    }); // Debug log
+    });
 
     return {
-      customer,
-      customerDetail,
-      folios,
-      investments,
-      performanceSummary,
-      investmentPerformance,
-      investmentReturns,
-      orders,
-      orderDetails,
-      mutualFunds
+      customer: customer || { name: 'Unknown', id: 'Unknown', rayi_customer_id: 'Unknown' },
+      customerDetail: customerDetail || null,
+      folios: folios || [],
+      investments: investments || null,
+      performanceSummary: performanceSummary || null,
+      investmentPerformance: investmentPerformance || [],
+      investmentReturns: investmentReturns || [],
+      orders: orders || [],
+      orderDetails: orderDetails || [],
+      mutualFunds: mutualFunds || []
     };
   } catch (error) {
     console.error('Error fetching user data:', error);
-    throw error;
+    return {
+      customer: { name: 'Unknown', id: 'Unknown', rayi_customer_id: 'Unknown' },
+      customerDetail: null,
+      folios: [],
+      investments: null,
+      performanceSummary: null,
+      investmentPerformance: [],
+      investmentReturns: [],
+      orders: [],
+      orderDetails: [],
+      mutualFunds: []
+    };
   }
+}
+
+// Function to map partial entity names to full names
+const entityMapping = {
+  'sbi': 'State Bank of India',
+  'apple': 'Apple Inc.',
+  'reliance': 'Reliance Industries',
+  'hdfc': 'HDFC Bank',
+  'icici': 'ICICI Bank'
+};
+
+// Function to classify the query
+function classifyQuery(message) {
+  const lowerMessage = message.toLowerCase();
+  
+  // Map partial entity names to full names
+  let expandedMessage = lowerMessage;
+  Object.keys(entityMapping).forEach(key => {
+    if (lowerMessage.includes(key)) {
+      expandedMessage = expandedMessage.replace(new RegExp(key, 'gi'), entityMapping[key]);
+    }
+  });
+
+  // Keywords indicating a user-specific financial query
+  const userSpecificKeywords = [
+    'my portfolio', 'my sip', 'my investments', 'my orders', 'my balance',
+    'my transactions', 'my account', 'my mutual funds', 'my returns',
+    'my performance', 'my folios'
+  ];
+
+  // Expanded keywords for general financial queries
+  const generalFinancialKeywords = [
+    'mutual fund', 'sip', 'investment', 'portfolio', 'returns', 'performance',
+    'market', 'stocks', 'shares', 'bonds', 'equity', 'debt', 'tax', 'financial planning',
+    'risk', 'strategy', 'reliance', 'hdf mutual fund', 'sbi', 'apple', 'stock price',
+    'market cap', 'dividend', 'etf', 'fund', 'trade', 'growth', 'value', 'sector',
+    'nasdaq', 'dow jones', 's&p 500', 'economy', 'interest rates', 'inflation', 'recession'
+  ];
+
+  const isUserSpecific = userSpecificKeywords.some(keyword => expandedMessage.includes(keyword));
+  const isFinancial = generalFinancialKeywords.some(keyword => expandedMessage.includes(keyword)) || isUserSpecific;
+
+  if (!isFinancial) {
+    return 'NON-FINANCIAL';
+  }
+  return isUserSpecific ? 'USER-SPECIFIC-FINANCIAL' : 'GENERAL-FINANCIAL';
+}
+
+// Function to strip hashtags from AI response
+function stripHashtags(response) {
+  return response.replace(/#[^\s]+/g, '');
 }
 
 app.post('/api/chat', authenticateToken, async (req, res) => {
@@ -229,16 +313,14 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
     const { chatId, title, message } = req.body;
     const userId = new ObjectId(req.user._id);
     
-    // FIX: Use the correct customer ID from JWT token
-    // The customerId should be the numeric ID (like 102), not the MongoDB ObjectId
     const customerId = req.user.customerId || req.user.id;
     console.log('JWT user object:', {
       _id: req.user._id,
       id: req.user.id,
       customerId: req.user.customerId,
       rayiCustomerId: req.user.rayiCustomerId
-    }); // Debug log
-    console.log('Processing chat for customerId:', customerId, 'Type:', typeof customerId); // Debug log
+    });
+    console.log('Processing chat for customerId:', customerId, 'Type:', typeof customerId);
     
     const db = mongoClient.db('financeai');
     const chatsCollection = db.collection('chats');
@@ -246,7 +328,6 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
     let chat;
     
     if (chatId && ObjectId.isValid(chatId)) {
-      // Existing chat
       chat = await chatsCollection.findOne({ 
         _id: new ObjectId(chatId),
         userId: userId
@@ -256,7 +337,6 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
         return res.status(404).json({ error: 'Chat not found' });
       }
     } else {
-      // New chat
       chat = {
         userId: userId,
         title: title || 'New Chat',
@@ -267,7 +347,6 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
       };
     }
     
-    // Add user message
     const userMessage = {
       sender: 'user',
       content: message,
@@ -279,11 +358,55 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
     }
     chat.messages.push(userMessage);
     
-    // Get user's complete data
-    const userData = await getUserData(customerId);
+    const queryType = classifyQuery(message);
+    console.log('Query classified as:', queryType);
 
-    // Create system prompt for OpenAI with better formatting
-    const systemPrompt = `You are a specialized financial advisor AI assistant with strict operational boundaries. You ONLY respond to finance-related queries about the user's portfolio and investment data.
+    const recentMessages = chat.messages.slice(-5).map(msg => ({
+      role: msg.sender === 'user' ? 'user' : 'assistant',
+      content: msg.content
+    }));
+
+    const isFirstMessage = chat.messages.length === 1;
+
+    let systemPrompt;
+    let userData = {};
+
+    // Always fetch user data to allow for mixed queries
+    userData = await getUserData(customerId);
+
+    if (queryType === 'NON-FINANCIAL') {
+      const aiResponse = isFirstMessage
+        ? "Hello! I'm your specialized financial advisor assistant, here to assist with your investment portfolio, orders, mutual funds, and other financial matters. It seems your question isn't related to finance. Could you please ask about your investments, portfolio performance, or financial planning needs? I'm happy to help with those!"
+        : "It seems your question isn't related to finance. Could you please ask about your investments, portfolio performance, or financial planning needs? I'm happy to help with those!";
+      
+      const assistantMessage = {
+        sender: 'assistant',
+        content: aiResponse,
+        timestamp: new Date()
+      };
+      
+      chat.messages.push(assistantMessage);
+      chat.updatedAt = new Date();
+      
+      if (chat._id) {
+        await chatsCollection.updateOne(
+          { _id: chat._id },
+          { 
+            $set: { 
+              messages: chat.messages, 
+              updatedAt: chat.updatedAt 
+            },
+            $inc: { __v: 1 }
+          }
+        );
+      } else {
+        const result = await chatsCollection.insertOne(chat);
+        chat._id = result.insertedId;
+      }
+      
+      return res.json(chat);
+    } else if (queryType === 'USER-SPECIFIC-FINANCIAL') {
+      systemPrompt = `You are a specialized financial advisor AI assistant with strict operational boundaries. You ONLY respond to finance-related queries about the user's portfolio and investment data, but you can also include general financial insights when relevant.
 
 AUTHORIZATION SCOPE:
 You are authorized to discuss ONLY the following topics:
@@ -297,6 +420,7 @@ You are authorized to discuss ONLY the following topics:
 - Account balances and folio information
 - Tax implications of investments (general guidance)
 - Market analysis related to user's holdings
+- General stock performance, market trends, and stock funds (e.g., ETFs) when relevant to the user's query
 
 USER DATA ACCESS:
 You have access to the following user financial data:
@@ -318,17 +442,56 @@ Investment Returns: ${JSON.stringify(userData.investmentReturns, null, 2)}
 Mutual Funds: ${JSON.stringify(userData.mutualFunds, null, 2)}
 
 RESPONSE GUIDELINES:
-1. Format all monetary amounts in Indian Rupees (₹)
-2. Provide specific details from the actual data when discussing orders, folios, or investments
-3. CRITICAL: If orders exist in the data, you MUST acknowledge and detail them. Never say "no orders found" when orders are present
-4. Offer clear, actionable financial insights based on the available data
-5. Maintain professional financial advisory tone
+1. **Politeness and Tone**:
+   - For the first message in a chat session, start with a polite greeting like "Hello ${userData.customer?.name || 'there'}!" or "Hi ${userData.customer?.name || 'there'}!".
+   - For follow-up messages, do NOT use a greeting unless the conversation context suggests it's needed (e.g., after a long pause or a non-financial query rejection). Instead, dive straight into the response while maintaining a polite and professional tone.
+   - Always end your response with a friendly closer, such as "Let me know how I can assist you further!" or "Feel free to ask me anything else!"
+   - Maintain a warm, professional, and conversational tone throughout, as if speaking to a valued client.
+
+2. **Conversation Context**:
+   - Use the provided conversation history to maintain context and make the conversation flow naturally.
+   - Reference prior messages when relevant to show continuity (e.g., "Following up on your question about your SIPs, here's more detail...").
+   - Avoid abrupt or disconnected responses; ensure each response feels like a natural continuation of the conversation.
+
+3. **Comprehensive Financial Analysis**:
+   - When the query involves both user-specific data and general financial topics (e.g., "How does Apple stock compare to my portfolio?"), provide a detailed analysis including:
+     - User-specific data from the database (e.g., portfolio holdings, orders).
+     - General financial insights (e.g., stock performance, market trends, related stock funds).
+     - Compare the user’s data with general trends (e.g., "Your portfolio has 5% in tech stocks, while Apple’s stock has been underperforming the tech sector this year").
+     - Visual aids: Suggest where graphs would enhance understanding, such as "Insert a pie chart showing your portfolio allocation compared to the tech sector here".
+   - Ensure responses are concise yet comprehensive, providing actionable insights.
+
+4. **Formatting**:
+   - Format all monetary amounts in Indian Rupees (₹) for Indian stocks or USD ($) for international stocks as appropriate.
+   - Provide specific details from the actual data when discussing orders, folios, or investments.
+   - Format responses using markdown for better readability:
+     - Use headings (#, ##, ###) for sections.
+     - Use bullet points (-) for lists.
+     - Use tables for structured data with the following strict guidelines:
+       - Use bold (**Header**) for table headers to make them stand out.
+       - Add a separator row with dashes (e.g., | --- | --- | --- |) below the header row to clearly delineate headers from data.
+       - Ensure a minimum of 3 spaces between columns for padding to improve readability.
+       - Standardize column widths by setting each column to the width of the longest entry in that column, padding shorter entries with spaces.
+       - For long text entries (e.g., "Reliance Industries"), truncate with an ellipsis (e.g., "Reliance Ind…") to fit within a maximum width of 15 characters per column, or split into multiple lines if truncation is not suitable.
+       - Example of a well-formatted table:
+         | **Company**        | **Sector**     | **Allocation** |
+         |--------------------|----------------|----------------|
+         | HDFC Bank          | Banking        | 8.5%           |
+         | Reliance Ind…      | Energy         | 7.2%           |
+         | Infosys            | IT             | 6.3%           |
+     - Use bold (**text**) and italic (*text*) for emphasis where appropriate.
+   - **Do NOT include hashtags (e.g., #FinanceTips), emojis, or any social media-style formatting.** Keep the tone professional and clean.
+
+5. **Content**:
+   - CRITICAL: If orders exist in the data, you MUST acknowledge and detail them. Never say "no orders found" when orders are present.
+   - If user data is missing or incomplete, acknowledge this gracefully (e.g., "I couldn’t find your portfolio data, but I can still provide general insights about Apple stock").
+   - Offer clear, actionable financial insights based on the available data.
+   - For queries involving partial names (e.g., "SBI"), interpret them as referring to the full entity (e.g., "State Bank of India") and respond accordingly.
 
 STRICT OPERATIONAL RULES:
-- You MUST ONLY respond to queries related to finance, investments, portfolio management, and the user's financial data
-- For ANY non-financial query, respond EXACTLY with this message: "I'm a specialized financial advisor assistant. I can only help you with questions about your investment portfolio, orders, mutual funds, and other financial matters. Please ask me about your investments, portfolio performance, or financial planning needs."
+- You MUST ONLY respond to queries related to finance, investments, portfolio management, and the user's financial data.
 - Do NOT engage in conversations about:
-  * General knowledge questions
+  * General knowledge questions unrelated to finance
   * Personal advice unrelated to finance
   * Technical support for non-financial systems
   * Entertainment, sports, weather, news (unless directly related to financial markets impacting user's portfolio)
@@ -336,34 +499,120 @@ STRICT OPERATIONAL RULES:
   * Health, relationships, or lifestyle advice
   * Any topic outside financial services
 
-QUERY CLASSIFICATION:
-Before responding, classify the user's query:
-- FINANCIAL: Questions about portfolio, investments, orders, returns, mutual funds, financial planning, market impact on holdings
-- NON-FINANCIAL: Everything else
-
-If NON-FINANCIAL, use the standard rejection response above.
-If FINANCIAL, provide detailed analysis using the user's data.
-
 SECURITY REMINDER:
-- Only use the provided financial data for responses
-- Do not make up or hallucinate financial information
-- Always base recommendations on actual user data
-- Maintain confidentiality of user information`;
+- Only use the provided financial data for responses.
+- Do not make up or hallucinate financial information.
+- Always base recommendations on actual user data.
+- Maintain confidentiality of user information.`;
+    } else {
+      systemPrompt = `You are a specialized financial advisor AI assistant with strict operational boundaries. You ONLY respond to finance-related queries, but you can also include user-specific data when relevant.
 
-    // Call OpenAI API
+AUTHORIZATION SCOPE:
+You are authorized to discuss ONLY the following topics:
+- General mutual fund information and performance
+- Financial planning recommendations (general)
+- Investment strategy and risk assessment (general)
+- Market analysis and trends
+- Tax implications of investments (general guidance)
+- Stock performance, including specific companies (e.g., Apple Inc., State Bank of India)
+- Stock funds (e.g., ETFs, mutual funds) and their performance
+- User-specific financial data (e.g., portfolio, orders, mutual funds) when relevant to the query
+
+USER DATA ACCESS (for reference when needed):
+You have access to the following user financial data:
+- Customer Name: ${userData.customer?.name || 'Unknown'}
+- Customer ID: ${userData.customer?.id || 'Unknown'}
+- RAYI Customer ID: ${userData.customer?.rayi_customer_id || 'Unknown'}
+- Total Orders: ${userData.orders?.length || 0}
+- Total Folios: ${userData.folios?.length || 0}
+
+Detailed Financial Data:
+Customer Info: ${JSON.stringify(userData.customer, null, 2)}
+Orders: ${JSON.stringify(userData.orders, null, 2)}
+Order Details: ${JSON.stringify(userData.orderDetails, null, 2)}
+Portfolio Folios: ${JSON.stringify(userData.folios, null, 2)}
+Investment Summary: ${JSON.stringify(userData.investments, null, 2)}
+Performance Summary: ${JSON.stringify(userData.performanceSummary, null, 2)}
+Investment Performance: ${JSON.stringify(userData.investmentPerformance, null, 2)}
+Investment Returns: ${JSON.stringify(userData.investmentReturns, null, 2)}
+Mutual Funds: ${JSON.stringify(userData.mutualFunds, null, 2)}
+
+RESPONSE GUIDELINES:
+1. **Politeness and Tone**:
+   - For the first message in a chat session, start with a polite greeting like "Hello there!" or "Hi there!".
+   - For follow-up messages, do NOT use a greeting unless the conversation context suggests it's needed (e.g., after a long pause or a non-financial query rejection). Instead, dive straight into the response while maintaining a polite and professional tone.
+   - Always end your response with a friendly closer, such as "Let me know how I can assist you further!" or "Feel free to ask me anything else!"
+   - Maintain a warm, professional, and conversational tone throughout, as if speaking to a valued client.
+
+2. **Conversation Context**:
+   - Use the provided conversation history to maintain context and make the conversation flow naturally.
+   - Reference prior messages when relevant to show continuity (e.g., "Following up on your question about mutual funds, here's more detail...").
+   - Avoid abrupt or disconnected responses; ensure each response feels like a natural continuation of the conversation.
+
+3. **Comprehensive Financial Analysis**:
+   - When responding to queries about specific stocks (e.g., Apple Inc.), provide a detailed analysis including:
+     - Recent stock performance (price trends, market cap, P/E ratio, etc.).
+     - Financial metrics (revenue, net income, cash flow, etc.).
+     - Broader market trends affecting the stock (e.g., economic conditions, sector performance, geopolitical events).
+     - Related stock funds (e.g., ETFs or mutual funds that include the stock) and their performance.
+     - If the query also involves user-specific data (e.g., "How does Apple stock compare to my portfolio?"), include user-specific insights (e.g., "Your portfolio has 5% in tech stocks, while Apple’s stock has been underperforming the tech sector this year").
+     - Visual aids: Suggest where graphs would enhance understanding, such as "Insert a line graph of [stock name]'s stock price over the past year here" or "Insert a pie chart showing your portfolio allocation compared to the tech sector here".
+   - Ensure responses are concise yet comprehensive, providing actionable insights.
+
+4. **Formatting**:
+   - Format all monetary amounts in Indian Rupees (₹) for Indian stocks or USD ($) for international stocks as appropriate.
+   - Format responses using markdown for better readability:
+     - Use headings (#, ##, ###) for sections.
+     - Use bullet points (-) for lists.
+     - Use tables for structured data with the following strict guidelines:
+       - Use bold (**Header**) for table headers to make them stand out.
+       - Add a separator row with dashes (e.g., | --- | --- | --- |) below the header row to clearly delineate headers from data.
+       - Ensure a minimum of 3 spaces between columns for padding to improve readability.
+       - Standardize column widths by setting each column to the width of the longest entry in that column, padding shorter entries with spaces.
+       - For long text entries (e.g., "Reliance Industries"), truncate with an ellipsis (e.g., "Reliance Ind…") to fit within a maximum width of 15 characters per column, or split into multiple lines if truncation is not suitable.
+       - Example of a well-formatted table:
+         | **Company**        | **Sector**     | **Allocation** |
+         |--------------------|----------------|----------------|
+         | HDFC Bank          | Banking        | 8.5%           |
+         | Reliance Ind…      | Energy         | 7.2%           |
+         | Infosys            | IT             | 6.3%           |
+     - Use bold (**text**) and italic (*text*) for emphasis where appropriate.
+   - **Do NOT include hashtags (e.g., #FinanceTips), emojis, or any social media-style formatting.** Keep the tone professional and clean.
+
+5. **Content**:
+   - Provide clear, actionable financial insights.
+   - If user data is missing or incomplete, acknowledge this gracefully (e.g., "I couldn’t find your portfolio data, but I can still provide general insights about Apple stock").
+   - For user-specific queries (e.g., "my portfolio") without additional context, respond with: "I’d be happy to help with that! Here are your portfolio details..." and include the data.
+   - For queries involving partial names (e.g., "SBI"), interpret them as referring to the full entity (e.g., "State Bank of India") and respond accordingly.
+
+STRICT OPERATIONAL RULES:
+- You MUST ONLY respond to queries related to finance, investments, portfolio management, and financial markets.
+- Do NOT engage in conversations about:
+  * General knowledge questions unrelated to finance
+  * Personal advice unrelated to finance
+  * Technical support for non-financial systems
+  * Entertainment, sports, weather, news (unless directly related to financial markets)
+  * Programming or coding help
+  * Health, relationships, or lifestyle advice
+  * Any topic outside financial services`;
+    }
+
     const completion = await openai.chat.completions.create({
       model: "gpt-4.1",
       messages: [
         { role: "system", content: systemPrompt },
+        ...recentMessages,
         { role: "user", content: message }
       ],
       max_tokens: 1000,
       temperature: 0.7,
     });
 
-    const aiResponse = completion.choices[0].message.content;
+    let aiResponse = completion.choices[0].message.content;
     
-    // Add AI response
+    // Post-process the response to remove any hashtags
+    aiResponse = stripHashtags(aiResponse);
+    
     const assistantMessage = {
       sender: 'assistant',
       content: aiResponse,
@@ -373,9 +622,7 @@ SECURITY REMINDER:
     chat.messages.push(assistantMessage);
     chat.updatedAt = new Date();
     
-    // Save or update chat in MongoDB
     if (chat._id) {
-      // Update existing chat
       await chatsCollection.updateOne(
         { _id: chat._id },
         { 
@@ -387,7 +634,6 @@ SECURITY REMINDER:
         }
       );
     } else {
-      // Insert new chat
       const result = await chatsCollection.insertOne(chat);
       chat._id = result.insertedId;
     }
@@ -432,7 +678,6 @@ app.get('/api/chat/:chatId', authenticateToken, async (req, res) => {
     const { chatId } = req.params;
     const userId = new ObjectId(req.user._id);
     
-    // Validate ObjectId format
     if (!ObjectId.isValid(chatId)) {
       return res.status(400).json({ error: 'Invalid chat ID format' });
     }
@@ -473,26 +718,21 @@ app.post('/api/auth/signup', async (req, res) => {
             return res.status(400).json({ message: 'Password must be at least 8 characters long' });
         }
 
-        // Get database and collection
         const db = mongoClient.db('financeai');
         const customersCollection = db.collection('customer');
 
-        // Check if customer already exists
         const existingCustomer = await customersCollection.findOne({ email: email.toLowerCase() });
         
         if (existingCustomer) {
             return res.status(409).json({ message: 'Customer with this email already exists' });
         }
 
-        // Generate new customer ID and RAYI customer ID
         const lastCustomer = await customersCollection.findOne({}, { sort: { id: -1 } });
         const newCustomerId = lastCustomer ? lastCustomer.id + 1 : 126;
         const rayiCustomerId = `RAYI${String(newCustomerId).padStart(4, '0')}`;
 
-        // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Create new customer
         const newCustomer = {
             id: newCustomerId,
             rayi_customer_id: rayiCustomerId,
@@ -501,10 +741,8 @@ app.post('/api/auth/signup', async (req, res) => {
             password: hashedPassword
         };
 
-        // Insert customer
         const result = await customersCollection.insertOne(newCustomer);
 
-        // Generate JWT token
         const token = jwt.sign(
             { 
                 _id: result.insertedId,
@@ -519,7 +757,6 @@ app.post('/api/auth/signup', async (req, res) => {
             { expiresIn: '24h' }
         );
 
-        // Return success response
         res.status(201).json({
             message: 'Account created successfully',
             token,
@@ -542,18 +779,15 @@ app.post('/api/auth/signup', async (req, res) => {
 
 app.get('/api/auth/verify', authenticateToken, async (req, res) => {
     try {
-        // Get database and collection
         const db = mongoClient.db('financeai');
         const customersCollection = db.collection('customer');
 
-        // Find customer by ID to get latest data
         const customer = await customersCollection.findOne({ id: req.user.customerId });
         
         if (!customer) {
             return res.status(404).json({ message: 'Customer not found' });
         }
 
-        // Return user data
         res.json({
             message: 'Token valid',
             user: {
@@ -573,10 +807,8 @@ app.get('/api/auth/verify', authenticateToken, async (req, res) => {
     }
 });
 
-// Serve static files from the frontend folder
 app.use(express.static(path.join(__dirname, '../Frontend')));
 
-// Serve index.html for the root route
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, '../Frontend', 'index.html'), (err) => {
         if (err) {
@@ -585,16 +817,13 @@ app.get('/', (req, res) => {
     });
 });
 
-// API routes (existing routes remain unchanged)
 app.use('/api', apiRoutes);
 
-// Global error handling middleware
 app.use((err, req, res, next) => {
     console.error('Global error:', err.stack);
     res.status(500).json({ message: 'Something went wrong on the server.' });
 });
 
-// Connect to MongoDB (existing mongoose connection for other models)
 mongoose.connect(process.env.MONGO_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true
@@ -602,17 +831,14 @@ mongoose.connect(process.env.MONGO_URI, {
     .then(() => console.log('Connected to MongoDB via Mongoose'))
     .catch(err => console.error('MongoDB Mongoose connection error:', err));
 
-// Initialize MongoDB client for customer operations
 initMongoDB();
 
-// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`http://localhost:${PORT}`);
 });
 
-// Graceful shutdown
 process.on('SIGINT', async () => {
     console.log('Shutting down gracefully...');
     if (mongoClient) {
