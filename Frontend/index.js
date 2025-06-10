@@ -1,4 +1,5 @@
 const API_BASE = window.location.origin + "/api";
+let authToken = null; // Don't use localStorage initially
 let currentUser = null;
 let currentChatId = null;
 
@@ -53,100 +54,129 @@ function setupEventListeners() {
   });
 
   // Form submissions
-  elements.loginForm.addEventListener("submit", handleLogin);
-  elements.signupForm.addEventListener("submit", handleSignup);
+  if (elements.loginForm) {
+    elements.loginForm.addEventListener("submit", handleLogin);
+  }
+  if (elements.signupForm) {
+    elements.signupForm.addEventListener("submit", handleSignup);
+  }
 
   // Real-time form validation
-  elements.loginForm.querySelector("#loginEmail").addEventListener("input", validateLoginForm);
-  elements.loginForm.querySelector("#loginPassword").addEventListener("input", validateLoginForm);
-  elements.signupForm.querySelector("#signupName").addEventListener("input", validateSignupForm);
-  elements.signupForm.querySelector("#signupEmail").addEventListener("input", validateSignupForm);
-  elements.signupForm.querySelector("#signupPassword").addEventListener("input", validateSignupForm);
+  if (elements.loginForm) {
+    const loginEmail = elements.loginForm.querySelector("#loginEmail");
+    const loginPassword = elements.loginForm.querySelector("#loginPassword");
+    if (loginEmail) loginEmail.addEventListener("input", validateLoginForm);
+    if (loginPassword) loginPassword.addEventListener("input", validateLoginForm);
+  }
+
+  if (elements.signupForm) {
+    const signupName = elements.signupForm.querySelector("#signupName");
+    const signupEmail = elements.signupForm.querySelector("#signupEmail");
+    const signupPassword = elements.signupForm.querySelector("#signupPassword");
+    if (signupName) signupName.addEventListener("input", validateSignupForm);
+    if (signupEmail) signupEmail.addEventListener("input", validateSignupForm);
+    if (signupPassword) signupPassword.addEventListener("input", validateSignupForm);
+  }
 
   // Close sidebar when clicking outside
   document.addEventListener("click", function (e) {
     const toggleBtn = document.querySelector(".sidebar-toggle");
     if (
-      elements.sidebar.classList.contains("active") &&
+      elements.sidebar && elements.sidebar.classList.contains("active") &&
       !elements.sidebar.contains(e.target) &&
-      !toggleBtn.contains(e.target)
+      (!toggleBtn || !toggleBtn.contains(e.target))
     ) {
       elements.sidebar.classList.remove("active");
     }
   });
+
+  // Send button click handler
+  if (elements.sendBtn) {
+    elements.sendBtn.addEventListener("click", sendMessage);
+  }
 }
 
 // Form validation functions
 const validateLoginForm = debounce(() => {
+  if (!elements.loginForm) return;
+  
   const email = elements.loginForm.querySelector("#loginEmail");
   const password = elements.loginForm.querySelector("#loginPassword");
   const emailError = elements.loginForm.querySelector("#loginEmailError");
   const passwordError = elements.loginForm.querySelector("#loginPasswordError");
+  
+  if (!email || !password) return;
+  
   let isValid = true;
 
   // Email validation
   if (!email.value || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value)) {
-    emailError.style.display = "block";
+    if (emailError) emailError.style.display = "block";
     email.classList.add("error");
     isValid = false;
   } else {
-    emailError.style.display = "none";
+    if (emailError) emailError.style.display = "none";
     email.classList.remove("error");
   }
 
   // Password validation
   if (!password.value) {
-    passwordError.style.display = "block";
+    if (passwordError) passwordError.style.display = "block";
     password.classList.add("error");
     isValid = false;
   } else {
-    passwordError.style.display = "none";
+    if (passwordError) passwordError.style.display = "none";
     password.classList.remove("error");
   }
 
-  elements.loginBtn.disabled = !isValid;
+  if (elements.loginBtn) elements.loginBtn.disabled = !isValid;
 }, 300);
 
 const validateSignupForm = debounce(() => {
+  if (!elements.signupForm) return;
+  
   const name = elements.signupForm.querySelector("#signupName");
   const email = elements.signupForm.querySelector("#signupEmail");
   const password = elements.signupForm.querySelector("#signupPassword");
   const nameError = elements.signupForm.querySelector("#signupNameError");
   const emailError = elements.signupForm.querySelector("#signupEmailError");
   const passwordError = elements.signupForm.querySelector("#signupPasswordError");
+  
+  if (!name || !email || !password) return;
+  
   let isValid = true;
 
   // Name validation
   if (!name.value.trim()) {
-    nameError.style.display = "block";
+    if (nameError) nameError.style.display = "block";
     name.classList.add("error");
     isValid = false;
   } else {
-    nameError.style.display = "none";
+    if (nameError) nameError.style.display = "none";
     name.classList.remove("error");
   }
 
   // Email validation
   if (!email.value || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value)) {
-    emailError.style.display = "block";
+    if (emailError) emailError.style.display = "block";
     email.classList.add("error");
     isValid = false;
   } else {
-    emailError.style.display = "none";
+    if (emailError) emailError.style.display = "none";
     email.classList.remove("error");
   }
 
   // Password validation
   if (!password.value || password.value.length < 8) {
-    passwordError.style.display = "block";
+    if (passwordError) passwordError.style.display = "block";
     password.classList.add("error");
     isValid = false;
   } else {
-    passwordError.style.display = "none";
+    if (passwordError) passwordError.style.display = "none";
     password.classList.remove("error");
   }
 
-  elements.signupBtn.disabled = !isValid;
+  if (elements.signupBtn) elements.signupBtn.disabled = !isValid;
 }, 300);
 
 // Utility function to sanitize user input
@@ -159,8 +189,10 @@ function sanitizeInput(input) {
 
 // Authentication functions
 async function checkAuthStatus() {
-  const token = localStorage.getItem("authToken");
-  if (!token) {
+  // Try to get token from memory first, then localStorage
+  authToken = authToken || (typeof localStorage !== 'undefined' ? localStorage.getItem("authToken") : null);
+  
+  if (!authToken) {
     console.log("No authentication token found");
     showAuthScreen();
     return;
@@ -171,7 +203,7 @@ async function checkAuthStatus() {
     const response = await fetch(`${API_BASE}/auth/verify`, {
       method: 'GET',
       headers: { 
-        'Authorization': `Bearer ${token}`,
+        'Authorization': `Bearer ${authToken}`,
         'Content-Type': 'application/json'
       },
     });
@@ -188,7 +220,10 @@ async function checkAuthStatus() {
     await loadChatHistory();
   } catch (error) {
     console.error("Authentication check failed:", error);
-    localStorage.removeItem("authToken");
+    authToken = null;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem("authToken");
+    }
     showAuthScreen();
     showNotification("Session expired. Please sign in again.", "warning");
   }
@@ -221,7 +256,10 @@ async function handleLogin(e) {
     }
 
     // Store authentication token
-    localStorage.setItem("authToken", data.token);
+    authToken = data.token;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem("authToken", data.token);
+    }
     currentUser = data.user;
     
     console.log("Login successful for user:", currentUser.name);
@@ -266,7 +304,10 @@ async function handleSignup(e) {
     }
 
     // Store authentication token
-    localStorage.setItem("authToken", data.token);
+    authToken = data.token;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem("authToken", data.token);
+    }
     currentUser = data.user;
     
     console.log("Signup successful for user:", currentUser.name);
@@ -284,6 +325,8 @@ async function handleSignup(e) {
 
 // UI helper functions
 function setButtonLoading(button, isLoading, text) {
+  if (!button) return;
+  
   if (isLoading) {
     button.disabled = true;
     button.innerHTML = `<i class="fas fa-spinner fa-spin" aria-label="Loading"></i> ${text}`;
@@ -315,41 +358,51 @@ function showNotification(message, type = "info") {
 }
 
 function switchToSignup() {
-  elements.loginForm.style.display = "none";
-  elements.signupForm.style.display = "block";
-  elements.signupForm.querySelector("#signupName").focus();
+  if (elements.loginForm) elements.loginForm.style.display = "none";
+  if (elements.signupForm) {
+    elements.signupForm.style.display = "block";
+    const nameField = elements.signupForm.querySelector("#signupName");
+    if (nameField) nameField.focus();
+  }
 }
 
 function switchToLogin() {
-  elements.signupForm.style.display = "none";
-  elements.loginForm.style.display = "block";
-  elements.loginForm.querySelector("#loginEmail").focus();
+  if (elements.signupForm) elements.signupForm.style.display = "none";
+  if (elements.loginForm) {
+    elements.loginForm.style.display = "block";
+    const emailField = elements.loginForm.querySelector("#loginEmail");
+    if (emailField) emailField.focus();
+  }
 }
 
 function showAuthScreen() {
-  elements.authScreen.style.display = "flex";
-  elements.chatScreen.style.display = "none";
+  if (elements.authScreen) elements.authScreen.style.display = "flex";
+  if (elements.chatScreen) elements.chatScreen.style.display = "none";
   // Focus first input field
   setTimeout(() => {
-    const firstInput = elements.loginForm.querySelector("#loginEmail");
-    if (firstInput) firstInput.focus();
+    if (elements.loginForm) {
+      const firstInput = elements.loginForm.querySelector("#loginEmail");
+      if (firstInput) firstInput.focus();
+    }
   }, 100);
 }
 
 function showChatScreen(user) {
   currentUser = user;
-  elements.authScreen.style.display = "none";
-  elements.chatScreen.style.display = "flex";
+  if (elements.authScreen) elements.authScreen.style.display = "none";
+  if (elements.chatScreen) elements.chatScreen.style.display = "flex";
   
   // Update user info in header
-  elements.userName.textContent = sanitizeInput(user.name);
-  elements.userInitials.textContent = sanitizeInput(user.name.charAt(0).toUpperCase());
+  if (elements.userName) elements.userName.textContent = sanitizeInput(user.name);
+  if (elements.userInitials) elements.userInitials.textContent = sanitizeInput(user.name.charAt(0).toUpperCase());
   
   // Reset chat area to welcome state
   resetChatArea();
 }
 
 function resetChatArea() {
+  if (!elements.chatMessages) return;
+  
   elements.chatMessages.innerHTML = `
     <div class="welcome-card">
       <h2>Welcome to FinanceAI! 👋</h2>
@@ -385,7 +438,7 @@ function resetChatArea() {
         <p>Check your available balance</p>
       </div>
     </div>
-    <div class="typing-indicator" id="typingIndicator">
+    <div class="typing-indicator" id="typingIndicator" style="display: none;">
       <div class="message-avatar">
         <i class="fas fa-robot" aria-label="FinanceAI assistant"></i>
       </div>
@@ -403,13 +456,16 @@ function resetChatArea() {
 
 function logout() {
   console.log("Logging out user...");
-  localStorage.removeItem("authToken");
+  authToken = null;
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem("authToken");
+  }
   currentUser = null;
   currentChatId = null;
   
   // Reset UI state
   resetChatArea();
-  elements.chatHistory.innerHTML = "";
+  if (elements.chatHistory) elements.chatHistory.innerHTML = "";
   
   showAuthScreen();
   showNotification("You have been logged out.", "info");
@@ -418,17 +474,18 @@ function logout() {
 // Sidebar functions
 function toggleSidebar() {
   console.log("Toggling sidebar...");
-  elements.sidebar.classList.toggle("active");
-  
-  // Log current state for debugging
-  const isActive = elements.sidebar.classList.contains("active");
-  console.log(`Sidebar is now ${isActive ? 'open' : 'closed'}`);
+  if (elements.sidebar) {
+    elements.sidebar.classList.toggle("active");
+    
+    // Log current state for debugging
+    const isActive = elements.sidebar.classList.contains("active");
+    console.log(`Sidebar is now ${isActive ? 'open' : 'closed'}`);
+  }
 }
 
 // Chat history functions
 async function loadChatHistory() {
-  const token = localStorage.getItem("authToken");
-  if (!token || !currentUser) {
+  if (!authToken || !currentUser) {
     console.log("No auth token or user, skipping chat history load");
     return;
   }
@@ -438,7 +495,7 @@ async function loadChatHistory() {
     const response = await fetch(`${API_BASE}/chat`, {
       method: 'GET',
       headers: { 
-        'Authorization': `Bearer ${token}`,
+        'Authorization': `Bearer ${authToken}`,
         'Content-Type': 'application/json'
       },
     });
@@ -458,6 +515,8 @@ async function loadChatHistory() {
 }
 
 function renderChatHistory(chats) {
+  if (!elements.chatHistory) return;
+  
   elements.chatHistory.innerHTML = "";
   
   if (chats.length === 0) {
@@ -528,14 +587,14 @@ function formatDate(dateString) {
 
 // Chat functions
 async function loadChat(chatId) {
-  const token = localStorage.getItem("authToken");
+  if (!authToken) return;
   
   try {
     console.log(`Loading chat: ${chatId}`);
     const response = await fetch(`${API_BASE}/chat/${chatId}`, {
       method: 'GET',
       headers: { 
-        'Authorization': `Bearer ${token}`,
+        'Authorization': `Bearer ${authToken}`,
         'Content-Type': 'application/json'
       },
     });
@@ -550,7 +609,9 @@ async function loadChat(chatId) {
     currentChatId = chatId;
     
     // Clear current messages
-    elements.chatMessages.innerHTML = "";
+    if (elements.chatMessages) {
+      elements.chatMessages.innerHTML = "";
+    }
     
     // Render messages
     chat.messages.forEach((message) => {
@@ -558,11 +619,14 @@ async function loadChat(chatId) {
     });
     
     scrollToBottom();
-    elements.sidebar.classList.remove("active");
+    if (elements.sidebar) elements.sidebar.classList.remove("active");
     
     // Update active state in sidebar
     document.querySelectorAll('.chat-history-item').forEach(item => {
-      item.classList.toggle('active', item.querySelector('.delete-chat-btn').dataset.chatId === chatId);
+      const deleteBtn = item.querySelector('.delete-chat-btn');
+      if (deleteBtn) {
+        item.classList.toggle('active', deleteBtn.dataset.chatId === chatId);
+      }
     });
     
   } catch (error) {
@@ -576,14 +640,14 @@ async function deleteChat(chatId) {
     return;
   }
 
-  const token = localStorage.getItem("authToken");
+  if (!authToken) return;
   
   try {
     console.log(`Deleting chat: ${chatId}`);
     const response = await fetch(`${API_BASE}/chat/${chatId}`, {
       method: "DELETE",
       headers: { 
-        'Authorization': `Bearer ${token}`,
+        'Authorization': `Bearer ${authToken}`,
         'Content-Type': 'application/json'
       },
     });
@@ -611,17 +675,19 @@ async function deleteChat(chatId) {
 }
 
 function appendMessage(sender, message, animate = true) {
+  if (!elements.chatMessages) return;
+  
   const messageDiv = document.createElement("div");
   messageDiv.className = `message ${sender}`;
   
   const avatar = sender === "user" 
-    ? sanitizeInput(currentUser.name.charAt(0).toUpperCase())
+    ? sanitizeInput(currentUser ? currentUser.name.charAt(0).toUpperCase() : "U")
     : '<i class="fas fa-robot" aria-label="FinanceAI assistant"></i>';
   
   messageDiv.innerHTML = `
     <div class="message-content">
       <div class="message-avatar">${avatar}</div>
-      <div class="message-bubble">${sanitizeInput(message)}</div>
+      <div class="message-bubble">${formatMessage(message)}</div>
     </div>
   `;
   
@@ -643,19 +709,34 @@ function appendMessage(sender, message, animate = true) {
   scrollToBottom();
 }
 
+function formatMessage(message) {
+  if (!message) return '';
+  // Basic formatting - convert newlines to <br> and preserve spacing
+  return sanitizeInput(message)
+    .replace(/\n/g, '<br>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Bold text
+    .replace(/\*(.*?)\*/g, '<em>$1</em>'); // Italic text
+}
+
 function scrollToBottom() {
-  elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+  if (elements.chatMessages) {
+    elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+  }
 }
 
 async function sendMessage() {
+  if (!elements.messageInput || !authToken) return;
+  
   const message = elements.messageInput.value.trim();
   if (!message) return;
 
   // Remove welcome elements if present
-  const welcomeCard = elements.chatMessages.querySelector(".welcome-card");
-  const quickActions = elements.chatMessages.querySelector(".quick-actions");
-  if (welcomeCard) welcomeCard.remove();
-  if (quickActions) quickActions.remove();
+  if (elements.chatMessages) {
+    const welcomeCard = elements.chatMessages.querySelector(".welcome-card");
+    const quickActions = elements.chatMessages.querySelector(".quick-actions");
+    if (welcomeCard) welcomeCard.remove();
+    if (quickActions) quickActions.remove();
+  }
 
   // Add user message
   appendMessage("user", message);
@@ -665,11 +746,9 @@ async function sendMessage() {
   elements.messageInput.style.height = "48px";
   
   // Disable send button and show typing indicator
-  elements.sendBtn.disabled = true;
-  elements.typingIndicator.style.display = "flex";
+  if (elements.sendBtn) elements.sendBtn.disabled = true;
+  if (elements.typingIndicator) elements.typingIndicator.style.display = "flex";
 
-  const token = localStorage.getItem("authToken");
-  
   try {
     // Generate title for new chats
     const title = currentChatId ? "" : (message.substring(0, 50) + (message.length > 50 ? "..." : ""));
@@ -680,7 +759,7 @@ async function sendMessage() {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`,
+        "Authorization": `Bearer ${authToken}`,
       },
       body: JSON.stringify({ 
         chatId: currentChatId, 
@@ -699,14 +778,14 @@ async function sendMessage() {
     // Update current chat ID
     currentChatId = chat._id;
 
-    // Add AI response (get the last message that's not from user)
-    const aiResponses = chat.messages.filter(msg => msg.sender !== "user");
+    // Add AI response (get the last message that's from assistant)
+    const aiResponses = chat.messages.filter(msg => msg.sender === "assistant");
     const lastAiResponse = aiResponses[aiResponses.length - 1];
     
     if (lastAiResponse) {
       setTimeout(() => {
         appendMessage("bot", lastAiResponse.content);
-      }, 500); // Small delay for better UX
+      }, 500);
     }
 
     // Reload chat history to update sidebar
@@ -717,14 +796,16 @@ async function sendMessage() {
     appendMessage("bot", "Sorry, I'm having trouble processing your request right now. Please try again in a moment.");
     showNotification("Failed to send message", "error");
   } finally {
-    elements.typingIndicator.style.display = "none";
-    elements.sendBtn.disabled = false;
+    if (elements.typingIndicator) elements.typingIndicator.style.display = "none";
+    if (elements.sendBtn) elements.sendBtn.disabled = false;
   }
 }
 
 function sendQuickMessage(message) {
-  elements.messageInput.value = message;
-  sendMessage();
+  if (elements.messageInput) {
+    elements.messageInput.value = message;
+    sendMessage();
+  }
 }
 
 function startNewChat() {
@@ -738,7 +819,15 @@ function startNewChat() {
   });
   
   // Close sidebar on mobile
-  elements.sidebar.classList.remove("active");
+  if (elements.sidebar) elements.sidebar.classList.remove("active");
   
   showNotification("New chat started", "success");
 }
+
+// Make functions globally available for onclick handlers
+window.switchToSignup = switchToSignup;
+window.switchToLogin = switchToLogin;
+window.logout = logout;
+window.toggleSidebar = toggleSidebar;
+window.sendQuickMessage = sendQuickMessage;
+window.startNewChat = startNewChat;
