@@ -8,6 +8,7 @@ const rateLimit = require('express-rate-limit');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { MongoClient, ObjectId } = require('mongodb');
+const axios = require('axios'); // Added for OpenRouter API calls
 
 // Load environment variables from .env located in the project root
 dotenv.config({ path: path.join(__dirname, '../.env') });
@@ -19,33 +20,15 @@ const MONGO_URI = process.env.MONGO_URI;
 const JWT_SECRET = process.env.JWT_SECRET;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
-// Initialize OpenRouter client
-const { Configuration, OpenAIApi } = require('openai');
-const configuration = new Configuration({
-  apiKey: OPENROUTER_API_KEY,
-  basePath: 'https://openrouter.ai/api/v1',
-  defaultHeaders: {
-    'HTTP-Referer': process.env.SITE_URL || 'http://localhost:3000',
-    'X-Title': process.env.SITE_NAME || 'FinanceAI App'
-  }
+const openRouterClient = axios.create({
+  baseURL: 'https://openrouter.ai/api/v1',
+  headers: {
+    Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+    'Content-Type': 'application/json',
+  },
 });
-const openai = new OpenAIApi(configuration);
 
 let mongoClient;
-
-// Top 10 OpenRouter Models (aligned with 2025 top AI models, June 2025)
-const OPENROUTER_MODELS = [
-  "google/gemini-2.5-pro", // Top performer, multimodal
-  "google/gemini-2.5-flash", // Fast and efficient
-  "openai/o3", // Advanced reasoning
-  "openai/gpt-4o", // Multimodal, widely used
-  "anthropic/claude-3.7-sonnet", // Coding and writing
-  "deepseek/r1", // Cost-effective, open-source
-  "openai/gpt-4.5", // Refined GPT-4
-  "tencent/hunyuan-turbos", // Emerging model
-  "xai/grok-3", // Real-time search
-  "meta/llama-3" // Open-source NLP
-];
 
 // Initialize MongoDB connection
 async function initMongoDB() {
@@ -287,29 +270,9 @@ const entityMapping = {
   'icici': 'ICICI Bank'
 };
 
-// Function to detect casual greetings
-function isCasualGreeting(message) {
-  const lowerMessage = message.toLowerCase().trim();
-  const greetings = [
-    'hi', 'hello', 'hey', 'good morning', 'good afternoon', 
-    'good evening', 'greetings', 'howdy', 'what\'s up', 'whats up'
-  ];
-  
-  return greetings.some(greeting => 
-    lowerMessage === greeting || 
-    lowerMessage.startsWith(greeting + ' ') || 
-    lowerMessage.startsWith(greeting + '!')
-  );
-}
-
 // Function to classify the query
 function classifyQuery(message) {
   const lowerMessage = message.toLowerCase();
-  
-  // Check for casual greetings first
-  if (isCasualGreeting(message)) {
-    return 'CASUAL-GREETING';
-  }
   
   // Map partial entity names to full names
   let expandedMessage = lowerMessage;
@@ -347,19 +310,6 @@ function classifyQuery(message) {
 // Function to strip hashtags from AI response
 function stripHashtags(response) {
   return response.replace(/#[^\s]+/g, '');
-}
-
-// Function to generate casual greeting response
-function generateCasualGreeting(userName) {
-  const greetings = [
-    `Hi ${userName}! How can I help you with your finances today?`,
-    `Hello ${userName}! What would you like to know about your investments?`,
-    `Hey ${userName}! Ready to discuss your portfolio?`,
-    `Hi there ${userName}! What financial questions do you have for me?`,
-    `Hello ${userName}! I'm here to help with all your investment needs.`
-  ];
-  
-  return greetings[Math.floor(Math.random() * greetings.length)];
 }
 
 app.post('/api/chat', authenticateToken, async (req, res) => {
@@ -428,37 +378,7 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
     // Always fetch user data to allow for mixed queries
     userData = await getUserData(customerId);
 
-    // Handle casual greetings
-    if (queryType === 'CASUAL-GREETING') {
-      const aiResponse = generateCasualGreeting(userData.customer?.name || 'there');
-      
-      const assistantMessage = {
-        sender: 'assistant',
-        content: aiResponse,
-        timestamp: new Date()
-      };
-      
-      chat.messages.push(assistantMessage);
-      chat.updatedAt = new Date();
-      
-      if (chat._id) {
-        await chatsCollection.updateOne(
-          { _id: chat._id },
-          { 
-            $set: { 
-              messages: chat.messages, 
-              updatedAt: chat.updatedAt 
-            },
-            $inc: { __v: 1 }
-          }
-        );
-      } else {
-        const result = await chatsCollection.insertOne(chat);
-        chat._id = result.insertedId;
-      }
-      
-      return res.json(chat);
-    } else if (queryType === 'NON-FINANCIAL') {
+    if (queryType === 'NON-FINANCIAL') {
       const aiResponse = isFirstMessage
         ? "Hello! I'm your specialized financial advisor assistant, here to assist with your investment portfolio, orders, mutual funds, and other financial matters. It seems your question isn't related to finance. Could you please ask about your investments, portfolio performance, or financial planning needs? I'm happy to help with those!"
         : "It seems your question isn't related to finance. Could you please ask about your investments, portfolio performance, or financial planning needs? I'm happy to help with those!";
@@ -490,7 +410,7 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
       
       return res.json(chat);
     } else if (queryType === 'USER-SPECIFIC-FINANCIAL') {
-      systemPrompt = `You are a personable and friendly financial advisor AI assistant. You communicate in a natural, conversational tone while maintaining professionalism.
+      systemPrompt = `You are a specialized financial advisor AI assistant with strict operational boundaries. You ONLY respond to finance-related queries about the user's portfolio and investment data, but you can also include general financial insights when relevant.
 
 AUTHORIZATION SCOPE:
 You are authorized to discuss ONLY the following topics:
@@ -526,44 +446,70 @@ Investment Returns: ${JSON.stringify(userData.investmentReturns, null, 2)}
 Mutual Funds: ${JSON.stringify(userData.mutualFunds, null, 2)}
 
 RESPONSE GUIDELINES:
-1. **Natural Conversation Flow**:
-   - Respond naturally as if you're having a real conversation with a friend or colleague
-   - Use the conversation history to maintain context and flow
-   - Mirror the user's communication style (formal/casual) while staying professional
-   - Feel free to use contractions (I'll, you're, let's) to sound more natural
-   - Ask follow-up questions when appropriate to better understand their needs
+1. **Politeness and Tone**:
+   - For the first message in a chat session, start with a polite greeting like "Hello ${userData.customer?.name || 'there'}!" or "Hi ${userData.customer?.name || 'there'}!".
+   - For follow-up messages, do NOT use a greeting unless the conversation context suggests it's needed (e.g., after a long pause or a non-financial query rejection). Instead, dive straight into the response while maintaining a polite and professional tone.
+   - Always end your response with a friendly closer, such as "Let me know how I can assist you further!" or "Feel free to ask me anything else!"
+   - Maintain a warm, professional, and conversational tone throughout, as if speaking to a valued client.
 
-2. **Personalization**:
-   - Always address the user by name when appropriate: "${userData.customer?.name || 'there'}"
-   - Reference their specific data and situation
-   - Remember what was discussed earlier in the conversation
-   - Make connections between different aspects of their portfolio
+2. **Conversation Context**:
+   - Use the provided conversation history to maintain context and make the conversation flow naturally.
+   - Reference prior messages when relevant to show continuity (e.g., "Following up on your question about your SIPs, here's more detail...").
+   - Avoid abrupt or disconnected responses; ensure each response feels like a natural continuation of the conversation.
 
-3. **Comprehensive Analysis**:
-   - Provide detailed, actionable insights based on their actual data
-   - Compare their performance to market benchmarks when relevant
-   - Explain financial concepts in simple terms
-   - Offer specific recommendations based on their portfolio
+3. **Comprehensive Financial Analysis**:
+   - When the query involves both user-specific data and general financial topics (e.g., "How does Apple stock compare to my portfolio?"), provide a detailed analysis including:
+     - User-specific data from the database (e.g., portfolio holdings, orders).
+     - General financial insights (e.g., stock performance, market trends, related stock funds).
+     - Compare the user’s data with general trends (e.g., "Your portfolio has 5% in tech stocks, while Apple’s stock has been underperforming the tech sector this year").
+     - Visual aids: Suggest where graphs would enhance understanding, such as "Insert a pie chart showing your portfolio allocation compared to the tech sector here".
+   - Ensure responses are concise yet comprehensive, providing actionable insights.
 
-4. **Professional Formatting**:
-   - Use markdown for better readability
-   - Format monetary amounts appropriately (₹ for Indian, $ for US)
-   - Create clear tables and lists when presenting data
-   - No hashtags or social media formatting
+4. **Formatting**:
+   - Format all monetary amounts in Indian Rupees (₹) for Indian stocks or USD ($) for international stocks as appropriate.
+   - Provide specific details from the actual data when discussing orders, folios, or investments.
+   - Format responses using markdown for better readability:
+     - Use headings (#, ##, ###) for sections.
+     - Use bullet points (-) for lists.
+     - Use tables for structured data with the following strict guidelines:
+       - Use bold (**Header**) for table headers to make them stand out.
+       - Add a separator row with dashes (e.g., | --- | --- | --- |) below the header row to clearly delineate headers from data.
+       - Ensure a minimum of 3 spaces between columns for padding to improve readability.
+       - Standardize column widths by setting each column to the width of the longest entry in that column, padding shorter entries with spaces.
+       - For long text entries (e.g., "Reliance Industries"), truncate with an ellipsis (e.g., "Reliance Ind…") to fit within a maximum width of 15 characters per column, or split into multiple lines if truncation is not suitable.
+       - Example of a well-formatted table:
+         | **Company**        | **Sector**     | **Allocation** |
+         |--------------------|----------------|----------------|
+         | HDFC Bank          | Banking        | 8.5%           |
+         | Reliance Ind…      | Energy         | 7.2%           |
+         | Infosys            | IT             | 6.3%           |
+     - Use bold (**text**) and italic (*text*) for emphasis where appropriate.
+   - **Do NOT include hashtags (e.g., #FinanceTips), emojis, or any social media-style formatting.** Keep the tone professional and clean.
 
-5. **Engagement**:
-   - End responses with engaging questions or offers to help further
-   - Show genuine interest in their financial success
-   - Celebrate their good investment choices
-   - Provide encouragement and guidance for areas of improvement
+5. **Content**:
+   - CRITICAL: If orders exist in the data, you MUST acknowledge and detail them. Never say "no orders found" when orders are present.
+   - If user data is missing or incomplete, acknowledge this gracefully (e.g., "I couldn’t find your portfolio data, but I can still provide general insights about Apple stock").
+   - Offer clear, actionable financial insights based on the available data.
+   - For queries involving partial names (e.g., "SBI"), interpret them as referring to the full entity (e.g., "State Bank of India") and respond accordingly.
 
-CRITICAL RULES:
-- MUST acknowledge and detail orders if they exist in the data
-- Base all responses on actual user data, never make up information
-- Stay within financial topics only
-- Maintain user data confidentiality`;
+STRICT OPERATIONAL RULES:
+- You MUST ONLY respond to queries related to finance, investments, portfolio management, and the user's financial data.
+- Do NOT engage in conversations about:
+  * General knowledge questions unrelated to finance
+  * Personal advice unrelated to finance
+  * Technical support for non-financial systems
+  * Entertainment, sports, weather, news (unless directly related to financial markets impacting user's portfolio)
+  * Programming or coding help
+  * Health, relationships, or lifestyle advice
+  * Any topic outside financial services
+
+SECURITY REMINDER:
+- Only use the provided financial data for responses.
+- Do not make up or hallucinate financial information.
+- Always base recommendations on actual user data.
+- Maintain confidentiality of user information.`;
     } else {
-      systemPrompt = `You are a personable and friendly financial advisor AI assistant. You communicate in a natural, conversational tone while maintaining professionalism.
+      systemPrompt = `You are a specialized financial advisor AI assistant with strict operational boundaries. You ONLY respond to finance-related queries, but you can also include user-specific data when relevant.
 
 AUTHORIZATION SCOPE:
 You are authorized to discuss ONLY the following topics:
@@ -572,9 +518,9 @@ You are authorized to discuss ONLY the following topics:
 - Investment strategy and risk assessment (general)
 - Market analysis and trends
 - Tax implications of investments (general guidance)
-- Stock performance, including specific companies
+- Stock performance, including specific companies (e.g., Apple Inc., State Bank of India)
 - Stock funds (e.g., ETFs, mutual funds) and their performance
-- User-specific financial data when relevant to the query
+- User-specific financial data (e.g., portfolio, orders, mutual funds) when relevant to the query
 
 USER DATA ACCESS (for reference when needed):
 You have access to the following user financial data:
@@ -596,92 +542,107 @@ Investment Returns: ${JSON.stringify(userData.investmentReturns, null, 2)}
 Mutual Funds: ${JSON.stringify(userData.mutualFunds, null, 2)}
 
 RESPONSE GUIDELINES:
-1. **Natural Conversation Flow**:
-   - Respond naturally as if you're having a real conversation
-   - Use the conversation history to maintain context
-   - Feel free to use contractions and conversational language
-   - Ask follow-up questions when appropriate
+1. **Politeness and Tone**:
+   - For the first message in a chat session, start with a polite greeting like "Hello there!" or "Hi there!".
+   - For follow-up messages, do NOT use a greeting unless the conversation context suggests it's needed (e.g., after a long pause or a non-financial query rejection). Instead, dive straight into the response while maintaining a polite and professional tone.
+   - Always end your response with a friendly closer, such as "Let me know how I can assist you further!" or "Feel free to ask me anything else!"
+   - Maintain a warm, professional, and conversational tone throughout, as if speaking to a valued client.
 
-2. **Comprehensive Analysis**:
-   - Provide detailed analysis for stock/market queries
-   - Include recent performance, financial metrics, and market trends
-   - Relate general information to the user's situation when possible
-   - Suggest relevant investment options or strategies
+2. **Conversation Context**:
+   - Use the provided conversation history to maintain context and make the conversation flow naturally.
+   - Reference prior messages when relevant to show continuity (e.g., "Following up on your question about mutual funds, here's more detail...").
+   - Avoid abrupt or disconnected responses; ensure each response feels like a natural continuation of the conversation.
 
-3. **Professional Formatting**:
-   - Use markdown for better readability
-   - Format monetary amounts appropriately
-   - Create clear tables and lists when presenting data
-   - No hashtags or social media formatting
+3. **Comprehensive Financial Analysis**:
+   - When responding to queries about specific stocks (e.g., Apple Inc.), provide a detailed analysis including:
+     - Recent stock performance (price trends, market cap, P/E ratio, etc.).
+     - Financial metrics (revenue, net income, cash flow, etc.).
+     - Broader market trends affecting the stock (e.g., economic conditions, sector performance, geopolitical events).
+     - Related stock funds (e.g., ETFs or mutual funds that include the stock) and their performance.
+     - If the query also involves user-specific data (e.g., "How does Apple stock compare to my portfolio?"), include user-specific insights (e.g., "Your portfolio has 5% in tech stocks, while Apple’s stock has been underperforming the tech sector this year").
+     - Visual aids: Suggest where graphs would enhance understanding, such as "Insert a line graph of [stock name]'s stock price over the past year here" or "Insert a pie chart showing your portfolio allocation compared to the tech sector here".
+   - Ensure responses are concise yet comprehensive, providing actionable insights.
 
-CRITICAL RULES:
-- MUST ONLY respond to finance-related queries
-- Provide actionable, accurate financial insights
-- Stay professional while being conversational
-- Reference user data when relevant to enhance the response`;
+4. **Formatting**:
+   - Format all monetary amounts in Indian Rupees (₹) for Indian stocks or USD ($) for international stocks as appropriate.
+   - Format responses using markdown for better readability:
+     - Use headings (#, ##, ###) for sections.
+     - Use bullet points (-) for lists.
+     - Use tables for structured data with the following strict guidelines:
+       - Use bold (**Header**) for table headers to make them stand out.
+       - Add a separator row with dashes (e.g., | --- | --- | --- |) below the header row to clearly delineate headers from data.
+       - Ensure a minimum of 3 spaces between columns for padding to improve readability.
+       - Standardize column widths by setting each column to the width of the longest entry in that column, padding shorter entries with spaces.
+       - For long text entries (e.g., "Reliance Industries"), truncate with an ellipsis (e.g., "Reliance Ind…") to fit within a maximum width of 15 characters per column, or split into multiple lines if truncation is not suitable.
+       - Example of a well-formatted table:
+         | **Company**        | **Sector**     | **Allocation** |
+         |--------------------|----------------|----------------|
+         | HDFC Bank          | Banking        | 8.5%           |
+         | Reliance Ind…      | Energy         | 7.2%           |
+         | Infosys            | IT             | 6.3%           |
+     - Use bold (**text**) and italic (*text*) for emphasis where appropriate.
+   - **Do NOT include hashtags (e.g., #FinanceTips), emojis, or any social media-style formatting.** Keep the tone professional and clean.
+
+5. **Content**:
+   - Provide clear, actionable financial insights.
+   - If user data is missing or incomplete, acknowledge this gracefully (e.g., "I couldn’t find your portfolio data, but I can still provide general insights about Apple stock").
+   - For user-specific queries (e.g., "my portfolio") without additional context, respond with: "I’d be happy to help with that! Here are your portfolio details..." and include the data.
+   - For queries involving partial names (e.g., "SBI"), interpret them as referring to the full entity (e.g., "State Bank of India") and respond accordingly.
+
+STRICT OPERATIONAL RULES:
+- You MUST ONLY respond to queries related to finance, investments, portfolio management, and financial markets.
+- Do NOT engage in conversations about:
+  * General knowledge questions unrelated to finance
+  * Personal advice unrelated to finance
+  * Technical support for non-financial systems
+  * Entertainment, sports, weather, news (unless directly related to financial markets)
+  * Programming or coding help
+  * Health, relationships, or lifestyle advice
+  * Any topic outside financial services`;
     }
 
-    // Select models based on query complexity
-    let selectedModels = [OPENROUTER_MODELS[0], OPENROUTER_MODELS[3]]; // Default: Gemini 2.5 Pro, GPT-4o
-    if (queryType === 'GENERAL-FINANCIAL' && message.length < 50) {
-      selectedModels = [OPENROUTER_MODELS[1], OPENROUTER_MODELS[9]]; // Gemini 2.5 Flash, Llama 3 for simple queries
+    const response = await openRouterClient.post('/chat/completions', {
+      model: "gpt-4-turbo", // Use an available model from OpenRouter (adjust as needed)
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...recentMessages,
+        { role: "user", content: message }
+      ],
+      max_tokens: 1000,
+      temperature: 0.7,
+    });
+
+    let aiResponse = response.data.choices[0].message.content;
+    
+    // Post-process the response to remove any hashtags
+    aiResponse = stripHashtags(aiResponse);
+    
+    const assistantMessage = {
+      sender: 'assistant',
+      content: aiResponse,
+      timestamp: new Date()
+    };
+    
+    chat.messages.push(assistantMessage);
+    chat.updatedAt = new Date();
+    
+    if (chat._id) {
+      await chatsCollection.updateOne(
+        { _id: chat._id },
+        { 
+          $set: { 
+            messages: chat.messages, 
+            updatedAt: chat.updatedAt 
+          },
+          $inc: { __v: 1 }
+        }
+      );
+    } else {
+      const result = await chatsCollection.insertOne(chat);
+      chat._id = result.insertedId;
     }
-    console.log(`Using models: ${selectedModels.join(', ')}`);
-
-    try {
-      const completion = await openai.createChatCompletion({
-        models: selectedModels, // Use models array for automatic fallback
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...recentMessages,
-          { role: "user", content: message }
-        ],
-        max_tokens: 1200,
-        temperature: 0.8 // Slightly higher for natural responses
-      });
-
-      let aiResponse = completion.data.choices[0].message.content;
-      const usedModel = completion.data.model || selectedModels[0]; // Log the model used
-      console.log(`Response generated by model: ${usedModel}`);
-      
-      // Post-process the response to remove any hashtags
-      aiResponse = stripHashtags(aiResponse);
-      
-      const assistantMessage = {
-        sender: 'assistant',
-        content: aiResponse,
-        timestamp: new Date(),
-        model: usedModel // Include for debugging and cost tracking
-      };
-      
-      chat.messages.push(assistantMessage);
-      chat.updatedAt = new Date();
-      
-      if (chat._id) {
-        await chatsCollection.updateOne(
-          { _id: chat._id },
-          { 
-            $set: { 
-              messages: chat.messages, 
-              updatedAt: chat.updatedAt 
-            },
-            $inc: { __v: 1 }
-          }
-        );
-      } else {
-        const result = await chatsCollection.insertOne(chat);
-        chat._id = result.insertedId;
-      }
-      
-      res.json(chat);
-
-    } catch (apiError) {
-      console.error('OpenRouter API error:', apiError.message);
-      res.status(503).json({
-        error: 'Failed to generate response',
-        details: `All models (${selectedModels.join(', ')}) are unavailable or rate-limited. Please try again later.`
-      });
-    }
+    
+    res.json(chat);
 
   } catch (error) {
     console.error('Chat processing error:', error);
@@ -714,16 +675,6 @@ app.get('/api/debug/userdata', authenticateToken, async (req, res) => {
     console.error('Debug endpoint error:', error);
     res.status(500).json({ error: 'Failed to fetch debug data', details: error.message });
   }
-});
-
-// New endpoint to get available models
-app.get('/api/models', (req, res) => {
-  res.json({
-    models: OPENROUTER_MODELS,
-    currentDefault: OPENROUTER_MODELS[0],
-    fallback: OPENROUTER_MODELS[3],
-    description: "Top 10 OpenRouter models for financial AI applications (2025)"
-  });
 });
 
 app.get('/api/chat/:chatId', authenticateToken, async (req, res) => {
@@ -860,10 +811,8 @@ app.get('/api/auth/verify', authenticateToken, async (req, res) => {
     }
 });
 
-// Serve static files from Frontend directory
 app.use(express.static(path.join(__dirname, '../Frontend')));
 
-// Serve index.html for root route
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, '../Frontend', 'index.html'), (err) => {
         if (err) {
@@ -872,16 +821,13 @@ app.get('/', (req, res) => {
     });
 });
 
-// Mount API routes
 app.use('/api', apiRoutes);
 
-// Global error handler
 app.use((err, req, res, next) => {
     console.error('Global error:', err.stack);
     res.status(500).json({ message: 'Something went wrong on the server.' });
 });
 
-// Connect to MongoDB via Mongoose
 mongoose.connect(process.env.MONGO_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true
@@ -889,7 +835,6 @@ mongoose.connect(process.env.MONGO_URI, {
     .then(() => console.log('Connected to MongoDB via Mongoose'))
     .catch(err => console.error('MongoDB Mongoose connection error:', err));
 
-// Initialize MongoDB client
 initMongoDB();
 
 const PORT = process.env.PORT || 3000;
@@ -898,7 +843,6 @@ app.listen(PORT, () => {
     console.log(`http://localhost:${PORT}`);
 });
 
-// Graceful shutdown
 process.on('SIGINT', async () => {
     console.log('Shutting down gracefully...');
     if (mongoClient) {
