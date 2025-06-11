@@ -42,11 +42,23 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 
 function setupEventListeners() {
-  // Auto-resize textarea
+  // Auto-resize textarea with enhanced mobile support
   if (elements.messageInput) {
     elements.messageInput.addEventListener("input", function () {
       this.style.height = "auto";
-      this.style.height = Math.min(this.scrollHeight, 120) + "px";
+      const newHeight = Math.min(this.scrollHeight, 120);
+      this.style.height = newHeight + "px";
+      
+      // On mobile, ensure the input stays visible when content expands
+      if (window.innerWidth <= 768 && document.body.classList.contains('keyboard-open')) {
+        setTimeout(() => {
+          this.scrollIntoView({ 
+            behavior: 'smooth', 
+            block: 'end',
+            inline: 'nearest'
+          });
+        }, 50);
+      }
       
       // Enable/disable send button based on input
       updateSendButtonState();
@@ -1210,34 +1222,126 @@ function addTouchFeedback() {
 
 function handleMobileKeyboard() {
   const inputElements = [elements.messageInput].filter(Boolean);
+  const authInputs = [
+    document.getElementById('loginEmail'),
+    document.getElementById('loginPassword'),
+    document.getElementById('signupName'),
+    document.getElementById('signupEmail'),
+    document.getElementById('signupPassword')
+  ].filter(Boolean);
   
-  inputElements.forEach(input => {
-    input.addEventListener('focus', () => {
-      // Scroll input into view when keyboard appears
-      setTimeout(() => {
-        if (input.scrollIntoView) {
-          input.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }, 300);
-    });
+  const allInputs = [...inputElements, ...authInputs];
+  
+  allInputs.forEach(input => {
+    if (input) {
+      input.addEventListener('focus', () => {
+        // Add keyboard-open class immediately on focus
+        setTimeout(() => {
+          document.body.classList.add('keyboard-open');
+          
+          // Enhanced scroll behavior for mobile
+          if (input.scrollIntoView) {
+            // For chat input, ensure it's visible above the keyboard
+            if (input === elements.messageInput) {
+              const container = document.querySelector('.chat-input-container');
+              if (container) {
+                container.classList.add('keyboard-open');
+                // Scroll to ensure input is visible
+                setTimeout(() => {
+                  input.scrollIntoView({ 
+                    behavior: 'smooth', 
+                    block: 'end',
+                    inline: 'nearest'
+                  });
+                }, 100);
+              }
+            } else {
+              // For auth inputs, scroll to center
+              input.scrollIntoView({ 
+                behavior: 'smooth', 
+                block: 'center' 
+              });
+            }
+          }
+        }, 100);
+      });
+      
+      input.addEventListener('blur', () => {
+        // Remove keyboard-open class when input loses focus
+        setTimeout(() => {
+          // Check if any input still has focus
+          const activeElement = document.activeElement;
+          const isInputFocused = allInputs.some(inp => inp === activeElement);
+          
+          if (!isInputFocused) {
+            document.body.classList.remove('keyboard-open');
+            const container = document.querySelector('.chat-input-container');
+            if (container) {
+              container.classList.remove('keyboard-open');
+            }
+          }
+        }, 100);
+      });
+    }
   });
   
-  // Handle viewport height changes due to virtual keyboard
+  // Enhanced viewport height monitoring
   let initialViewportHeight = window.innerHeight;
+  let keyboardDetectionTimeout;
   
   const handleResize = () => {
-    const currentHeight = window.innerHeight;
-    const heightDifference = initialViewportHeight - currentHeight;
+    clearTimeout(keyboardDetectionTimeout);
     
-    // If height decreased significantly, keyboard is probably open
-    if (heightDifference > 150) {
-      document.body.classList.add('keyboard-open');
-    } else {
-      document.body.classList.remove('keyboard-open');
-    }
+    keyboardDetectionTimeout = setTimeout(() => {
+      const currentHeight = window.innerHeight;
+      const heightDifference = initialViewportHeight - currentHeight;
+      
+      // More intelligent keyboard detection
+      if (heightDifference > 150) {
+        document.body.classList.add('keyboard-open');
+        const container = document.querySelector('.chat-input-container');
+        if (container && document.activeElement === elements.messageInput) {
+          container.classList.add('keyboard-open');
+        }
+      } else if (heightDifference < 50) {
+        document.body.classList.remove('keyboard-open');
+        const container = document.querySelector('.chat-input-container');
+        if (container) {
+          container.classList.remove('keyboard-open');
+        }
+      }
+    }, 100);
   };
   
   window.addEventListener('resize', handleResize);
+  
+  // Additional iOS-specific handling
+  if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+    // Visual viewport API support for better iOS handling
+    if (window.visualViewport) {
+      const handleViewportChange = () => {
+        const viewportHeight = window.visualViewport.height;
+        const windowHeight = window.innerHeight;
+        const heightDifference = windowHeight - viewportHeight;
+        
+        if (heightDifference > 100) {
+          document.body.classList.add('keyboard-open');
+          const container = document.querySelector('.chat-input-container');
+          if (container && document.activeElement === elements.messageInput) {
+            container.classList.add('keyboard-open');
+          }
+        } else {
+          document.body.classList.remove('keyboard-open');
+          const container = document.querySelector('.chat-input-container');
+          if (container) {
+            container.classList.remove('keyboard-open');
+          }
+        }
+      };
+      
+      window.visualViewport.addEventListener('resize', handleViewportChange);
+    }
+  }
 }
 
 // Initialize mobile optimizations
