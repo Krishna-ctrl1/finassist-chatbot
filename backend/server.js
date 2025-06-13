@@ -8,7 +8,8 @@ const rateLimit = require('express-rate-limit');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { MongoClient, ObjectId } = require('mongodb');
-const axios = require('axios');
+const OpenAI = require('openai');
+const stringSimilarity = require('string-similarity'); // Added for typo/abbreviation handling
 
 // Load environment variables from .env located in the project root
 dotenv.config({ path: path.join(__dirname, '../.env') });
@@ -18,14 +19,10 @@ const app = express();
 // Configuration
 const MONGO_URI = process.env.MONGO_URI;
 const JWT_SECRET = process.env.JWT_SECRET;
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-const openRouterClient = axios.create({
-  baseURL: 'https://openrouter.ai/api/v1',
-  headers: {
-    Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-    'Content-Type': 'application/json',
-  },
+const openai = new OpenAI({
+  apiKey: OPENAI_API_KEY,
 });
 
 let mongoClient;
@@ -267,26 +264,68 @@ const entityMapping = {
   'apple': 'Apple Inc.',
   'reliance': 'Reliance Industries',
   'hdfc': 'HDFC Bank',
-  'icici': 'ICICI Bank'
+  'icici': 'ICICI Bank',
+  'mf': 'Mutual Fund',
+  'sip': 'Systematic Investment Plan',
+  'etf': 'Exchange Traded Fund'
 };
 
-// Function to get time-based greeting
-function getTimeBasedGreeting() {
-  const hour = new Date().getHours();
-  if (hour >= 0 && hour < 12) return "Good morning";
-  if (hour >= 12 && hour < 17) return "Good afternoon";
-  return "Good evening";
+// Function to correct typos and interpret incomplete sentences
+function preprocessQuery(message) {
+  let processedMessage = message.toLowerCase().trim();
+  
+  // Replace abbreviations and common typos
+  Object.keys(entityMapping).forEach(key => {
+    const regex = new RegExp(`\\b${key}\\b`, 'gi');
+    processedMessage = processedMessage.replace(regex, entityMapping[key]);
+  });
+
+  // Handle common typos using string similarity
+  const financeTerms = [
+    'portfolio', 'investment', 'mutual fund', 'sip', 'stock', 'stocks',
+    'returns', 'performance', 'folio', 'order', 'orders', 'balance',
+    'market', 'etf', 'bonds', 'equity', 'debt', 'tax', 'financial planning',
+    'risk', 'strategy', 'dividend', 'growth', 'sector', 'economy'
+  ];
+
+  processedMessage = processedMessage.split(' ').map(word => {
+    if (word.length < 3) return word;
+    const matches = stringSimilarity.findBestMatch(word, financeTerms);
+    if (matches.bestMatch.rating > 0.7) {
+      return matches.bestMatch.target;
+    }
+    return word;
+  }).join(' ');
+
+  // Complete partial sentences
+  if (!processedMessage.match(/[.!?]$/)) {
+    if (processedMessage.includes('portfolio') || processedMessage.includes('investment')) {
+      processedMessage += ' details';
+    } else if (processedMessage.includes('stock') || processedMessage.includes('market')) {
+      processedMessage += ' performance';
+    }
+  }
+
+  return processedMessage;
 }
 
 // Function to classify the query
 function classifyQuery(message) {
-  const lowerMessage = message.toLowerCase();
+  const lowerMessage = message.toLowerCase().trim();
   
+  // Detect greetings
+  const greetings = ['hi', 'hello', 'hey', 'thank', 'thanks', 'thx', 'hii', 'helo'];
+  const isGreeting = greetings.some(g => lowerMessage.startsWith(g) || lowerMessage === g);
+  
+  if (isGreeting) {
+    return 'GREETING';
+  }
+
   // Map partial entity names to full names
   let expandedMessage = lowerMessage;
   Object.keys(entityMapping).forEach(key => {
     if (lowerMessage.includes(key)) {
-      expandedMessage = expandedMessage.replace(new RegExp(key, 'gi'), entityMapping[key]);
+      expandedMessage = expandedMessage.replace(new RegExp(`\\b${key}\\b`, 'gi'), entityMapping[key]);
     }
   });
 
@@ -297,37 +336,17 @@ function classifyQuery(message) {
     'my performance', 'my folios'
   ];
 
-  // Comprehensive list of finance-related keywords, including edge cases
+  // Expanded keywords for general financial queries
   const generalFinancialKeywords = [
-    'mutual fund', 'mutual funds', 'sip', 'investment', 'investments', 'portfolio', 'returns', 'performance',
-    'market', 'markets', 'stock', 'stocks', 'stonks', 'share', 'shares', 'equity', 'equities', 'bond', 'bonds',
-    'debt', 'tax', 'taxes', 'financial planning', 'risk', 'strategy', 'reliance', 'hdf mutual fund', 'sbi', 'apple',
-    'stock price', 'market cap', 'dividend', 'dividends', 'etf', 'fund', 'funds', 'trade', 'trading', 'growth',
-    'value', 'sector', 'sectors', 'nasdaq', 'dow jones', 's&p 500', 'economy', 'interest rates', 'inflation',
-    'recession', 'large cap', 'small cap', 'mid cap', 'derivatives', 'option', 'options', 'future', 'futures',
-    'commodity', 'commodities', 'hedge fund', 'index fund', 'portfolio management', 'asset allocation',
-    'diversification', 'bull market', 'bear market', 'volatility', 'liquidity', 'capital gains', 'yield', 'p/e ratio',
-    'earnings', 'revenue', 'cash flow', 'balance sheet', 'income statement', 'financial statement', 'brokerage',
-    'ipo', 'retirement planning', '401k', 'ira', 'rothschild', 'bankruptcy', 'credit', 'debt management', 'forex',
-    'currency', 'crypto', 'cryptocurrency', 'bitcoin', 'blockchain', 'financial advisor', 'budget', 'savings',
-    'expense', 'income', 'wealth', 'asset', 'assets', 'liability', 'liabilities', 'net worth', 'bank', 'banking',
-    'loan', 'loans', 'mortgage', 'interest', 'dividend yield', 'market trend', 'financial market', 'swap', 'swaps',
-    'cdo', 'collateralized debt obligation', 'hedging', 'arbitrage', 'short selling', 'leverage', 'margin',
-    'technical analysis', 'fundamental analysis', 'quantitative easing', 'monetary policy', 'fiscal policy',
-    'economic indicator', 'gdp', 'cpi', 'ppi', 'unemployment rate', 'alpha', 'beta', 'sharpe ratio', 'vol',
-    'volatility index', 'vix', 'esg', 'sustainable investing', 'green bonds', 'real estate', 'reit', 'mutal fund',
-    'stok', 'financ', 'invest', 'money', 'cash', 'profit', 'loss', 'gain', 'financial', 'finance'
+    'mutual fund', 'sip', 'investment', 'portfolio', 'returns', 'performance',
+    'market', 'stocks', 'shares', 'bonds', 'equity', 'debt', 'tax', 'financial planning',
+    'risk', 'strategy', 'reliance', 'hdf mutual fund', 'state bank of india', 'apple inc.',
+    'stock price', 'market cap', 'dividend', 'etf', 'fund', 'trade', 'growth', 'value', 
+    'sector', 'nasdaq', 'dow jones', 's&p 500', 'economy', 'interest rates', 'inflation', 'recession'
   ];
 
-  // Regex for ticker symbols (e.g., AAPL, SBIN) and financial numbers (e.g., $100, ₹5000)
-  const tickerRegex = /\b[A-Z]{1,5}\b/;
-  const currencyRegex = /[\$₹€£¥]\s*\d+|\d+\s*(?:usd|inr|eur|gbp|yen|rupee|dollar)/i;
-
   const isUserSpecific = userSpecificKeywords.some(keyword => expandedMessage.includes(keyword));
-  const isFinancial = generalFinancialKeywords.some(keyword => expandedMessage.includes(keyword)) ||
-                      tickerRegex.test(expandedMessage) ||
-                      currencyRegex.test(expandedMessage) ||
-                      Object.values(entityMapping).some(entity => expandedMessage.includes(entity.toLowerCase()));
+  const isFinancial = generalFinancialKeywords.some(keyword => expandedMessage.includes(keyword)) || isUserSpecific;
 
   if (!isFinancial) {
     return 'NON-FINANCIAL';
@@ -379,9 +398,11 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
       };
     }
     
+    const processedMessage = preprocessQuery(message);
     const userMessage = {
       sender: 'user',
-      content: message,
+      content: message, // Store original message
+      processedContent: processedMessage, // Store processed message for AI
       timestamp: new Date()
     };
     
@@ -390,12 +411,12 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
     }
     chat.messages.push(userMessage);
     
-    const queryType = classifyQuery(message);
+    const queryType = classifyQuery(processedMessage);
     console.log('Query classified as:', queryType);
 
     const recentMessages = chat.messages.slice(-5).map(msg => ({
       role: msg.sender === 'user' ? 'user' : 'assistant',
-      content: msg.content
+      content: msg.processedContent || msg.content
     }));
 
     const isFirstMessage = chat.messages.length === 1;
@@ -406,13 +427,10 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
     // Always fetch user data to allow for mixed queries
     userData = await getUserData(customerId);
 
-    // Determine greeting based on time of day
-    const greeting = isFirstMessage ? `${getTimeBasedGreeting()}, ${userData.customer?.name || 'there'}!` : '';
-
-    if (queryType === 'NON-FINANCIAL') {
+    if (queryType === 'GREETING') {
       const aiResponse = isFirstMessage
-        ? `${greeting} I'm your specialized financial advisor assistant, here to assist with all finance-related questions, including investments, financial concepts, market trends, and more. It seems your question isn't related to finance. Could you please ask about stocks, mutual funds, financial planning, or any other finance topic? I'm happy to help with those!`
-        : "It seems your question isn't related to finance. Could you please ask about stocks, mutual funds, financial planning, or any other finance topic? I'm happy to help with those!";
+        ? `Hello ${userData.customer?.name || 'there'}! I'm your specialized financial advisor assistant, ready to help with your investment portfolio, mutual funds, or financial planning. How can I assist you today?`
+        : `Hi again! Thanks for reaching out. What's on your mind regarding your investments or financial questions?`;
       
       const assistantMessage = {
         sender: 'assistant',
@@ -440,25 +458,56 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
       }
       
       return res.json(chat);
-    } else if (queryType === 'USER-SPECIFIC-FINANCIAL') {
-      systemPrompt = `You are a specialized financial advisor AI assistant with broad expertise in all finance-related topics. You respond to any query with even minimal finance relevance, including user-specific portfolio questions, general financial concepts, market trends, financial instruments, and educational questions (e.g., "what is a stock," "what are large cap funds").
+    } else if (queryType === 'NON-FINANCIAL') {
+      const aiResponse = isFirstMessage
+        ? `Hello ${userData.customer?.name || 'there'}! I'm your specialized financial advisor assistant, here to assist with your investment portfolio, orders, mutual funds, and other financial matters. It seems your question isn't related to finance. Could you please ask about your investments, portfolio performance, or financial planning needs? I'm happy to help with those!`
+        : `It seems your question isn't related to finance. Could you please ask about your investments, portfolio performance, or financial planning needs? I'm happy to help with those!`;
+      
+      const assistantMessage = {
+        sender: 'assistant',
+        content: aiResponse,
+        timestamp: new Date()
+      };
+      
+      chat.messages.push(assistantMessage);
+      chat.updatedAt = new Date();
+      
+      if (chat._id) {
+        await chatsCollection.updateOne(
+          { _id: chat._id },
+          { 
+            $set: { 
+              messages: chat.messages, 
+              updatedAt: chat.updatedAt 
+            },
+            $inc: { __v: 1 }
+          }
+        );
+      } else {
+        const result = await chatsCollection.insertOne(chat);
+        chat._id = result.insertedId;
+      }
+      
+      return res.json(chat);
+    } else {
+      systemPrompt = `You are a specialized financial advisor AI assistant designed to provide accurate, concise, and context-aware responses for any finance-related query, even if only 1% related to finance (e.g., stocks, ETFs, mutual funds, financial education, market trends). You handle typos, abbreviations, incomplete sentences, and simple queries like "what is this" or "what is that" if they pertain to finance.
 
 AUTHORIZATION SCOPE:
-You are authorized to discuss all finance-related topics, including but not limited to:
+You are authorized to discuss ONLY the following topics:
 - Portfolio analysis and performance
 - Investment holdings and allocations  
 - Order history and transaction details
 - Mutual fund information and performance
 - Financial planning recommendations based on user data
+- Financial planning, tax implications, and risk assessment
+- Financial education (e.g., "what is a mutual fund?", "how does an ETF work?")
 - Investment strategy and risk assessment
 - Returns, gains, losses, and performance metrics
 - Account balances and folio information
 - Tax implications of investments (general guidance)
 - Market analysis related to user's holdings
 - General stock performance, market trends, and stock funds (e.g., ETFs)
-- Educational queries about financial concepts (e.g., stocks, bonds, large cap, small cap, derivatives, swaps, CDOs, etc.)
-- Definitions and explanations of financial terms, instruments, and slang (e.g., "stonks")
-- Any query with even 1% finance relevance (e.g., company names, ticker symbols, currency amounts)
+- Greetings (e.g., "hi", "hello", "thanks") with polite redirects to finance topics
 
 USER DATA ACCESS:
 You have access to the following user financial data:
@@ -481,52 +530,70 @@ Mutual Funds: ${JSON.stringify(userData.mutualFunds, null, 2)}
 
 RESPONSE GUIDELINES:
 1. **Politeness and Tone**:
-   - For the first message in a chat session, start with a time-based greeting like "${getTimeBasedGreeting()}, ${userData.customer?.name || 'there'}!" (e.g., "Good morning, John!" or "Good evening, there!").
+   - For the first message in a chat session, start with a polite greeting like "Hello ${userData.customer?.name || 'there'}!" or "Hi ${userData.customer?.name || 'there'}!".
    - For follow-up messages, do NOT use a greeting unless the conversation context suggests it's needed (e.g., after a long pause or a non-financial query rejection). Instead, dive straight into the response while maintaining a polite and professional tone.
    - Always end your response with a friendly closer, such as "Let me know how I can assist you further!" or "Feel free to ask me anything else!"
    - Maintain a warm, professional, and conversational tone throughout, as if speaking to a valued client.
 
 2. **Conversation Context**:
-   - Use the provided conversation history to maintain context and make the conversation flow naturally.
+   - Use the provided conversation history (recentMessages) to maintain context and make the conversation flow naturally.
    - Reference prior messages when relevant to show continuity (e.g., "Following up on your question about your SIPs, here's more detail...").
+   - Summarize the conversation context if multiple messages are relevant (e.g., "Based on your earlier questions about your portfolio and Apple stock...").
    - Avoid abrupt or disconnected responses; ensure each response feels like a natural continuation of the conversation.
 
 3. **Comprehensive Financial Analysis**:
-   - For user-specific queries (e.g., "my portfolio"), provide detailed analysis based on the user's data.
-   - For general financial queries (e.g., "what is a stock"), provide clear, educational explanations, including examples where relevant.
-   - For queries mixing finance and non-finance topics (e.g., "What is a stock and how’s the weather?"), respond only to the finance-related portion and politely ignore the rest.
-   - For ambiguous terms (e.g., "alpha"), assume a financial context (e.g., alpha in investing) unless clearly non-financial.
-   - When the query involves both user-specific data and general financial topics (e.g., "How does Apple stock compare to my portfolio?"), provide a detailed analysis including:
-     - User-specific data from the database (e.g., portfolio holdings, orders).
-     - General financial insights (e.g., stock performance, market trends, related stock funds).
-     - Compare the user’s data with general trends (e.g., "Your portfolio has 5% in tech stocks, while Apple’s stock has been underperforming the tech sector this year").
-     - Visual aids: Suggest where graphs would enhance understanding, such as "Insert a pie chart showing your portfolio allocation compared to the tech sector here".
-   - Ensure responses are concise yet comprehensive, providing actionable insights or educational content.
+   - For user-specific queries (e.g., "my portfolio"), provide a detailed analysis including:
+     - Portfolio holdings, allocations, and performance metrics.
+     - Specific details about orders, folios, and mutual funds from the user data.
+     - Comparisons with market trends or benchmarks (e.g., "Your portfolio has 5% in tech stocks, while the tech sector has grown 10% this year").
+   - For general financial queries (e.g., "Apple stock performance"), provide:
+     - Recent stock performance (price trends, market cap, P/E ratio, etc.).
+     - Financial metrics (revenue, net income, cash flow, etc.).
+     - Broader market trends affecting the stock (e.g., economic conditions, sector performance).
+     - Related stock funds (e.g., ETFs or mutual funds that include the stock).
+   - For mixed queries (e.g., "How does Apple stock compare to my portfolio?"), combine user-specific data with general financial insights.
+   - Suggest visualizations to enhance understanding:
+     - Pie charts for portfolio allocations (e.g., "Insert a pie chart showing your portfolio allocation by sector here").
+     - Bar graphs for performance comparisons (e.g., "Insert a bar graph comparing your portfolio returns to the S&P 500 here").
+     - Line graphs for time-series data (e.g., "Insert a line graph of Apple Inc.'s stock price over the past year here").
+   - Ensure responses are concise yet comprehensive, providing actionable insights.
 
 4. **Formatting**:
    - Format all monetary amounts in Indian Rupees (₹) for Indian stocks or USD ($) for international stocks as appropriate.
    - Provide specific details from the actual data when discussing orders, folios, or investments.
    - Format responses using markdown for better readability:
      - Use headings (#, ##, ###) for sections.
-     - Use bullet points (-) or numbered lists (1., 2., etc.) for structured data instead of tables.
-     - Example of structured data using bullet points:
-       - Company: HDFC Bank, Sector: Banking, Allocation: 8.5%
-       - Company: Reliance Industries, Sector: Energy, Allocation: 7.2%
-       - Company: Infosys, Sector: IT, Allocation: 6.3%
-     - Ensure consistent formatting for lists, with each item starting with a clear label (e.g., "Company:").
+     - Use bullet points (-) for lists.
+     - Use tables for structured data with the following strict guidelines:
+       - Use bold (**Header**) for table headers to make them stand out.
+       - Add a separator row with dashes (e.g., | --- | --- | --- |) below the header row to clearly delineate headers from data.
+       - Ensure a minimum of 3 spaces between columns for padding to improve readability.
+       - Standardize column widths by setting each column to the width of the longest entry in that column, padding shorter entries with spaces.
+       - For long text entries (e.g., "Reliance Industries"), truncate with an ellipsis (e.g., "Reliance Ind…") to fit within a maximum width of 15 characters per column, or split into multiple lines if truncation is not suitable.
+       - Example of a well-formatted table:
+         | **Company**        | **Sector**     | **Allocation** |
+         |--------------------|----------------|----------------|
+         | HDFC Bank          | Banking        | 8.5%           |
+         | Reliance Ind…      | Energy         | 7.2%           |
+         | Infosys            | IT             | 6.3%           |
      - Use bold (**text**) and italic (*text*) for emphasis where appropriate.
    - **Do NOT include hashtags (e.g., #FinanceTips), emojis, or any social media-style formatting.** Keep the tone professional and clean.
 
 5. **Content**:
    - CRITICAL: If orders exist in the data, you MUST acknowledge and detail them. Never say "no orders found" when orders are present.
    - If user data is missing or incomplete, acknowledge this gracefully (e.g., "I couldn’t find your portfolio data, but I can still provide general insights about Apple stock").
-   - Offer clear, actionable financial insights or educational explanations based on the query.
-   - For queries involving partial names (e.g., "SBI") or misspellings (e.g., "stok"), interpret them as referring to the full entity (e.g., "State Bank of India") or correct term (e.g., "stock") and respond accordingly.
-   - For edge cases (e.g., "stonks," "mutal fund"), treat them as finance-related and provide appropriate responses.
+   - Interpret typos, abbreviations, and incomplete sentences to understand the user's intent (e.g., "portfolo" → "portfolio", "SBI" → "State Bank of India").
+   - Offer clear, actionable financial insights based on the available data.
+   - For queries involving partial names (e.g., "SBI"), interpret them as referring to the full entity (e.g., "State Bank of India") and respond accordingly.
+
+6. **Errors and Exceptions**:
+   - If an error occurs, provide a clear explanation and suggest a solution.
+   - If the query is not understood, provide a clear explanation and suggest a related topic.
+   - If the query is too vague, ask for clarification (e.g., "Could you please specify which mutual fund you are referring to?").
+   - If the query is too broad, suggest narrowing it down (e.g., "Are you looking for information on a specific stock or mutual fund?").
 
 STRICT OPERATIONAL RULES:
-- You MUST respond to ALL queries with even 1% relevance to finance, investments, portfolio management, financial concepts, or markets.
-- If a query contains both finance and non-finance elements, respond only to the finance-related portion and politely ignore the rest.
+- You MUST ONLY respond to queries related to finance, investments, portfolio management, and financial markets.
 - Do NOT engage in conversations about:
   * General knowledge questions unrelated to finance
   * Personal advice unrelated to finance
@@ -536,117 +603,30 @@ STRICT OPERATIONAL RULES:
   * Health, relationships, or lifestyle advice
   * Any topic outside financial services
 
+CONTEXT AWARENESS:
+- Use the conversation history (recentMessages) to understand the context.
+- If the user asked about a specific stock or portfolio earlier, reference it in the response if relevant.
+- Summarize prior context if the conversation involves multiple related queries (e.g., "You previously asked about your portfolio's tech allocation, and now you're asking about Apple stock...").
+
 SECURITY REMINDER:
 - Only use the provided financial data for responses.
 - Do not make up or hallucinate financial information.
-- Always base recommendations on actual user data when relevant.
+- Always base recommendations on actual user data.
 - Maintain confidentiality of user information.`;
-    } else {
-      systemPrompt = `You are a specialized financial advisor AI assistant with broad expertise in all finance-related topics. You respond to any query with even minimal finance relevance, including general financial concepts, market trends, stock performance, financial instruments, and educational questions (e.g., "what is a stock," "what are large cap funds"). You can also include user-specific data when relevant to the query.
-
-AUTHORIZATION SCOPE:
-You are authorized to discuss all finance-related topics, including but not limited to:
-- General mutual fund information and performance
-- Financial planning recommendations (general)
-- Investment strategy and risk assessment (general)
-- Market analysis and trends
-- Tax implications of investments (general guidance)
-- Stock performance, including specific companies (e.g., Apple Inc., State Bank of India)
-- Stock funds (e.g., ETFs, mutual funds) and their performance
-- Educational queries about financial concepts (e.g., stocks, bonds, large cap, small cap, derivatives, swaps, CDOs, etc.)
-- Definitions and explanations of financial terms, instruments, and slang (e.g., "stonks")
-- Any query with even 1% finance relevance (e.g., company names, ticker symbols, currency amounts)
-- User-specific financial data (e.g., portfolio, orders, mutual funds) when relevant to the query
-
-USER DATA ACCESS (for reference when needed):
-You have access to the following user financial data:
-- Customer Name: ${userData.customer?.name || 'Unknown'}
-- Customer ID: ${userData.customer?.id || 'Unknown'}
-- RAYI Customer ID: ${userData.customer?.rayi_customer_id || 'Unknown'}
-- Total Orders: ${userData.orders?.length || 0}
-- Total Folios: ${userData.folios?.length || 0}
-
-Detailed Financial Data:
-Customer Info: ${JSON.stringify(userData.customer, null, 2)}
-Orders: ${JSON.stringify(userData.orders, null, 2)}
-Order Details: ${JSON.stringify(userData.orderDetails, null, 2)}
-Portfolio Folios: ${JSON.stringify(userData.folios, null, 2)}
-Investment Summary: ${JSON.stringify(userData.investments, null, 2)}
-Performance Summary: ${JSON.stringify(userData.performanceSummary, null, 2)}
-Investment Performance: ${JSON.stringify(userData.investmentPerformance, null, 2)}
-Investment Returns: ${JSON.stringify(userData.investmentReturns, null, 2)}
-Mutual Funds: ${JSON.stringify(userData.mutualFunds, null, 2)}
-
-RESPONSE GUIDELINES:
-1. **Politeness and Tone**:
-   - For the first message in a chat session, start with a time-based greeting like "${getTimeBasedGreeting()}, ${userData.customer?.name || 'there'}!" (e.g., "Good morning, John!" or "Good evening, there!").
-   - For follow-up messages, do NOT use a greeting unless the conversation context suggests it's needed (e.g., after a long pause or a non-financial query rejection). Instead, dive straight into the response while maintaining a polite and professional tone.
-   - Always end your response with a friendly closer, such as "Let me know how I can assist you further!" or "Feel free to ask me anything else!"
-   - Maintain a warm, professional, and conversational tone throughout, as if speaking to a valued client.
-
-2. **Conversation Context**:
-   - Use the provided conversation history to maintain context and make the conversation flow naturally.
-   - Reference prior messages when relevant to show continuity (e.g., "Following up on your question about mutual funds, here's more detail...").
-   - Avoid abrupt or disconnected responses; ensure each response feels like a natural continuation of the conversation.
-
-3. **Comprehensive Financial Analysis**:
-   - For general financial queries (e.g., "what is a stock"), provide clear, educational explanations, including examples where relevant.
-   - For queries mixing finance and non-finance topics (e.g., "What is a stock and how’s the weather?"), respond only to the finance-related portion and politely ignore the rest.
-   - For ambiguous terms (e.g., "alpha"), assume a financial context (e.g., alpha in investing) unless clearly non-financial.
-   - When responding to queries about specific stocks (e.g., Apple Inc.), provide a detailed analysis including:
-     - Recent stock performance (price trends, market cap, P/E ratio, etc.).
-     - Financial metrics (revenue, net income, cash flow, etc.).
-     - Broader market trends affecting the stock (e.g., economic conditions, sector performance, geopolitical events).
-     - Related stock funds (e.g., ETFs or mutual funds that include the stock) and their performance.
-     - If the query also involves user-specific data (e.g., "How does Apple stock compare to my portfolio?"), include user-specific insights (e.g., "Your portfolio has 5% in tech stocks, while Apple’s stock has been underperforming the tech sector this year").
-     - Visual aids: Suggest where graphs would enhance understanding, such as "Insert a line graph of [stock name]'s stock price over the past year here" or "Insert a pie chart showing your portfolio allocation compared to the tech sector here".
-   - Ensure responses are concise yet comprehensive, providing actionable insights or educational content.
-
-4. **Formatting**:
-   - Format all monetary amounts in Indian Rupees (₹) for Indian stocks or USD ($) for international stocks as appropriate.
-   - Format responses using markdown for better readability:
-     - Use headings (#, ##, ###) for sections.
-     - Use bullet points (-) or numbered lists (1., 2., etc.) for structured data instead of tables.
-     - Example of structured data using bullet points:
-       - Company: HDFC Bank, Sector: Banking, Allocation: 8.5%
-       - Company: Reliance Industries, Sector: Energy, Allocation: 7.2%
-       - Company: Infosys, Sector: IT, Allocation: 6.3%
-     - Ensure consistent formatting for lists, with each item starting with a clear label (e.g., "Company:").
-     - Use bold (**text**) and italic (*text*) for emphasis where appropriate.
-   - **Do NOT include hashtags (e.g., #FinanceTips), emojis, or any social media-style formatting.** Keep the tone professional and clean.
-
-5. **Content**:
-   - Provide clear, actionable financial insights or educational explanations.
-   - If user data is missing or incomplete, acknowledge this gracefully (e.g., "I couldn’t find your portfolio data, but I can still provide general insights about Apple stock").
-   - For user-specific queries (e.g., "my portfolio") without additional context, respond with: "I’d be happy to help with that! Here are your portfolio details..." and include the data.
-   - For queries involving partial names (e.g., "SBI") or misspellings (e.g., "stok"), interpret them as referring to the full entity (e.g., "State Bank of India") or correct term (e.g., "stock") and respond accordingly.
-   - For edge cases (e.g., "stonks," "mutal fund"), treat them as finance-related and provide appropriate responses.
-
-STRICT OPERATIONAL RULES:
-- You MUST respond to ALL queries with even 1% relevance to finance, investments, portfolio management, financial concepts, or markets.
-- If a query contains both finance and non-finance elements, respond only to the finance-related portion and politely ignore the rest.
-- Do NOT engage in conversations about:
-  * General knowledge questions unrelated to finance
-  * Personal advice unrelated to finance
-  * Technical support for non-financial systems
-  * Entertainment, sports, weather, news (unless directly related to financial markets)
-  * Programming or coding help
-  * Health, relationships, or lifestyle advice
-  * Any topic outside financial services`;
     }
 
-    const response = await openRouterClient.post('/chat/completions', {
-      model: "google/gemini-2.5-flash-preview-05-20", 
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4.1",
       messages: [
         { role: "system", content: systemPrompt },
         ...recentMessages,
-        { role: "user", content: message }
+        { role: "user", content: processedMessage }
       ],
       max_tokens: 1000,
       temperature: 0.7,
     });
 
-    let aiResponse = response.data.choices[0].message.content;
+    let aiResponse = completion.choices[0].message.content;
     
     // Post-process the response to remove any hashtags
     aiResponse = stripHashtags(aiResponse);

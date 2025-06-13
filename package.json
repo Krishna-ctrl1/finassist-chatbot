@@ -5,6 +5,8 @@
     "start": "nodemon server.js"
   },
   "dependencies": {
+    "@google-cloud/speech": "^7.1.0",
+    "@google-cloud/text-to-speech": "^6.1.0",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
@@ -17,7 +19,8 @@
     "mongodb": "^6.17.0",
     "mongoose": "^8.7.3",
     "node-cache": "^5.1.2",
-    "openai": "^3.3.0"
+    "openai": "^5.3.0",
+    "string-similarity": "^4.0.4"
   },
   "devDependencies": {
     "nodemon": "^3.1.7"
