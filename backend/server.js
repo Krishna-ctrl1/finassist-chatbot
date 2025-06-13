@@ -9,9 +9,10 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { MongoClient, ObjectId } = require('mongodb');
 const OpenAI = require('openai');
-const stringSimilarity = require('string-similarity'); // Added for typo/abbreviation handling
+const stringSimilarity = require('string-similarity');
+const axios = require('axios');
+const crypto = require('crypto');
 
-// Load environment variables from .env located in the project root
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const app = express();
@@ -34,7 +35,6 @@ async function initMongoDB() {
         await mongoClient.connect();
         console.log('MongoDB client connected for customer authentication');
         
-        // Create indexes for better performance
         const db = mongoClient.db('financeai');
         try {
             await db.collection('chats').createIndex({ userId: 1, updatedAt: -1 });
@@ -50,7 +50,7 @@ async function initMongoDB() {
 // Rate limiting for authentication endpoints
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // Limit each IP to 100 requests per windowMs
+    max: 100, // Limit each IP to 100 requests per windows
     message: 'Too many requests from this IP, please try again later.'
 });
 app.use('/api/auth', authLimiter);
@@ -162,7 +162,6 @@ async function getUserData(customerId) {
     const testOrderQuery = await db.collection('order').find({ customer_id: numericCustomerId }).toArray();
     console.log('Direct order query result for customer_id', numericCustomerId, ':', testOrderQuery);
     
-    // FIXED: Corrected the Promise.all array to match the destructuring
     const [
       customer,
       customerDetail,
@@ -220,7 +219,6 @@ async function getUserData(customerId) {
       console.log('Order details fetched:', orderDetails.length);
     }
 
-    // Get mutual fund IDs from folios and investment returns
     const mfIds = [...new Set([
       ...(folios || []).map(f => f?.mf_id),
       ...(investmentReturns || []).map(r => r?.mf_id)
@@ -252,7 +250,7 @@ async function getUserData(customerId) {
       customer: customer || { name: 'Unknown', id: 'Unknown', rayi_customer_id: 'Unknown' },
       customerDetail: customerDetail || null,
       folios: folios || [],
-      investments: null, // This was causing confusion - removed from Promise.all
+      investments: null,
       performanceSummary: performanceSummary || null,
       investmentPerformance: investmentPerformance || [],
       investmentReturns: investmentReturns || [],
@@ -335,7 +333,7 @@ function stripHashtags(response) {
   return response.replace(/#[^\s]+/g, '');
 }
 
-// AI-powered function to classify the query using OpenAI
+// Function to classify the query
 async function classifyQueryWithAI(message) {
   try {
     const classificationPrompt = `You are a query classifier for a financial advisor AI assistant. 
@@ -368,21 +366,20 @@ User query: "${message}"
 Respond with ONLY the category name (GREETING, USER-SPECIFIC-FINANCIAL, GENERAL-FINANCIAL, or NON-FINANCIAL). Do not include any explanation.`;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4.1", // Using faster, cheaper model for classification
+      model: "gpt-4.1",
       messages: [
         { role: "user", content: classificationPrompt }
       ],
       max_tokens: 50,
-      temperature: 0.1, // Low temperature for consistent classification
+      temperature: 0.1,
     });
 
     const classification = completion.choices[0].message.content.trim().toUpperCase();
     
-    // Validate the response
     const validCategories = ['GREETING', 'USER-SPECIFIC-FINANCIAL', 'GENERAL-FINANCIAL', 'NON-FINANCIAL'];
     if (!validCategories.includes(classification)) {
       console.warn(`Invalid classification received: ${classification}. Defaulting to GENERAL-FINANCIAL`);
-      return 'GENERAL-FINANCIAL'; // Safe default for edge cases
+      return 'GENERAL-FINANCIAL';
     }
     
     console.log(`AI Classification: "${message}" -> ${classification}`);
@@ -395,7 +392,7 @@ Respond with ONLY the category name (GREETING, USER-SPECIFIC-FINANCIAL, GENERAL-
   }
 }
 
-// Fallback classification function (simplified version of your original)
+// Fallback classification function
 function fallbackClassifyQuery(message) {
   const lowerMessage = message.toLowerCase().trim();
   
@@ -424,7 +421,713 @@ function fallbackClassifyQuery(message) {
   return hasUserSpecific ? 'USER-SPECIFIC-FINANCIAL' : 'GENERAL-FINANCIAL';
 }
 
-// Updated main chat endpoint function - replace the relevant part in your /api/chat route
+// =============================================================================
+// INVESTMENT PRODUCT ROUTES
+// =============================================================================
+
+// Get available mutual funds from Alpha Vantage
+app.get('/api/investment/products', authenticateToken, async (req, res) => {
+  try {
+    const { category = 'all', search = '' } = req.query;
+    
+    // Sample mutual fund data (you can replace with real API calls)
+    const sampleMutualFunds = [
+      {
+        id: 'MF001',
+        name: 'SBI Bluechip Fund',
+        category: 'Large Cap',
+        nav: 85.67,
+        expense_ratio: 0.65,
+        returns_1y: 15.2,
+        returns_3y: 12.8,
+        returns_5y: 14.5,
+        min_investment: 500,
+        risk_level: 'Moderate',
+        fund_manager: 'SBI Mutual Fund',
+        aum: '₹45,000 Cr'
+      },
+      {
+        id: 'MF002',
+        name: 'HDFC Top 100 Fund',
+        category: 'Large Cap',
+        nav: 920.45,
+        expense_ratio: 0.70,
+        returns_1y: 16.8,
+        returns_3y: 13.2,
+        returns_5y: 15.1,
+        min_investment: 500,
+        risk_level: 'Moderate',
+        fund_manager: 'HDFC Asset Management',
+        aum: '₹28,500 Cr'
+      },
+      {
+        id: 'MF003',
+        name: 'Axis Midcap Fund',
+        category: 'Mid Cap',
+        nav: 67.89,
+        expense_ratio: 0.85,
+        returns_1y: 22.5,
+        returns_3y: 18.7,
+        returns_5y: 19.2,
+        min_investment: 1000,
+        risk_level: 'High',
+        fund_manager: 'Axis Asset Management',
+        aum: '₹12,800 Cr'
+      },
+      {
+        id: 'MF004',
+        name: 'ICICI Prudential Balanced Advantage Fund',
+        category: 'Hybrid',
+        nav: 45.23,
+        expense_ratio: 0.75,
+        returns_1y: 11.8,
+        returns_3y: 10.5,
+        returns_5y: 12.3,
+        min_investment: 500,
+        risk_level: 'Moderate',
+        fund_manager: 'ICICI Prudential',
+        aum: '₹35,200 Cr'
+      },
+      {
+        id: 'MF005',
+        name: 'Kotak Small Cap Fund',
+        category: 'Small Cap',
+        nav: 158.76,
+        expense_ratio: 0.95,
+        returns_1y: 28.3,
+        returns_3y: 24.1,
+        returns_5y: 22.8,
+        min_investment: 1000,
+        risk_level: 'Very High',
+        fund_manager: 'Kotak Mahindra Asset Management',
+        aum: '₹8,900 Cr'
+      }
+    ];
+
+    let filteredFunds = sampleMutualFunds;
+
+    // Filter by category
+    if (category !== 'all') {
+      filteredFunds = filteredFunds.filter(fund => 
+        fund.category.toLowerCase().includes(category.toLowerCase())
+      );
+    }
+
+    // Filter by search term
+    if (search) {
+      filteredFunds = filteredFunds.filter(fund =>
+        fund.name.toLowerCase().includes(search.toLowerCase()) ||
+        fund.category.toLowerCase().includes(search.toLowerCase())
+      );
+    }
+
+    res.json({
+      success: true,
+      products: filteredFunds,
+      total: filteredFunds.length
+    });
+
+  } catch (error) {
+    console.error('Error fetching investment products:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch investment products' 
+    });
+  }
+});
+
+// Get detailed product information
+app.get('/api/investment/products/:productId', authenticateToken, async (req, res) => {
+  try {
+    const { productId } = req.params;
+    
+    // In a real application, you would fetch this from your database or external API
+    // For now, we'll simulate with sample data
+    const productDetails = {
+      id: productId,
+      name: 'SBI Bluechip Fund',
+      category: 'Large Cap',
+      nav: 85.67,
+      nav_history: [
+        { date: '2024-01-01', nav: 78.45 },
+        { date: '2024-06-01', nav: 82.12 },
+        { date: '2024-12-01', nav: 85.67 }
+      ],
+      expense_ratio: 0.65,
+      returns: {
+        '1y': 15.2,
+        '3y': 12.8,
+        '5y': 14.5
+      },
+      portfolio_composition: [
+        { sector: 'Banking & Financial Services', percentage: 25.6 },
+        { sector: 'Information Technology', percentage: 18.3 },
+        { sector: 'Energy', percentage: 12.8 },
+        { sector: 'Consumer Goods', percentage: 11.2 },
+        { sector: 'Healthcare', percentage: 8.7 }
+      ],
+      top_holdings: [
+        { company: 'Reliance Industries', percentage: 8.2 },
+        { company: 'TCS', percentage: 6.8 },
+        { company: 'HDFC Bank', percentage: 5.9 },
+        { company: 'Infosys', percentage: 4.7 },
+        { company: 'ICICI Bank', percentage: 4.3 }
+      ],
+      min_investment: 500,
+      risk_level: 'Moderate',
+      fund_manager: 'SBI Mutual Fund',
+      aum: '₹45,000 Cr',
+      inception_date: '2010-05-15',
+      benchmark: 'S&P BSE 100'
+    };
+
+    res.json({
+      success: true,
+      product: productDetails
+    });
+
+  } catch (error) {
+    console.error('Error fetching product details:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch product details' 
+    });
+  }
+});
+
+// =============================================================================
+// INVESTMENT ORDER ROUTES
+// =============================================================================
+
+// Create investment order
+app.post('/api/investment/order', authenticateToken, async (req, res) => {
+  try {
+    const { 
+      productId, 
+      investmentType, // 'SIP' or 'LUMPSUM'
+      amount, 
+      frequency, // For SIP: 'MONTHLY', 'QUARTERLY', 'YEARLY'
+      sipDate, // For SIP: date of month (1-28)
+      duration // For SIP: duration in months
+    } = req.body;
+
+    const customerId = req.user.customerId || req.user.id;
+    
+    // Validation
+    if (!productId || !investmentType || !amount) {
+      return res.status(400).json({
+        success: false,
+        message: 'Product ID, investment type, and amount are required'
+      });
+    }
+
+    if (investmentType === 'SIP' && (!frequency || !sipDate)) {
+      return res.status(400).json({
+        success: false,
+        message: 'SIP frequency and date are required for SIP investments'
+      });
+    }
+
+    if (amount < 500) {
+      return res.status(400).json({
+        success: false,
+        message: 'Minimum investment amount is ₹500'
+      });
+    }
+
+    const db = mongoClient.db('financeai');
+    
+    // Generate order ID
+    const lastOrder = await db.collection('investment_orders').findOne({}, { sort: { order_id: -1 } });
+    const newOrderId = lastOrder ? lastOrder.order_id + 1 : 100001;
+
+    // Create order object
+    const order = {
+      order_id: newOrderId,
+      customer_id: parseInt(customerId),
+      product_id: productId,
+      investment_type: investmentType,
+      amount: parseFloat(amount),
+      frequency: frequency || null,
+      sip_date: sipDate || null,
+      duration: duration || null,
+      status: 'PENDING',
+      payment_status: 'PENDING',
+      created_at: new Date(),
+      updated_at: new Date(),
+      payment_gateway_id: null,
+      transaction_id: null
+    };
+
+    // Insert order
+    const result = await db.collection('investment_orders').insertOne(order);
+    
+    // Generate payment gateway session
+    const paymentSession = {
+      order_id: newOrderId,
+      amount: amount,
+      currency: 'INR',
+      payment_id: `PAY_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      created_at: new Date(),
+      expires_at: new Date(Date.now() + 15 * 60 * 1000) // 15 minutes
+    };
+
+    res.json({
+      success: true,
+      order: {
+        ...order,
+        _id: result.insertedId
+      },
+      payment_session: paymentSession,
+      message: 'Order created successfully. Proceed to payment.'
+    });
+
+  } catch (error) {
+    console.error('Error creating investment order:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create investment order'
+    });
+  }
+});
+
+// =============================================================================
+// PAYMENT GATEWAY SIMULATION
+// =============================================================================
+
+// Generate OTP for payment
+app.post('/api/payment/generate-otp', authenticateToken, async (req, res) => {
+  try {
+    const { payment_id, mobile_number } = req.body;
+    
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000);
+    
+    // Store OTP in database (with expiration)
+    const db = mongoClient.db('financeai');
+    await db.collection('payment_otps').insertOne({
+      payment_id,
+      mobile_number,
+      otp: otp.toString(),
+      created_at: new Date(),
+      expires_at: new Date(Date.now() + 5 * 60 * 1000), // 5 minutes
+      verified: false
+    });
+
+    // In real implementation, you would send SMS here
+    console.log(`OTP for payment ${payment_id}: ${otp}`);
+
+    res.json({
+      success: true,
+      message: 'OTP sent successfully',
+      // For demo purposes, we'll return the OTP
+      demo_otp: otp
+    });
+
+  } catch (error) {
+    console.error('Error generating OTP:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate OTP'
+    });
+  }
+});
+
+// Verify OTP and process payment
+app.post('/api/payment/verify-otp', authenticateToken, async (req, res) => {
+  try {
+    const { payment_id, otp, order_id } = req.body;
+    
+    const db = mongoClient.db('financeai');
+    
+    // Verify OTP
+    const otpRecord = await db.collection('payment_otps').findOne({
+      payment_id,
+      otp,
+      verified: false,
+      expires_at: { $gt: new Date() }
+    });
+
+    if (!otpRecord) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired OTP'
+      });
+    }
+
+    // Mark OTP as verified
+    await db.collection('payment_otps').updateOne(
+      { _id: otpRecord._id },
+      { $set: { verified: true, verified_at: new Date() } }
+    );
+
+    // Process payment (simulation)
+    const paymentSuccess = Math.random() > 0.1; // 90% success rate
+
+    if (paymentSuccess) {
+      // Update order status
+      await db.collection('investment_orders').updateOne(
+        { order_id: parseInt(order_id) },
+        { 
+          $set: { 
+            status: 'CONFIRMED',
+            payment_status: 'COMPLETED',
+            transaction_id: `TXN_${Date.now()}`,
+            updated_at: new Date()
+          }
+        }
+      );
+
+      // Create investment record
+      const order = await db.collection('investment_orders').findOne({ order_id: parseInt(order_id) });
+      
+      if (order && order.investment_type === 'SIP') {
+        // Create SIP record
+        await db.collection('sip_investments').insertOne({
+          customer_id: order.customer_id,
+          product_id: order.product_id,
+          order_id: order.order_id,
+          amount: order.amount,
+          frequency: order.frequency,
+          sip_date: order.sip_date,
+          duration: order.duration,
+          status: 'ACTIVE',
+          next_deduction: calculateNextSIPDate(order.sip_date, order.frequency),
+          created_at: new Date(),
+          updated_at: new Date()
+        });
+      }
+
+      res.json({
+        success: true,
+        message: 'Payment successful! Your investment has been confirmed.',
+        transaction_id: `TXN_${Date.now()}`,
+        order_status: 'CONFIRMED'
+      });
+
+    } else {
+      // Payment failed
+      await db.collection('investment_orders').updateOne(
+        { order_id: parseInt(order_id) },
+        { 
+          $set: { 
+            status: 'FAILED',
+            payment_status: 'FAILED',
+            updated_at: new Date()
+          }
+        }
+      );
+
+      res.status(400).json({
+        success: false,
+        message: 'Payment failed. Please try again.',
+        order_status: 'FAILED'
+      });
+    }
+
+  } catch (error) {
+    console.error('Error verifying OTP:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to verify OTP'
+    });
+  }
+});
+
+// =============================================================================
+// SIP MANAGEMENT ROUTES
+// =============================================================================
+
+// Get user's SIP investments
+app.get('/api/sip/investments', authenticateToken, async (req, res) => {
+  try {
+    const customerId = req.user.customerId || req.user.id;
+    const db = mongoClient.db('financeai');
+
+    const sipInvestments = await db.collection('sip_investments').find({
+      customer_id: parseInt(customerId)
+    }).toArray();
+
+    // Enrich with product details
+    const enrichedSIPs = await Promise.all(
+      sipInvestments.map(async (sip) => {
+        // In real app, fetch product details
+        const productDetails = {
+          name: 'Sample Fund Name',
+          category: 'Large Cap',
+          nav: 85.67
+        };
+        
+        return {
+          ...sip,
+          product: productDetails,
+          total_invested: sip.amount * calculateCompletedInstallments(sip),
+          next_deduction_formatted: sip.next_deduction.toDateString()
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      sip_investments: enrichedSIPs
+    });
+
+  } catch (error) {
+    console.error('Error fetching SIP investments:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch SIP investments'
+    });
+  }
+});
+
+// Pause SIP
+app.post('/api/sip/pause', authenticateToken, async (req, res) => {
+  try {
+    const { sip_id } = req.body;
+    const customerId = req.user.customerId || req.user.id;
+    const db = mongoClient.db('financeai');
+
+    const result = await db.collection('sip_investments').updateOne(
+      { 
+        _id: new ObjectId(sip_id),
+        customer_id: parseInt(customerId),
+        status: 'ACTIVE'
+      },
+      { 
+        $set: { 
+          status: 'PAUSED',
+          paused_at: new Date(),
+          updated_at: new Date()
+        }
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'SIP not found or already paused'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'SIP paused successfully'
+    });
+
+  } catch (error) {
+    console.error('Error pausing SIP:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to pause SIP'
+    });
+  }
+});
+
+// Resume SIP
+app.post('/api/sip/resume', authenticateToken, async (req, res) => {
+  try {
+    const { sip_id } = req.body;
+    const customerId = req.user.customerId || req.user.id;
+    const db = mongoClient.db('financeai');
+
+    const result = await db.collection('sip_investments').updateOne(
+      { 
+        _id: new ObjectId(sip_id),
+        customer_id: parseInt(customerId),
+        status: 'PAUSED'
+      },
+      { 
+        $set: { 
+          status: 'ACTIVE',
+          resumed_at: new Date(),
+          updated_at: new Date()
+        }
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'SIP not found or not paused'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'SIP resumed successfully'
+    });
+
+  } catch (error) {
+    console.error('Error resuming SIP:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to resume SIP'
+    });
+  }
+});
+
+// Cancel SIP
+app.post('/api/sip/cancel', authenticateToken, async (req, res) => {
+  try {
+    const { sip_id } = req.body;
+    const customerId = req.user.customerId || req.user.id;
+    const db = mongoClient.db('financeai');
+
+    const result = await db.collection('sip_investments').updateOne(
+      { 
+        _id: new ObjectId(sip_id),
+        customer_id: parseInt(customerId),
+        status: { $in: ['ACTIVE', 'PAUSED'] }
+      },
+      { 
+        $set: { 
+          status: 'CANCELLED',
+          cancelled_at: new Date(),
+          updated_at: new Date()
+        }
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'SIP not found or already cancelled'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'SIP cancelled successfully'
+    });
+
+  } catch (error) {
+    console.error('Error cancelling SIP:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to cancel SIP'
+    });
+  }
+});
+
+// Modify SIP
+app.post('/api/sip/modify', authenticateToken, async (req, res) => {
+  try {
+    const { sip_id, new_amount, new_date } = req.body;
+    const customerId = req.user.customerId || req.user.id;
+    const db = mongoClient.db('financeai');
+
+    const updateFields = {
+      updated_at: new Date()
+    };
+
+    if (new_amount) {
+      if (new_amount < 500) {
+        return res.status(400).json({
+          success: false,
+          message: 'Minimum SIP amount is ₹500'
+        });
+      }
+      updateFields.amount = parseFloat(new_amount);
+    }
+
+    if (new_date) {
+      if (new_date < 1 || new_date > 28) {
+        return res.status(400).json({
+          success: false,
+          message: 'SIP date must be between 1 and 28'
+        });
+      }
+      updateFields.sip_date = parseInt(new_date);
+    }
+
+    const result = await db.collection('sip_investments').updateOne(
+      { 
+        _id: new ObjectId(sip_id),
+        customer_id: parseInt(customerId),
+        status: 'ACTIVE'
+      },
+      { $set: updateFields }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'SIP not found or not active'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'SIP modified successfully'
+    });
+
+  } catch (error) {
+    console.error('Error modifying SIP:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to modify SIP'
+    });
+  }
+});
+
+// =============================================================================
+// HELPER FUNCTIONS
+// =============================================================================
+
+function calculateNextSIPDate(sipDate, frequency) {
+  const now = new Date();
+  const nextDate = new Date();
+  
+  switch (frequency) {
+    case 'MONTHLY':
+      nextDate.setDate(sipDate);
+      if (nextDate <= now) {
+        nextDate.setMonth(nextDate.getMonth() + 1);
+      }
+      break;
+    case 'QUARTERLY':
+      nextDate.setDate(sipDate);
+      if (nextDate <= now) {
+        nextDate.setMonth(nextDate.getMonth() + 3);
+      }
+      break;
+    case 'YEARLY':
+      nextDate.setDate(sipDate);
+      if (nextDate <= now) {
+        nextDate.setFullYear(nextDate.getFullYear() + 1);
+      }
+      break;
+  }
+  
+  return nextDate;
+}
+
+function calculateCompletedInstallments(sip) {
+  const startDate = sip.created_at;
+  const currentDate = new Date();
+  
+  let installments = 0;
+  const tempDate = new Date(startDate);
+  
+  while (tempDate <= currentDate) {
+    installments++;
+    switch (sip.frequency) {
+      case 'MONTHLY':
+        tempDate.setMonth(tempDate.getMonth() + 1);
+        break;
+      case 'QUARTERLY':
+        tempDate.setMonth(tempDate.getMonth() + 3);
+        break;
+      case 'YEARLY':
+        tempDate.setFullYear(tempDate.getFullYear() + 1);
+        break;
+    }
+  }
+  
+  return Math.max(0, installments - 1);
+}
+
 app.post('/api/chat', authenticateToken, async (req, res) => {
   try {
     const { chatId, title, message } = req.body;
@@ -494,7 +1197,6 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
     }
     chat.messages.push(userMessage);
     
-    // USE AI CLASSIFICATION INSTEAD OF HARDCODED KEYWORDS
     const queryType = await classifyQueryWithAI(processedMessage);
     console.log('AI classified query as:', queryType);
 
@@ -508,7 +1210,6 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
     let systemPrompt;
     let userData = {};
 
-    // Always fetch user data
     console.log('=== FETCHING USER DATA ===');
     userData = await getUserData(customerId);
     console.log('User data fetched. Orders found:', userData.orders?.length || 0);
@@ -579,8 +1280,7 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
       return res.json(chat);
       
     } else {
-      // Financial query - proceed with your existing system prompt logic
-      systemPrompt = `You are a specialized financial advisor AI assistant designed to provide accurate, concise, and context-aware responses for any finance-related query, even if only 1% related to finance (e.g., stocks, ETFs, mutual funds, financial education, market trends). You handle typos, abbreviations, incomplete sentences, and simple queries like "what is this" or "what is that" if they pertain to finance.
+      systemPrompt = `You are a specialized financial advisor AI assistant designed to provide accurate, concise, and context-aware responses for any finance-related query, even if only 1% related to finance (e.g., stocks, ETFs, mutual funds, financial education, market trends). You handle typos, abbreviations, incomplete sentences, and simple queries like "what is this" or "what is that" if they pertain to finance. You also have investment ordering capabilities.
 
 AUTHORIZATION SCOPE:
 You are authorized to discuss ONLY the following topics:
@@ -664,7 +1364,48 @@ SECURITY REMINDER:
 - Only use the provided financial data for responses.
 - Do not make up or hallucinate financial information.
 - Always base recommendations on actual user data.
-- Maintain confidentiality of user information.`;
+- Maintain confidentiality of user information.
+
+ENHANCED CAPABILITIES:
+1. **Investment Product Recommendations**: Help users discover and select mutual funds
+2. **Investment Order Processing**: Guide users through SIP/Lumpsum investment process
+3. **SIP Management**: Help users manage their existing SIP investments
+4. **Payment Processing**: Assist with payment-related queries
+5. **Portfolio Analysis**: Analyze user's existing investments
+
+INVESTMENT WORKFLOW COMMANDS:
+When users express interest in investing, use these structured responses:
+
+**For Product Discovery:**
+- "I can help you find suitable mutual funds. What's your investment goal? (Growth/Income/Balanced)"
+- "Would you like me to show you top-performing funds in a specific category?"
+
+**For Investment Process:**
+- "Great choice! Would you like to invest via SIP (monthly) or Lumpsum (one-time)?"
+- "For SIP, what amount would you like to invest monthly? (Minimum ₹500)"
+- "On which date of the month would you prefer the SIP deduction? (1-28)"
+
+**For SIP Management:**
+- "I can help you pause, resume, cancel, or modify your existing SIPs."
+- "Your current SIPs: [List active SIPs with details]"
+
+**For Payment Issues:**
+- "Let me help you with your payment. I'll generate a new OTP for you."
+- "Your payment is processing. Please wait for confirmation."
+
+RESPONSE FORMATTING:
+- Always provide clear next steps
+- Include relevant investment details (NAV, returns, risk level)
+- Mention minimum investment amounts
+- Explain SIP vs Lumpsum benefits when relevant
+- Provide actionable buttons/options when possible
+
+CRITICAL GUIDELINES:
+- Never provide investment advice without risk warnings
+- Always mention "Mutual fund investments are subject to market risks"
+- Explain charges and fees transparently
+- Suggest diversification for new investors
+- Recommend consulting a financial advisor for large investments`;
     }
 
     const completion = await openai.chat.completions.create({
@@ -717,7 +1458,7 @@ SECURITY REMINDER:
   }
 });
 
-// DEBUGGING ENDPOINT
+// Debugging Endpoint
 app.get('/api/debug/userdata', authenticateToken, async (req, res) => {
   try {
     const customerId = req.user.customerId || req.user.id;
