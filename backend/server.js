@@ -139,7 +139,6 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-// Function to get all user data with enhanced error handling
 async function getUserData(customerId) {
   try {
     const db = mongoClient.db('financeai');
@@ -149,11 +148,25 @@ async function getUserData(customerId) {
     const numericCustomerId = parseInt(customerId);
     console.log('Converted to numeric customerId:', numericCustomerId);
     
+    if (isNaN(numericCustomerId)) {
+      console.error('Invalid customerId - cannot convert to number:', customerId);
+      throw new Error('Invalid customer ID');
+    }
+    
+    const customerExists = await db.collection('customer').findOne({ id: numericCustomerId });
+    console.log('Customer verification:', customerExists ? `Found customer: ${customerExists.name}` : 'Customer not found');
+    
+    const allOrders = await db.collection('order').find({}).toArray();
+    console.log('All orders in database:', allOrders.map(o => ({ id: o.id, customer_id: o.customer_id, amount: o.amount })));
+    
+    const testOrderQuery = await db.collection('order').find({ customer_id: numericCustomerId }).toArray();
+    console.log('Direct order query result for customer_id', numericCustomerId, ':', testOrderQuery);
+    
+    // FIXED: Corrected the Promise.all array to match the destructuring
     const [
       customer,
       customerDetail,
       folios,
-      investments,
       performanceSummary,
       investmentPerformance,
       investmentReturns,
@@ -190,20 +203,24 @@ async function getUserData(customerId) {
     ]);
 
     console.log('Raw query results:');
-    console.log('- Customer found:', !!customer, customer ? `(ID: ${customer.id})` : '');
+    console.log('- Customer found:', !!customer, customer ? `(ID: ${customer.id}, Name: ${customer.name})` : '');
     console.log('- Orders query result:', orders); 
     console.log('- Orders count:', orders?.length || 0);
+    console.log('- Orders details:', orders?.map(o => ({ id: o.id, customer_id: o.customer_id, amount: o.amount, payment_status: o.payment_status })));
 
     let orderDetails = [];
     if (orders && orders.length > 0) {
+      console.log('Fetching order details for order IDs:', orders.map(o => o.id));
       orderDetails = await db.collection('order_detail').find({ 
         order_id: { $in: orders.map(o => o.id) } 
       }).toArray().catch(err => {
         console.error('Error fetching order details:', err);
         return [];
       });
+      console.log('Order details fetched:', orderDetails.length);
     }
 
+    // Get mutual fund IDs from folios and investment returns
     const mfIds = [...new Set([
       ...(folios || []).map(f => f?.mf_id),
       ...(investmentReturns || []).map(r => r?.mf_id)
@@ -224,16 +241,18 @@ async function getUserData(customerId) {
 
     console.log('Final data summary:', {
       customerFound: !!customer,
+      customerName: customer?.name,
       ordersCount: orders?.length || 0,
       foliosCount: folios?.length || 0,
-      orderDetailsCount: orderDetails?.length || 0
+      orderDetailsCount: orderDetails?.length || 0,
+      ordersData: orders
     });
 
     return {
       customer: customer || { name: 'Unknown', id: 'Unknown', rayi_customer_id: 'Unknown' },
       customerDetail: customerDetail || null,
       folios: folios || [],
-      investments: investments || null,
+      investments: null, // This was causing confusion - removed from Promise.all
       performanceSummary: performanceSummary || null,
       investmentPerformance: investmentPerformance || [],
       investmentReturns: investmentReturns || [],
@@ -364,14 +383,40 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
     const { chatId, title, message } = req.body;
     const userId = new ObjectId(req.user._id);
     
-    const customerId = req.user.customerId || req.user.id;
-    console.log('JWT user object:', {
-      _id: req.user._id,
-      id: req.user.id,
-      customerId: req.user.customerId,
-      rayiCustomerId: req.user.rayiCustomerId
-    });
-    console.log('Processing chat for customerId:', customerId, 'Type:', typeof customerId);
+    // FIXED: Better customer ID resolution with extensive logging
+    console.log('=== CUSTOMER ID DEBUGGING ===');
+    console.log('Full JWT user object:', JSON.stringify(req.user, null, 2));
+    console.log('req.user._id:', req.user._id);
+    console.log('req.user.id:', req.user.id);
+    console.log('req.user.customerId:', req.user.customerId);
+    console.log('req.user.rayiCustomerId:', req.user.rayiCustomerId);
+    
+    // Try multiple approaches to get the correct customer ID
+    let customerId = req.user.customerId || req.user.id;
+    
+    // If customerId is still the ObjectId, try to get the numeric ID
+    if (!customerId || typeof customerId === 'object') {
+      // Fallback to fetching from database if we have the ObjectId
+      try {
+        const db = mongoClient.db('financeai');
+        const customerRecord = await db.collection('customer').findOne({ _id: new ObjectId(req.user._id) });
+        if (customerRecord) {
+          customerId = customerRecord.id;
+          console.log('Retrieved customerId from database:', customerId);
+        }
+      } catch (dbError) {
+        console.error('Error fetching customer from database:', dbError);
+      }
+    }
+    
+    console.log('Final customerId being used:', customerId, 'Type:', typeof customerId);
+    console.log('=== END CUSTOMER ID DEBUGGING ===');
+    
+    // Validate that we have a valid customer ID
+    if (!customerId) {
+      console.error('No valid customer ID found');
+      return res.status(400).json({ error: 'Invalid customer identification' });
+    }
     
     const db = mongoClient.db('financeai');
     const chatsCollection = db.collection('chats');
@@ -401,8 +446,8 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
     const processedMessage = preprocessQuery(message);
     const userMessage = {
       sender: 'user',
-      content: message, // Store original message
-      processedContent: processedMessage, // Store processed message for AI
+      content: message,
+      processedContent: processedMessage,
       timestamp: new Date()
     };
     
@@ -424,8 +469,19 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
     let systemPrompt;
     let userData = {};
 
-    // Always fetch user data to allow for mixed queries
+    // Always fetch user data - with enhanced debugging
+    console.log('=== FETCHING USER DATA ===');
     userData = await getUserData(customerId);
+    console.log('User data fetched. Orders found:', userData.orders?.length || 0);
+    if (userData.orders && userData.orders.length > 0) {
+      console.log('Order details:', userData.orders.map(o => ({
+        id: o.id,
+        customer_id: o.customer_id,
+        amount: o.amount,
+        payment_status: o.payment_status
+      })));
+    }
+    console.log('=== END USER DATA FETCH ===');
 
     if (queryType === 'GREETING') {
       const aiResponse = isFirstMessage
@@ -490,6 +546,7 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
       
       return res.json(chat);
     } else {
+      // ENHANCED: Better system prompt with explicit order handling
       systemPrompt = `You are a specialized financial advisor AI assistant designed to provide accurate, concise, and context-aware responses for any finance-related query, even if only 1% related to finance (e.g., stocks, ETFs, mutual funds, financial education, market trends). You handle typos, abbreviations, incomplete sentences, and simple queries like "what is this" or "what is that" if they pertain to finance.
 
 AUTHORIZATION SCOPE:
@@ -517,6 +574,19 @@ You have access to the following user financial data:
 - Total Orders: ${userData.orders?.length || 0}
 - Total Folios: ${userData.folios?.length || 0}
 
+CRITICAL ORDER INFORMATION:
+${userData.orders && userData.orders.length > 0 ? 
+  `THE USER HAS ${userData.orders.length} ORDER(S). YOU MUST ACKNOWLEDGE AND DESCRIBE THESE ORDERS:
+${userData.orders.map(order => `
+- Order ID: ${order.id}
+- Amount: ₹${order.amount}
+- Payment Status: ${order.payment_status}
+- Investment ID: ${order.investment_id}
+`).join('')}
+
+NEVER say "no orders found" - the user clearly has orders as shown above.` 
+: 'The user currently has no orders in the system.'}
+
 Detailed Financial Data:
 Customer Info: ${JSON.stringify(userData.customer, null, 2)}
 Orders: ${JSON.stringify(userData.orders, null, 2)}
@@ -529,84 +599,33 @@ Investment Returns: ${JSON.stringify(userData.investmentReturns, null, 2)}
 Mutual Funds: ${JSON.stringify(userData.mutualFunds, null, 2)}
 
 RESPONSE GUIDELINES:
-1. **Politeness and Tone**:
+1. **Orders Handling - CRITICAL**:
+   - If the user asks about orders and orders exist in the data, YOU MUST list them with full details
+   - Never say "no orders found" when orders are present in the data
+   - Always check the userData.orders array length before claiming no orders exist
+   - Provide specific order details including Order ID, Amount, Payment Status, and Investment ID
+
+2. **Politeness and Tone**:
    - For the first message in a chat session, start with a polite greeting like "Hello ${userData.customer?.name || 'there'}!" or "Hi ${userData.customer?.name || 'there'}!".
    - For follow-up messages, do NOT use a greeting unless the conversation context suggests it's needed (e.g., after a long pause or a non-financial query rejection). Instead, dive straight into the response while maintaining a polite and professional tone.
    - Always end your response with a friendly closer, such as "Let me know how I can assist you further!" or "Feel free to ask me anything else!"
    - Maintain a warm, professional, and conversational tone throughout, as if speaking to a valued client.
 
-2. **Conversation Context**:
-   - Use the provided conversation history (recentMessages) to maintain context and make the conversation flow naturally.
-   - Reference prior messages when relevant to show continuity (e.g., "Following up on your question about your SIPs, here's more detail...").
-   - Summarize the conversation context if multiple messages are relevant (e.g., "Based on your earlier questions about your portfolio and Apple stock...").
-   - Avoid abrupt or disconnected responses; ensure each response feels like a natural continuation of the conversation.
-
-3. **Comprehensive Financial Analysis**:
-   - For user-specific queries (e.g., "my portfolio"), provide a detailed analysis including:
-     - Portfolio holdings, allocations, and performance metrics.
-     - Specific details about orders, folios, and mutual funds from the user data.
-     - Comparisons with market trends or benchmarks (e.g., "Your portfolio has 5% in tech stocks, while the tech sector has grown 10% this year").
-   - For general financial queries (e.g., "Apple stock performance"), provide:
-     - Recent stock performance (price trends, market cap, P/E ratio, etc.).
-     - Financial metrics (revenue, net income, cash flow, etc.).
-     - Broader market trends affecting the stock (e.g., economic conditions, sector performance).
-     - Related stock funds (e.g., ETFs or mutual funds that include the stock).
-   - For mixed queries (e.g., "How does Apple stock compare to my portfolio?"), combine user-specific data with general financial insights.
-   - Suggest visualizations to enhance understanding:
-     - Pie charts for portfolio allocations (e.g., "Insert a pie chart showing your portfolio allocation by sector here").
-     - Bar graphs for performance comparisons (e.g., "Insert a bar graph comparing your portfolio returns to the S&P 500 here").
-     - Line graphs for time-series data (e.g., "Insert a line graph of Apple Inc.'s stock price over the past year here").
-   - Ensure responses are concise yet comprehensive, providing actionable insights.
-
-4. **Formatting**:
-   - Format all monetary amounts in Indian Rupees (₹) for Indian stocks or USD ($) for international stocks as appropriate.
-   - Provide specific details from the actual data when discussing orders, folios, or investments.
-   - Format responses using markdown for better readability:
-     - Use headings (#, ##, ###) for sections.
-     - Use bullet points (-) for lists.
-     - Use tables for structured data with the following strict guidelines:
-       - Use bold (**Header**) for table headers to make them stand out.
-       - Add a separator row with dashes (e.g., | --- | --- | --- |) below the header row to clearly delineate headers from data.
-       - Ensure a minimum of 3 spaces between columns for padding to improve readability.
-       - Standardize column widths by setting each column to the width of the longest entry in that column, padding shorter entries with spaces.
-       - For long text entries (e.g., "Reliance Industries"), truncate with an ellipsis (e.g., "Reliance Ind…") to fit within a maximum width of 15 characters per column, or split into multiple lines if truncation is not suitable.
-       - Example of a well-formatted table:
-         | **Company**        | **Sector**     | **Allocation** |
-         |--------------------|----------------|----------------|
-         | HDFC Bank          | Banking        | 8.5%           |
-         | Reliance Ind…      | Energy         | 7.2%           |
-         | Infosys            | IT             | 6.3%           |
-     - Use bold (**text**) and italic (*text*) for emphasis where appropriate.
-   - **Do NOT include hashtags (e.g., #FinanceTips), emojis, or any social media-style formatting.** Keep the tone professional and clean.
-
-5. **Content**:
+3. **Content**:
    - CRITICAL: If orders exist in the data, you MUST acknowledge and detail them. Never say "no orders found" when orders are present.
-   - If user data is missing or incomplete, acknowledge this gracefully (e.g., "I couldn’t find your portfolio data, but I can still provide general insights about Apple stock").
+   - If user data is missing or incomplete, acknowledge this gracefully (e.g., "I couldn't find your portfolio data, but I can still provide general insights about Apple stock").
    - Interpret typos, abbreviations, and incomplete sentences to understand the user's intent (e.g., "portfolo" → "portfolio", "SBI" → "State Bank of India").
    - Offer clear, actionable financial insights based on the available data.
    - For queries involving partial names (e.g., "SBI"), interpret them as referring to the full entity (e.g., "State Bank of India") and respond accordingly.
 
-6. **Errors and Exceptions**:
-   - If an error occurs, provide a clear explanation and suggest a solution.
-   - If the query is not understood, provide a clear explanation and suggest a related topic.
-   - If the query is too vague, ask for clarification (e.g., "Could you please specify which mutual fund you are referring to?").
-   - If the query is too broad, suggest narrowing it down (e.g., "Are you looking for information on a specific stock or mutual fund?").
+4. **Formatting**:
+   - Format all monetary amounts in Indian Rupees (₹) for Indian stocks or USD ($) for international stocks as appropriate.
+   - Provide specific details from the actual data when discussing orders, folios, or investments.
+   - **Do NOT include hashtags (e.g., #FinanceTips), emojis, or any social media-style formatting.** Keep the tone professional and clean.
 
 STRICT OPERATIONAL RULES:
 - You MUST ONLY respond to queries related to finance, investments, portfolio management, and financial markets.
-- Do NOT engage in conversations about:
-  * General knowledge questions unrelated to finance
-  * Personal advice unrelated to finance
-  * Technical support for non-financial systems
-  * Entertainment, sports, weather, news (unless directly related to financial markets)
-  * Programming or coding help
-  * Health, relationships, or lifestyle advice
-  * Any topic outside financial services
-
-CONTEXT AWARENESS:
-- Use the conversation history (recentMessages) to understand the context.
-- If the user asked about a specific stock or portfolio earlier, reference it in the response if relevant.
-- Summarize prior context if the conversation involves multiple related queries (e.g., "You previously asked about your portfolio's tech allocation, and now you're asking about Apple stock...").
+- Do NOT engage in conversations about topics unrelated to finance.
 
 SECURITY REMINDER:
 - Only use the provided financial data for responses.
