@@ -328,75 +328,114 @@ function preprocessQuery(message) {
   return processedMessage;
 }
 
-// Function to classify the query
-function classifyQuery(message) {
-  const lowerMessage = message.toLowerCase().trim();
-  
-  // Detect greetings
-  const greetings = ['hi', 'hello', 'hey', 'thank', 'thanks', 'thx', 'hii', 'helo'];
-  const isGreeting = greetings.some(g => lowerMessage.startsWith(g) || lowerMessage === g);
-  
-  if (isGreeting) {
-    return 'GREETING';
-  }
 
-  // Map partial entity names to full names
-  let expandedMessage = lowerMessage;
-  Object.keys(entityMapping).forEach(key => {
-    if (lowerMessage.includes(key)) {
-      expandedMessage = expandedMessage.replace(new RegExp(`\\b${key}\\b`, 'gi'), entityMapping[key]);
-    }
-  });
-
-  // Keywords indicating a user-specific financial query
-  const userSpecificKeywords = [
-    'my portfolio', 'my sip', 'my investments', 'my orders', 'my balance',
-    'my transactions', 'my account', 'my mutual funds', 'my returns',
-    'my performance', 'my folios'
-  ];
-
-  // Expanded keywords for general financial queries
-  const generalFinancialKeywords = [
-    'mutual fund', 'sip', 'investment', 'portfolio', 'returns', 'performance',
-    'market', 'stocks', 'shares', 'bonds', 'equity', 'debt', 'tax', 'financial planning',
-    'risk', 'strategy', 'reliance', 'hdf mutual fund', 'state bank of india', 'apple inc.',
-    'stock price', 'market cap', 'dividend', 'etf', 'fund', 'trade', 'growth', 'value', 
-    'sector', 'nasdaq', 'dow jones', 's&p 500', 'economy', 'interest rates', 'inflation', 'recession'
-  ];
-
-  const isUserSpecific = userSpecificKeywords.some(keyword => expandedMessage.includes(keyword));
-  const isFinancial = generalFinancialKeywords.some(keyword => expandedMessage.includes(keyword)) || isUserSpecific;
-
-  if (!isFinancial) {
-    return 'NON-FINANCIAL';
-  }
-  return isUserSpecific ? 'USER-SPECIFIC-FINANCIAL' : 'GENERAL-FINANCIAL';
-}
 
 // Function to strip hashtags from AI response
 function stripHashtags(response) {
   return response.replace(/#[^\s]+/g, '');
 }
 
+// AI-powered function to classify the query using OpenAI
+async function classifyQueryWithAI(message) {
+  try {
+    const classificationPrompt = `You are a query classifier for a financial advisor AI assistant. 
+
+Your task is to classify the following user query into exactly ONE of these categories:
+
+1. "GREETING" - Simple greetings like "hi", "hello", "hey", "thanks", "thank you"
+2. "USER-SPECIFIC-FINANCIAL" - Questions about the user's personal financial data like "my portfolio", "my investments", "my orders", "my SIP", "my returns", "my balance"
+3. "GENERAL-FINANCIAL" - Any finance-related questions including:
+   - Investment scenarios ("what if I invested...")
+   - Mutual fund questions
+   - Stock market queries
+   - Financial planning
+   - Investment advice
+   - Market analysis
+   - Fund performance
+   - Financial education
+   - Tax implications
+   - Any question about specific companies, funds, or financial instruments
+4. "NON-FINANCIAL" - Questions completely unrelated to finance, investments, or money
+
+IMPORTANT RULES:
+- If a query has even 1% relation to finance, stocks, investments, or money, classify it as financial
+- Investment scenarios like "what if I had invested X in Y fund Z years ago" are GENERAL-FINANCIAL
+- Questions about specific mutual funds, stocks, or companies are GENERAL-FINANCIAL
+- Only classify as NON-FINANCIAL if the query has absolutely no connection to finance
+
+User query: "${message}"
+
+Respond with ONLY the category name (GREETING, USER-SPECIFIC-FINANCIAL, GENERAL-FINANCIAL, or NON-FINANCIAL). Do not include any explanation.`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4.1", // Using faster, cheaper model for classification
+      messages: [
+        { role: "user", content: classificationPrompt }
+      ],
+      max_tokens: 50,
+      temperature: 0.1, // Low temperature for consistent classification
+    });
+
+    const classification = completion.choices[0].message.content.trim().toUpperCase();
+    
+    // Validate the response
+    const validCategories = ['GREETING', 'USER-SPECIFIC-FINANCIAL', 'GENERAL-FINANCIAL', 'NON-FINANCIAL'];
+    if (!validCategories.includes(classification)) {
+      console.warn(`Invalid classification received: ${classification}. Defaulting to GENERAL-FINANCIAL`);
+      return 'GENERAL-FINANCIAL'; // Safe default for edge cases
+    }
+    
+    console.log(`AI Classification: "${message}" -> ${classification}`);
+    return classification;
+    
+  } catch (error) {
+    console.error('Error in AI classification:', error);
+    // Fallback to simple keyword-based classification if AI fails
+    return fallbackClassifyQuery(message);
+  }
+}
+
+// Fallback classification function (simplified version of your original)
+function fallbackClassifyQuery(message) {
+  const lowerMessage = message.toLowerCase().trim();
+  
+  // Detect greetings
+  const greetings = ['hi', 'hello', 'hey', 'thank', 'thanks', 'thx'];
+  const isGreeting = greetings.some(g => lowerMessage.startsWith(g) || lowerMessage === g);
+  
+  if (isGreeting) {
+    return 'GREETING';
+  }
+
+  // Basic financial keywords for fallback
+  const financialKeywords = [
+    'invest', 'investment', 'portfolio', 'fund', 'stock', 'share', 'money', 'rupee',
+    'lakh', 'crore', 'market', 'financial', 'finance', 'mutual', 'sip', 'return',
+    'my portfolio', 'my investment', 'my order'
+  ];
+
+  const hasFinancialKeyword = financialKeywords.some(keyword => lowerMessage.includes(keyword));
+  const hasUserSpecific = lowerMessage.includes('my ');
+  
+  if (!hasFinancialKeyword) {
+    return 'NON-FINANCIAL';
+  }
+  
+  return hasUserSpecific ? 'USER-SPECIFIC-FINANCIAL' : 'GENERAL-FINANCIAL';
+}
+
+// Updated main chat endpoint function - replace the relevant part in your /api/chat route
 app.post('/api/chat', authenticateToken, async (req, res) => {
   try {
     const { chatId, title, message } = req.body;
     const userId = new ObjectId(req.user._id);
     
-    // FIXED: Better customer ID resolution with extensive logging
     console.log('=== CUSTOMER ID DEBUGGING ===');
     console.log('Full JWT user object:', JSON.stringify(req.user, null, 2));
-    console.log('req.user._id:', req.user._id);
-    console.log('req.user.id:', req.user.id);
-    console.log('req.user.customerId:', req.user.customerId);
-    console.log('req.user.rayiCustomerId:', req.user.rayiCustomerId);
     
-    // Try multiple approaches to get the correct customer ID
     let customerId = req.user.customerId || req.user.id;
     
-    // If customerId is still the ObjectId, try to get the numeric ID
     if (!customerId || typeof customerId === 'object') {
-      // Fallback to fetching from database if we have the ObjectId
       try {
         const db = mongoClient.db('financeai');
         const customerRecord = await db.collection('customer').findOne({ _id: new ObjectId(req.user._id) });
@@ -412,7 +451,6 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
     console.log('Final customerId being used:', customerId, 'Type:', typeof customerId);
     console.log('=== END CUSTOMER ID DEBUGGING ===');
     
-    // Validate that we have a valid customer ID
     if (!customerId) {
       console.error('No valid customer ID found');
       return res.status(400).json({ error: 'Invalid customer identification' });
@@ -456,8 +494,9 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
     }
     chat.messages.push(userMessage);
     
-    const queryType = classifyQuery(processedMessage);
-    console.log('Query classified as:', queryType);
+    // USE AI CLASSIFICATION INSTEAD OF HARDCODED KEYWORDS
+    const queryType = await classifyQueryWithAI(processedMessage);
+    console.log('AI classified query as:', queryType);
 
     const recentMessages = chat.messages.slice(-5).map(msg => ({
       role: msg.sender === 'user' ? 'user' : 'assistant',
@@ -469,18 +508,10 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
     let systemPrompt;
     let userData = {};
 
-    // Always fetch user data - with enhanced debugging
+    // Always fetch user data
     console.log('=== FETCHING USER DATA ===');
     userData = await getUserData(customerId);
     console.log('User data fetched. Orders found:', userData.orders?.length || 0);
-    if (userData.orders && userData.orders.length > 0) {
-      console.log('Order details:', userData.orders.map(o => ({
-        id: o.id,
-        customer_id: o.customer_id,
-        amount: o.amount,
-        payment_status: o.payment_status
-      })));
-    }
     console.log('=== END USER DATA FETCH ===');
 
     if (queryType === 'GREETING') {
@@ -514,6 +545,7 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
       }
       
       return res.json(chat);
+      
     } else if (queryType === 'NON-FINANCIAL') {
       const aiResponse = isFirstMessage
         ? `Hello ${userData.customer?.name || 'there'}! I'm your specialized financial advisor assistant, here to assist with your investment portfolio, orders, mutual funds, and other financial matters. It seems your question isn't related to finance. Could you please ask about your investments, portfolio performance, or financial planning needs? I'm happy to help with those!`
@@ -545,8 +577,9 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
       }
       
       return res.json(chat);
+      
     } else {
-      // ENHANCED: Better system prompt with explicit order handling
+      // Financial query - proceed with your existing system prompt logic
       systemPrompt = `You are a specialized financial advisor AI assistant designed to provide accurate, concise, and context-aware responses for any finance-related query, even if only 1% related to finance (e.g., stocks, ETFs, mutual funds, financial education, market trends). You handle typos, abbreviations, incomplete sentences, and simple queries like "what is this" or "what is that" if they pertain to finance.
 
 AUTHORIZATION SCOPE:
@@ -646,8 +679,6 @@ SECURITY REMINDER:
     });
 
     let aiResponse = completion.choices[0].message.content;
-    
-    // Post-process the response to remove any hashtags
     aiResponse = stripHashtags(aiResponse);
     
     const assistantMessage = {
