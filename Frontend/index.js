@@ -529,6 +529,9 @@ function showChatScreen(user) {
     }, 200);
   }
   
+  // Update profile dropdown information
+  updateProfileDropdown(user);
+  
   // Reset chat area to welcome state
   resetChatArea();
   
@@ -597,6 +600,13 @@ function resetChatArea() {
 
 function logout() {
   console.log("Logging out user...");
+  
+  // Close profile dropdown first
+  const dropdown = document.getElementById('profileDropdown');
+  const userMenu = document.querySelector('.user-menu');
+  if (dropdown) dropdown.classList.remove('active');
+  if (userMenu) userMenu.classList.remove('active');
+  
   authToken = null;
   if (typeof localStorage !== 'undefined') {
     localStorage.removeItem("authToken");
@@ -1417,6 +1427,58 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+// Profile dropdown functionality
+function toggleProfileDropdown() {
+  const dropdown = document.getElementById('profileDropdown');
+  const userMenu = document.querySelector('.user-menu');
+  const chevron = document.getElementById('profileChevron');
+  
+  if (!dropdown) return;
+  
+  const isActive = dropdown.classList.contains('active');
+  
+  if (isActive) {
+    dropdown.classList.remove('active');
+    userMenu?.classList.remove('active');
+  } else {
+    dropdown.classList.add('active');
+    userMenu?.classList.add('active');
+  }
+}
+
+// Close profile dropdown when clicking outside
+document.addEventListener('click', function(e) {
+  const dropdown = document.getElementById('profileDropdown');
+  const userMenu = document.querySelector('.user-menu');
+  
+  if (dropdown && !userMenu?.contains(e.target)) {
+    dropdown.classList.remove('active');
+    userMenu?.classList.remove('active');
+  }
+});
+
+// Account settings and preferences (placeholder functions)
+function showAccountSettings() {
+  toggleProfileDropdown();
+  showNotification('Account settings coming soon!', 'info');
+}
+
+function showPreferences() {
+  toggleProfileDropdown();
+  showNotification('Preferences coming soon!', 'info');
+}
+
+// Update profile information in dropdown
+function updateProfileDropdown(user) {
+  const profileName = document.getElementById('profileName');
+  const profileEmail = document.getElementById('profileEmail');
+  const profileAvatar = document.getElementById('profileAvatar');
+  
+  if (profileName) profileName.textContent = sanitizeInput(user.name);
+  if (profileEmail) profileEmail.textContent = sanitizeInput(user.email || 'user@example.com');
+  if (profileAvatar) profileAvatar.textContent = sanitizeInput(user.name.charAt(0).toUpperCase());
+}
+
 // Make functions globally available for onclick handlers
 window.switchToSignup = switchToSignup;
 window.switchToLogin = switchToLogin;
@@ -1425,3 +1487,6 @@ window.toggleSidebar = toggleSidebar;
 window.sendQuickMessage = sendQuickMessage;
 window.startNewChat = startNewChat;
 window.closeSidebar = closeSidebar;
+window.toggleProfileDropdown = toggleProfileDropdown;
+window.showAccountSettings = showAccountSettings;
+window.showPreferences = showPreferences;

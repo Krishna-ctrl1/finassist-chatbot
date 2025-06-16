@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <meta name="theme-color" content="#202123">
+    <meta name="theme-color" content="#ffffff">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <title>FinanceAI - Your Personal Financial Assistant</title>
     <meta name="description" content="Advanced AI-powered financial assistant for investment management, portfolio tracking, and financial planning.">
     <meta name="keywords" content="finance, AI, investment, portfolio, SIP, financial planning">
@@ -110,13 +110,43 @@
                         </div>
                     </div>
                     <div class="chat-header-right">
-                        <div class="user-menu">
+                        <div class="user-menu" onclick="toggleProfileDropdown()" role="button" tabindex="0" onkeydown="if(event.key === 'Enter') toggleProfileDropdown()">
                             <div class="user-avatar" id="userInitials">U</div>
-                            <span id="userName">User</span>
+                            <span class="user-name" id="userName">User</span>
+                            <i class="fas fa-chevron-down profile-chevron" id="profileChevron"></i>
                         </div>
-                        <button class="logout-btn" onclick="logout()" title="Logout" aria-label="Logout">
-                            <i class="fas fa-sign-out-alt"></i>
-                        </button>
+                        
+                        <!-- Profile Dropdown -->
+                        <div class="profile-dropdown" id="profileDropdown">
+                            <div class="profile-dropdown-content">
+                                <div class="profile-header">
+                                    <div class="profile-avatar" id="profileAvatar">U</div>
+                                    <div class="profile-info">
+                                        <h3 id="profileName">User</h3>
+                                        <p id="profileEmail">user@example.com</p>
+                                    </div>
+                                </div>
+                                
+                                <div class="profile-menu">
+                                    <button class="profile-menu-item" onclick="showAccountSettings()">
+                                        <i class="fas fa-user-cog"></i>
+                                        <span>Account Settings</span>
+                                    </button>
+                                    
+                                    <button class="profile-menu-item" onclick="showPreferences()">
+                                        <i class="fas fa-cog"></i>
+                                        <span>Preferences</span>
+                                    </button>
+                                    
+                                    <hr class="profile-divider">
+                                    
+                                    <button class="profile-menu-item logout-item" onclick="logout()">
+                                        <i class="fas fa-sign-out-alt"></i>
+                                        <span>Log out</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="chat-messages" id="chatMessages">
