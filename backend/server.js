@@ -326,8 +326,6 @@ function preprocessQuery(message) {
   return processedMessage;
 }
 
-
-
 // Function to strip hashtags from AI response
 function stripHashtags(response) {
   return response.replace(/#[^\s]+/g, '');
@@ -387,7 +385,6 @@ Respond with ONLY the category name (GREETING, USER-SPECIFIC-FINANCIAL, GENERAL-
     
   } catch (error) {
     console.error('Error in AI classification:', error);
-    // Fallback to simple keyword-based classification if AI fails
     return fallbackClassifyQuery(message);
   }
 }
@@ -396,7 +393,6 @@ Respond with ONLY the category name (GREETING, USER-SPECIFIC-FINANCIAL, GENERAL-
 function fallbackClassifyQuery(message) {
   const lowerMessage = message.toLowerCase().trim();
   
-  // Detect greetings
   const greetings = ['hi', 'hello', 'hey', 'thank', 'thanks', 'thx'];
   const isGreeting = greetings.some(g => lowerMessage.startsWith(g) || lowerMessage === g);
   
@@ -404,7 +400,6 @@ function fallbackClassifyQuery(message) {
     return 'GREETING';
   }
 
-  // Basic financial keywords for fallback
   const financialKeywords = [
     'invest', 'investment', 'portfolio', 'fund', 'stock', 'share', 'money', 'rupee',
     'lakh', 'crore', 'market', 'financial', 'finance', 'mutual', 'sip', 'return',
@@ -425,12 +420,10 @@ function fallbackClassifyQuery(message) {
 // INVESTMENT PRODUCT ROUTES
 // =============================================================================
 
-// Get available mutual funds from Alpha Vantage
 app.get('/api/investment/products', authenticateToken, async (req, res) => {
   try {
     const { category = 'all', search = '' } = req.query;
     
-    // Sample mutual fund data (you can replace with real API calls)
     const sampleMutualFunds = [
       {
         id: 'MF001',
@@ -506,14 +499,12 @@ app.get('/api/investment/products', authenticateToken, async (req, res) => {
 
     let filteredFunds = sampleMutualFunds;
 
-    // Filter by category
     if (category !== 'all') {
       filteredFunds = filteredFunds.filter(fund => 
         fund.category.toLowerCase().includes(category.toLowerCase())
       );
     }
 
-    // Filter by search term
     if (search) {
       filteredFunds = filteredFunds.filter(fund =>
         fund.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -536,13 +527,10 @@ app.get('/api/investment/products', authenticateToken, async (req, res) => {
   }
 });
 
-// Get detailed product information
 app.get('/api/investment/products/:productId', authenticateToken, async (req, res) => {
   try {
     const { productId } = req.params;
     
-    // In a real application, you would fetch this from your database or external API
-    // For now, we'll simulate with sample data
     const productDetails = {
       id: productId,
       name: 'SBI Bluechip Fund',
@@ -599,7 +587,6 @@ app.get('/api/investment/products/:productId', authenticateToken, async (req, re
 // INVESTMENT ORDER ROUTES
 // =============================================================================
 
-// Create investment order
 app.post('/api/investment/order', authenticateToken, async (req, res) => {
   try {
     const { 
@@ -613,7 +600,6 @@ app.post('/api/investment/order', authenticateToken, async (req, res) => {
 
     const customerId = req.user.customerId || req.user.id;
     
-    // Validation
     if (!productId || !investmentType || !amount) {
       return res.status(400).json({
         success: false,
@@ -637,11 +623,9 @@ app.post('/api/investment/order', authenticateToken, async (req, res) => {
 
     const db = mongoClient.db('financeai');
     
-    // Generate order ID
     const lastOrder = await db.collection('investment_orders').findOne({}, { sort: { order_id: -1 } });
     const newOrderId = lastOrder ? lastOrder.order_id + 1 : 100001;
 
-    // Create order object
     const order = {
       order_id: newOrderId,
       customer_id: parseInt(customerId),
@@ -659,10 +643,8 @@ app.post('/api/investment/order', authenticateToken, async (req, res) => {
       transaction_id: null
     };
 
-    // Insert order
     const result = await db.collection('investment_orders').insertOne(order);
     
-    // Generate payment gateway session
     const paymentSession = {
       order_id: newOrderId,
       amount: amount,
@@ -695,15 +677,12 @@ app.post('/api/investment/order', authenticateToken, async (req, res) => {
 // PAYMENT GATEWAY SIMULATION
 // =============================================================================
 
-// Generate OTP for payment
 app.post('/api/payment/generate-otp', authenticateToken, async (req, res) => {
   try {
     const { payment_id, mobile_number } = req.body;
     
-    // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000);
     
-    // Store OTP in database (with expiration)
     const db = mongoClient.db('financeai');
     await db.collection('payment_otps').insertOne({
       payment_id,
@@ -714,13 +693,11 @@ app.post('/api/payment/generate-otp', authenticateToken, async (req, res) => {
       verified: false
     });
 
-    // In real implementation, you would send SMS here
     console.log(`OTP for payment ${payment_id}: ${otp}`);
 
     res.json({
       success: true,
       message: 'OTP sent successfully',
-      // For demo purposes, we'll return the OTP
       demo_otp: otp
     });
 
@@ -733,14 +710,12 @@ app.post('/api/payment/generate-otp', authenticateToken, async (req, res) => {
   }
 });
 
-// Verify OTP and process payment
 app.post('/api/payment/verify-otp', authenticateToken, async (req, res) => {
   try {
     const { payment_id, otp, order_id } = req.body;
     
     const db = mongoClient.db('financeai');
     
-    // Verify OTP
     const otpRecord = await db.collection('payment_otps').findOne({
       payment_id,
       otp,
@@ -755,17 +730,14 @@ app.post('/api/payment/verify-otp', authenticateToken, async (req, res) => {
       });
     }
 
-    // Mark OTP as verified
     await db.collection('payment_otps').updateOne(
       { _id: otpRecord._id },
       { $set: { verified: true, verified_at: new Date() } }
     );
 
-    // Process payment (simulation)
     const paymentSuccess = Math.random() > 0.1; // 90% success rate
 
     if (paymentSuccess) {
-      // Update order status
       await db.collection('investment_orders').updateOne(
         { order_id: parseInt(order_id) },
         { 
@@ -778,11 +750,9 @@ app.post('/api/payment/verify-otp', authenticateToken, async (req, res) => {
         }
       );
 
-      // Create investment record
       const order = await db.collection('investment_orders').findOne({ order_id: parseInt(order_id) });
       
       if (order && order.investment_type === 'SIP') {
-        // Create SIP record
         await db.collection('sip_investments').insertOne({
           customer_id: order.customer_id,
           product_id: order.product_id,
@@ -806,7 +776,6 @@ app.post('/api/payment/verify-otp', authenticateToken, async (req, res) => {
       });
 
     } else {
-      // Payment failed
       await db.collection('investment_orders').updateOne(
         { order_id: parseInt(order_id) },
         { 
@@ -838,7 +807,6 @@ app.post('/api/payment/verify-otp', authenticateToken, async (req, res) => {
 // SIP MANAGEMENT ROUTES
 // =============================================================================
 
-// Get user's SIP investments
 app.get('/api/sip/investments', authenticateToken, async (req, res) => {
   try {
     const customerId = req.user.customerId || req.user.id;
@@ -848,10 +816,8 @@ app.get('/api/sip/investments', authenticateToken, async (req, res) => {
       customer_id: parseInt(customerId)
     }).toArray();
 
-    // Enrich with product details
     const enrichedSIPs = await Promise.all(
       sipInvestments.map(async (sip) => {
-        // In real app, fetch product details
         const productDetails = {
           name: 'Sample Fund Name',
           category: 'Large Cap',
@@ -881,7 +847,6 @@ app.get('/api/sip/investments', authenticateToken, async (req, res) => {
   }
 });
 
-// Pause SIP
 app.post('/api/sip/pause', authenticateToken, async (req, res) => {
   try {
     const { sip_id } = req.body;
@@ -924,7 +889,6 @@ app.post('/api/sip/pause', authenticateToken, async (req, res) => {
   }
 });
 
-// Resume SIP
 app.post('/api/sip/resume', authenticateToken, async (req, res) => {
   try {
     const { sip_id } = req.body;
@@ -967,7 +931,6 @@ app.post('/api/sip/resume', authenticateToken, async (req, res) => {
   }
 });
 
-// Cancel SIP
 app.post('/api/sip/cancel', authenticateToken, async (req, res) => {
   try {
     const { sip_id } = req.body;
@@ -1010,7 +973,6 @@ app.post('/api/sip/cancel', authenticateToken, async (req, res) => {
   }
 });
 
-// Modify SIP
 app.post('/api/sip/modify', authenticateToken, async (req, res) => {
   try {
     const { sip_id, new_amount, new_date } = req.body;
@@ -1200,12 +1162,28 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
     const queryType = await classifyQueryWithAI(processedMessage);
     console.log('AI classified query as:', queryType);
 
-    const recentMessages = chat.messages.slice(-5).map(msg => ({
+    const recentMessages = chat.messages.slice(-3).map(msg => ({
       role: msg.sender === 'user' ? 'user' : 'assistant',
       content: msg.processedContent || msg.content
     }));
 
     const isFirstMessage = chat.messages.length === 1;
+
+    let maxTokens;
+    switch (queryType) {
+      case 'GREETING':
+      case 'NON-FINANCIAL':
+        maxTokens = 150;
+        break;
+      case 'USER-SPECIFIC-FINANCIAL':
+        maxTokens = processedMessage.includes('details') ? 500 : 300;
+        break;
+      case 'GENERAL-FINANCIAL':
+        maxTokens = processedMessage.includes('analysis') || processedMessage.includes('recommend') ? 600 : 400;
+        break;
+      default:
+        maxTokens = 300;
+    }
 
     let systemPrompt;
     let userData = {};
@@ -1217,8 +1195,8 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
 
     if (queryType === 'GREETING') {
       const aiResponse = isFirstMessage
-        ? `Hello ${userData.customer?.name || 'there'}! I'm your specialized financial advisor assistant, ready to help with your investment portfolio, mutual funds, or financial planning. How can I assist you today?`
-        : `Hi again! Thanks for reaching out. What's on your mind regarding your investments or financial questions?`;
+        ? `Hello ${userData.customer?.name || 'there'}! I'm your financial advisor, here to help with investments or portfolio queries. How can I assist you today?`
+        : `Hi again! What's on your mind about your investments? Need help with orders or funds?`;
       
       const assistantMessage = {
         sender: 'assistant',
@@ -1249,8 +1227,8 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
       
     } else if (queryType === 'NON-FINANCIAL') {
       const aiResponse = isFirstMessage
-        ? `Hello ${userData.customer?.name || 'there'}! I'm your specialized financial advisor assistant, here to assist with your investment portfolio, orders, mutual funds, and other financial matters. It seems your question isn't related to finance. Could you please ask about your investments, portfolio performance, or financial planning needs? I'm happy to help with those!`
-        : `It seems your question isn't related to finance. Could you please ask about your investments, portfolio performance, or financial planning needs? I'm happy to help with those!`;
+        ? `Hello ${userData.customer?.name || 'there'}! I'm here to assist with your investments or financial planning. Your question seems unrelated—can I help with your portfolio instead?`
+        : `That question isn't about finance. Want to check your orders or explore mutual funds?`;
       
       const assistantMessage = {
         sender: 'assistant',
@@ -1280,27 +1258,36 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
       return res.json(chat);
       
     } else {
-      systemPrompt = `You are a specialized financial advisor AI assistant designed to provide accurate, concise, and context-aware responses for any finance-related query, even if only 1% related to finance (e.g., stocks, ETFs, mutual funds, financial education, market trends). You handle typos, abbreviations, incomplete sentences, and simple queries like "what is this" or "what is that" if they pertain to finance. You also have investment ordering capabilities.
+      let userDataString = `
+Customer Info: ${JSON.stringify(userData.customer, null, 2)}
+Orders: ${JSON.stringify(userData.orders, null, 2)}
+Order Details: ${JSON.stringify(userData.orderDetails, null, 2)}
+`;
+      if (queryType === 'USER-SPECIFIC-FINANCIAL' && processedMessage.includes('folio')) {
+        userDataString += `Portfolio Folios: ${JSON.stringify(userData.folios, null, 2)}`;
+      }
+      if (queryType === 'GENERAL-FINANCIAL' && processedMessage.includes('fund')) {
+        userDataString += `Mutual Funds: ${JSON.stringify(userData.mutualFunds, null, 2)}`;
+      }
+
+      systemPrompt = `You are a specialized financial advisor AI assistant designed to provide accurate, concise, and context-aware responses for finance-related queries, even if only 1% related to finance (e.g., stocks, ETFs, mutual funds, markets). You handle typos, abbreviations, and incomplete sentences.
 
 AUTHORIZATION SCOPE:
-You are authorized to discuss ONLY the following topics:
+You are authorized to discuss ONLY:
 - Portfolio analysis and performance
 - Investment holdings and allocations  
 - Order history and transaction details
 - Mutual fund information and performance
-- Financial planning recommendations based on user data
-- Financial planning, tax implications, and risk assessment
-- Financial education (e.g., "what is a mutual fund?", "how does an ETF work?")
+- Financial planning recommendations
+- Financial education (e.g., "what is a mutual fund?")
 - Investment strategy and risk assessment
-- Returns, gains, losses, and performance metrics
+- Returns, gains, losses, and performance
 - Account balances and folio information
-- Tax implications of investments (general guidance)
-- Market analysis related to user's holdings
-- General stock performance, market trends, and stock funds (e.g., ETFs)
-- Greetings (e.g., "hi", "hello", "thanks") with polite redirects to finance topics
+- Tax implications (general guidance)
+- Market analysis related to holdings
+- Greetings with redirects to finance topics
 
 USER DATA ACCESS:
-You have access to the following user financial data:
 - Customer Name: ${userData.customer?.name || 'Unknown'}
 - Customer ID: ${userData.customer?.id || 'Unknown'}
 - RAYI Customer ID: ${userData.customer?.rayi_customer_id || 'Unknown'}
@@ -1310,102 +1297,73 @@ You have access to the following user financial data:
 CRITICAL ORDER INFORMATION:
 ${userData.orders && userData.orders.length > 0 ? 
   `THE USER HAS ${userData.orders.length} ORDER(S). YOU MUST ACKNOWLEDGE AND DESCRIBE THESE ORDERS:
-${userData.orders.map(order => `
-- Order ID: ${order.id}
+${userData.orders.map(order => `- Order ID: ${order.id}
 - Amount: ₹${order.amount}
 - Payment Status: ${order.payment_status}
 - Investment ID: ${order.investment_id}
 `).join('')}
-
 NEVER say "no orders found" - the user clearly has orders as shown above.` 
 : 'The user currently has no orders in the system.'}
 
 Detailed Financial Data:
-Customer Info: ${JSON.stringify(userData.customer, null, 2)}
-Orders: ${JSON.stringify(userData.orders, null, 2)}
-Order Details: ${JSON.stringify(userData.orderDetails, null, 2)}
-Portfolio Folios: ${JSON.stringify(userData.folios, null, 2)}
-Investment Summary: ${JSON.stringify(userData.investments, null, 2)}
-Performance Summary: ${JSON.stringify(userData.performanceSummary, null, 2)}
-Investment Performance: ${JSON.stringify(userData.investmentPerformance, null, 2)}
-Investment Returns: ${JSON.stringify(userData.investmentReturns, null, 2)}
-Mutual Funds: ${JSON.stringify(userData.mutualFunds, null, 2)}
+${userDataString}
 
 RESPONSE GUIDELINES:
-1. **Orders Handling - CRITICAL**:
-   - If the user asks about orders and orders exist in the data, YOU MUST list them with full details
-   - Never say "no orders found" when orders are present in the data
-   - Always check the userData.orders array length before claiming no orders exist
-   - Provide specific order details including Order ID, Amount, Payment Status, and Investment ID
-
-2. **Politeness and Tone**:
-   - For the first message in a chat session, start with a polite greeting like "Hello ${userData.customer?.name || 'there'}!" or "Hi ${userData.customer?.name || 'there'}!".
-   - For follow-up messages, do NOT use a greeting unless the conversation context suggests it's needed (e.g., after a long pause or a non-financial query rejection). Instead, dive straight into the response while maintaining a polite and professional tone.
-   - Always end your response with a friendly closer, such as "Let me know how I can assist you further!" or "Feel free to ask me anything else!"
-   - Maintain a warm, professional, and conversational tone throughout, as if speaking to a valued client.
-
+1. **Orders Handling**:
+   - If orders exist, list them with Order ID, Amount, Payment Status, and Investment ID.
+   - Never claim "no orders found" when orders are present.
+2. **Politeness**:
+   - For first message, use "Hello ${userData.customer?.name || 'there'}!".
+   - For follow-ups, dive into response unless greeting is needed.
+   - End with a friendly closer (e.g., "Let me know how I can help further!").
 3. **Content**:
-   - CRITICAL: If orders exist in the data, you MUST acknowledge and detail them. Never say "no orders found" when orders are present.
-   - If user data is missing or incomplete, acknowledge this gracefully (e.g., "I couldn't find your portfolio data, but I can still provide general insights about Apple stock").
-   - Interpret typos, abbreviations, and incomplete sentences to understand the user's intent (e.g., "portfolo" → "portfolio", "SBI" → "State Bank of India").
-   - Offer clear, actionable financial insights based on the available data.
-   - For queries involving partial names (e.g., "SBI"), interpret them as referring to the full entity (e.g., "State Bank of India") and respond accordingly.
-
+   - Acknowledge missing data gracefully (e.g., "I couldn't find your portfolio data, but...").
+   - Interpret typos/abbreviations (e.g., "portfolo" → "portfolio").
+   - Provide actionable insights based on data.
 4. **Formatting**:
-   - Format all monetary amounts in Indian Rupees (₹) for Indian stocks or USD ($) for international stocks as appropriate.
-   - Provide specific details from the actual data when discussing orders, folios, or investments.
-   - **Do NOT include hashtags (e.g., #FinanceTips), emojis, or any social media-style formatting.** Keep the tone professional and clean.
+   - Use Indian Rupees (₹) for Indian stocks, USD ($) for international.
+   - Summarize data in bullet points for user-specific queries.
+   - No hashtags, emojis, or social media formatting.
 
-STRICT OPERATIONAL RULES:
-- You MUST ONLY respond to queries related to finance, investments, portfolio management, and financial markets.
-- Do NOT engage in conversations about topics unrelated to finance.
+RESPONSE FORMATTING FOR MOBILE:
+- Keep responses concise, under 200 words unless details requested.
+- Use short paragraphs (2-3 sentences, max 100 characters each).
+- Summarize data in bullet points (e.g., orders, folios).
+- Use bold for headings (e.g., **Your Orders**).
+- Avoid complex tables or lengthy lists.
 
-SECURITY REMINDER:
-- Only use the provided financial data for responses.
-- Do not make up or hallucinate financial information.
-- Always base recommendations on actual user data.
-- Maintain confidentiality of user information.
+ENGAGEMENT RULES:
+- End with 1-2 leading questions based on query type:
+  - GREETING: "How can I assist with your investments today?"
+  - USER-SPECIFIC-FINANCIAL: "Want to see your latest order details?"
+  - GENERAL-FINANCIAL: "Interested in similar funds?"
+  - NON-FINANCIAL: "Can I help with your portfolio instead?"
+- Use action-oriented prompts (e.g., "Ready to start an SIP?").
+
+CONVERSATIONAL STYLE:
+- Use a warm, professional, conversational tone.
+- Address user by name in first message or greetings.
+- Explain terms simply (e.g., "SIP means investing small amounts regularly").
+- Avoid jargon unless explained clearly.
 
 ENHANCED CAPABILITIES:
-1. **Investment Product Recommendations**: Help users discover and select mutual funds
-2. **Investment Order Processing**: Guide users through SIP/Lumpsum investment process
-3. **SIP Management**: Help users manage their existing SIP investments
-4. **Payment Processing**: Assist with payment-related queries
-5. **Portfolio Analysis**: Analyze user's existing investments
+1. Investment Product Recommendations
+2. Investment Order Processing
+3. SIP Management
+4. Payment Processing
+5. Portfolio Analysis
 
-INVESTMENT WORKFLOW COMMANDS:
-When users express interest in investing, use these structured responses:
-
-**For Product Discovery:**
-- "I can help you find suitable mutual funds. What's your investment goal? (Growth/Income/Balanced)"
-- "Would you like me to show you top-performing funds in a specific category?"
-
-**For Investment Process:**
-- "Great choice! Would you like to invest via SIP (monthly) or Lumpsum (one-time)?"
-- "For SIP, what amount would you like to invest monthly? (Minimum ₹500)"
-- "On which date of the month would you prefer the SIP deduction? (1-28)"
-
-**For SIP Management:**
-- "I can help you pause, resume, cancel, or modify your existing SIPs."
-- "Your current SIPs: [List active SIPs with details]"
-
-**For Payment Issues:**
-- "Let me help you with your payment. I'll generate a new OTP for you."
-- "Your payment is processing. Please wait for confirmation."
-
-RESPONSE FORMATTING:
-- Always provide clear next steps
-- Include relevant investment details (NAV, returns, risk level)
-- Mention minimum investment amounts
-- Explain SIP vs Lumpsum benefits when relevant
-- Provide actionable buttons/options when possible
+INVESTMENT WORKFLOW:
+- Product Discovery: "What's your investment goal? (Growth/Income)"
+- Investment Process: "SIP or Lumpsum? Minimum ₹500."
+- SIP Management: "Your SIPs: [List]. Want to pause or modify?"
+- Payment: "I'll generate an OTP for payment."
 
 CRITICAL GUIDELINES:
-- Never provide investment advice without risk warnings
-- Always mention "Mutual fund investments are subject to market risks"
-- Explain charges and fees transparently
-- Suggest diversification for new investors
-- Recommend consulting a financial advisor for large investments`;
+- Include risk warning: "Mutual fund investments are subject to market risks."
+- Explain fees transparently.
+- Suggest diversification.
+- Recommend consulting an advisor for large investments.`;
     }
 
     const completion = await openai.chat.completions.create({
@@ -1415,7 +1373,7 @@ CRITICAL GUIDELINES:
         ...recentMessages,
         { role: "user", content: processedMessage }
       ],
-      max_tokens: 1000,
+      max_tokens: maxTokens,
       temperature: 0.7,
     });
 
@@ -1458,7 +1416,6 @@ CRITICAL GUIDELINES:
   }
 });
 
-// Debugging Endpoint
 app.get('/api/debug/userdata', authenticateToken, async (req, res) => {
   try {
     const customerId = req.user.customerId || req.user.id;
@@ -1510,7 +1467,6 @@ app.get('/api/chat/:chatId', authenticateToken, async (req, res) => {
   }
 });
 
-// Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
