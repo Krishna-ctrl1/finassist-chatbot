@@ -1232,7 +1232,7 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
         : `Hi again! What's on your mind about your investments? Need help with orders or funds?`;
       
       const assistantMessage = {
-        sender: 'assistant',
+        sender: 'bot',
         content: aiResponse,
         timestamp: new Date()
       };
@@ -1264,7 +1264,7 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
         : `That question isn't about finance. Want to check your orders or explore mutual funds?`;
       
       const assistantMessage = {
-        sender: 'assistant',
+        sender: 'bot',
         content: aiResponse,
         timestamp: new Date()
       };
@@ -1414,7 +1414,7 @@ CRITICAL GUIDELINES:
     aiResponse = stripHashtags(aiResponse);
     
     const assistantMessage = {
-      sender: 'assistant',
+      sender: 'bot',
       content: aiResponse,
       timestamp: new Date()
     };

@@ -82,7 +82,7 @@
 
         <!-- Chat Screen -->
         <div id="chatScreen" class="chat-screen">
-            <button class="sidebar-toggle" onclick="toggleSidebar()" aria-label="Toggle sidebar menu">
+            <button class="sidebar-toggle" onclick="toggleSidebar(event)" aria-label="Toggle sidebar menu">
                 <i class="fas fa-bars"></i>
             </button>
             
@@ -90,13 +90,37 @@
             <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
             <aside class="sidebar" id="sidebar">
                 <div class="sidebar-header">
-                    <h3>Chat History</h3>
+                    <div class="sidebar-brand">
+                        <div class="sidebar-logo">
+                            <i class="fas fa-chart-line" aria-label="FinanceAI logo"></i>
+                        </div>
+                        <span class="sidebar-brand-text">FinanceAI</span>
+                    </div>
+                    <button class="sidebar-collapse-btn" onclick="toggleSidebar(event)" aria-label="Collapse sidebar">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                </div>
+                
+                <div class="sidebar-content">
                     <button class="new-chat-btn" onclick="startNewChat()" aria-label="Start new chat">
                         <i class="fas fa-plus"></i>
                         <span>New Chat</span>
                     </button>
+                    
+                    <div class="sidebar-search">
+                        <div class="search-input-wrapper">
+                            <i class="fas fa-search search-icon"></i>
+                            <input type="text" id="chatSearch" class="search-input" placeholder="Search conversations..." aria-label="Search conversations">
+                            <button class="search-clear" id="searchClear" onclick="clearSearch()" style="display: none;" aria-label="Clear search">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="chat-history-container">
+                        <div id="chatHistory"></div>
+                    </div>
                 </div>
-                <div id="chatHistory"></div>
             </aside>
             <main class="chat-main">
                 <div class="chat-header">

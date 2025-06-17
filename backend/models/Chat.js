@@ -4,7 +4,7 @@ const messageSchema = new mongoose.Schema({
     sender: {
         type: String,
         required: true,
-        enum: ['user', 'bot']
+        enum: ['user', 'bot', 'assistant']
     },
     content: {
         type: String,

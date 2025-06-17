@@ -188,6 +188,34 @@ router.post('/chat', authMiddleware, async (req, res) => {
     }
 });
 
+// Update a chat (rename)
+router.put('/chat/:id', authMiddleware, async (req, res) => {
+    try {
+        const { title } = req.body;
+        console.log('Updating chat with ID:', req.params.id, 'new title:', title, 'for user:', req.user.id);
+        
+        if (!title || !title.trim()) {
+            return res.status(400).json({ message: 'Title is required' });
+        }
+
+        const sanitizedTitle = sanitizeInput(title.trim());
+        
+        const chat = await Chat.findOne({ _id: req.params.id, userId: req.user.id });
+        if (!chat) {
+            return res.status(404).json({ message: 'Chat not found' });
+        }
+
+        chat.title = sanitizedTitle;
+        chat.updatedAt = new Date();
+        await chat.save();
+
+        res.json({ message: 'Chat updated successfully', chat });
+    } catch (error) {
+        console.error('Update chat error:', error.message, error.stack);
+        res.status(500).json({ message: 'Server error while updating chat.' });
+    }
+});
+
 // Delete a chat
 router.delete('/chat/:id', authMiddleware, async (req, res) => {
     try {
