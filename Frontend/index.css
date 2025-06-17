@@ -61,6 +61,41 @@
   --tablet: 1024px;
 }
 
+/* Dark Mode Variables */
+.dark-mode {
+  --bg-primary: #1a1a1a;
+  --bg-secondary: #252525;
+  --bg-sidebar: #252525;
+  --bg-chat: #1a1a1a;
+  --bg-user-message: #2d2d2d;
+  --bg-bot-message: #252525;
+  --bg-input: #2d2d2d;
+  --bg-hover: #3a3a3a;
+  --bg-pill: #2d2d2d;
+  --bg-pill-hover: #3a3a3a;
+
+  --text-primary: #e5e7eb;
+  --text-secondary: #9ca3af;
+  --text-sidebar: #e5e7eb;
+  --text-muted: #6b7280;
+  --text-light: #4b5563;
+
+  --border: #4b5563;
+  --border-light: #374151;
+  --border-focus: #34d399;
+
+  --green: #34d399;
+  --green-hover: #2fb586;
+  --green-light: #1a3c34;
+  --error: #f87171;
+  --warning: #fbbf24;
+
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px 0 rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+}
+
 /* ChatGPT-style animations */
 @keyframes fadeIn {
   from { 
@@ -137,15 +172,16 @@ body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  overflow: hidden; /* Prevent body scrolling */
+  overflow: hidden;
   font-weight: 400;
   letter-spacing: -0.005em;
+  transition: background-color 0.3s ease, color 0.3s ease; /* Added for smooth theme transitions */
 }
 
 @media (prefers-color-scheme: dark) {
-  body {
-    background: var(--dark-bg-primary);
-    color: var(--dark-text-primary);
+  body:not(.light-mode) {
+    background: var(--bg-primary);
+    color: var(--text-primary);
   }
 }
 
@@ -193,7 +229,7 @@ body {
 .auth-logo {
   width: 64px;
   height: 64px;
-  background: linear-gradient(135deg, var(--green), var(--green-hover));
+  background: var(--green);
   border-radius: var(--rounded-lg);
   display: flex;
   align-items: center;
@@ -569,11 +605,10 @@ body {
   background: var(--bg-hover);
 }
 
-
 .user-avatar {
   width: 28px;
   height: 28px;
-  background: var(--text-primary);
+  background: var(--green);
   border-radius: var(--rounded-full);
   display: flex;
   align-items: center;
@@ -647,7 +682,7 @@ body {
 .profile-avatar {
   width: 40px;
   height: 40px;
-  background: var(--text-primary);
+  background: var(--green);
   border-radius: var(--rounded-full);
   display: flex;
   align-items: center;
@@ -873,7 +908,7 @@ body {
 }
 
 .message.user .message-avatar {
-  background: var(--text-primary);
+  background: var(--green);
   color: white;
 }
 
@@ -899,7 +934,7 @@ body {
   border: none;
 }
 
-/* Typing Indicator - Fixed positioning */
+/* Typing Indicator */
 .typing-indicator {
   display: flex;
   align-items: center;
@@ -916,7 +951,7 @@ body {
 .typing-indicator .message-avatar {
   width: 32px;
   height: 32px;
-  background: linear-gradient(135deg, var(--green), var(--green-hover));
+  background: var(--green);
   border-radius: var(--rounded-full);
   display: flex;
   align-items: center;
@@ -994,7 +1029,7 @@ body {
   position: absolute;
   right: 8px;
   bottom: 8px;
-  background: var(--text-primary);
+  background: var(--green);
   color: white;
   border: none;
   border-radius: var(--rounded-full);
@@ -1010,7 +1045,7 @@ body {
 }
 
 .send-btn:hover:not(:disabled) {
-  background: var(--green);
+  background: var(--green-hover);
   transform: scale(1.1);
 }
 
@@ -1066,7 +1101,7 @@ body {
 
 @media (max-width: 768px) {
   body {
-    font-size: 1rem; /* Increase base font size for mobile */
+    font-size: 1rem;
   }
 
   .app-container {
@@ -1151,7 +1186,7 @@ body {
   }
 
   .chat-input {
-    font-size: 1rem; /* Increase input font size for mobile */
+    font-size: 1rem;
   }
 
   .chat-messages {
@@ -1161,8 +1196,7 @@ body {
     padding: var(--space-4) var(--space-3);
     padding-bottom: var(--space-4);
     padding-top: var(--space-4);
-    /* Only this container should scroll */
-    -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+    -webkit-overflow-scrolling: touch;
   }
 
   .message-content {
@@ -1228,7 +1262,7 @@ body {
 
 @media (max-width: 480px) {
   body {
-    font-size: 1.0625rem; /* 17px - Even larger font for small phones */
+    font-size: 1.0625rem;
   }
 
   .chat-input-container {
@@ -1237,8 +1271,8 @@ body {
   }
 
   .chat-input {
-    font-size: 1.0625rem; /* 17px - Larger input font for small phones */
-    min-height: 48px; /* Increase minimum height for better touch target */
+    font-size: 1.0625rem;
+    min-height: 48px;
   }
 
   .chat-messages {
@@ -1256,7 +1290,7 @@ body {
 
   .message-bubble {
     padding: var(--space-2) var(--space-3);
-    font-size: 1rem; /* Increase message font size for better readability */
+    font-size: 1rem;
   }
 
   .auth-title {

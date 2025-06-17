@@ -1,4 +1,5 @@
 const API_BASE = window.location.origin + "/api";
+const THEME_KEY = 'theme-preference';
 let authToken = null; // Don't use localStorage initially
 let currentUser = null;
 let currentChatId = null;
@@ -37,6 +38,7 @@ function debounce(fn, ms) {
 document.addEventListener("DOMContentLoaded", function () {
   console.log("DOM loaded, initializing app...");
   showAuthScreen();
+  initializeTheme();
   checkAuthStatus();
   setupEventListeners();
 });
@@ -1151,6 +1153,49 @@ function enhanceFocusManagement() {
   });
 }
 
+function initializeTheme() {
+  const savedTheme = localStorage.getItem(THEME_KEY);
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+  if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
+    document.body.classList.add('dark-mode');
+    document.body.classList.remove('light-mode');
+  } else {
+    document.body.classList.add('light-mode');
+    document.body.classList.remove('dark-mode');
+  }
+
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+    if (!localStorage.getItem(THEME_KEY)) {
+      if (e.matches) {
+        document.body.classList.add('dark-mode');
+        document.body.classList.remove('light-mode');
+      } else {
+        document.body.classList.add('light-mode');
+        document.body.classList.remove('dark-mode');
+      }
+    }
+  });
+}
+
+function toggleTheme() {
+  const isDarkMode = document.body.classList.contains('dark-mode');
+  const toggleBtn = document.querySelector('.profile-menu-item[onclick="toggleTheme()"] i');
+  if (isDarkMode) {
+    document.body.classList.remove('dark-mode');
+    document.body.classList.add('light-mode');
+    localStorage.setItem(THEME_KEY, 'light');
+    if (toggleBtn) toggleBtn.className = 'fas fa-moon';
+    showNotification('Light mode enabled', 'success');
+  } else {
+    document.body.classList.remove('light-mode');
+    document.body.classList.add('dark-mode');
+    localStorage.setItem(THEME_KEY, 'dark');
+    if (toggleBtn) toggleBtn.className = 'fas fa-sun';
+    showNotification('Dark mode enabled', 'success');
+  }
+  toggleProfileDropdown();
+}
 // Initialize enhanced features
 document.addEventListener('DOMContentLoaded', function() {
   enhanceFocusManagement();
@@ -1484,6 +1529,7 @@ window.switchToSignup = switchToSignup;
 window.switchToLogin = switchToLogin;
 window.logout = logout;
 window.toggleSidebar = toggleSidebar;
+window.toggleTheme = toggleTheme;
 window.sendQuickMessage = sendQuickMessage;
 window.startNewChat = startNewChat;
 window.closeSidebar = closeSidebar;
