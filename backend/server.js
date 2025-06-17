@@ -1598,10 +1598,18 @@ mongoose.connect(process.env.MONGO_URI, {
 
 initMongoDB();
 
+// Get local IP address
+const os = require('os');
+const networkInterfaces = os.networkInterfaces();
+const localIP = Object.values(networkInterfaces)
+  .flat()
+  .find((iface) => iface.family === 'IPv4' && !iface.internal).address;
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on:`);
     console.log(`http://localhost:${PORT}`);
+    console.log(`→ Network: http://${localIP}:${PORT}`);
 });
 
 process.on('SIGINT', async () => {
