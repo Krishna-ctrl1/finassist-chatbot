@@ -941,11 +941,34 @@ function formatMessage(message) {
 
 // This function is now defined above in the resize handler section
 
+// Global variables for request management
+let isSendingMessage = false;
+let lastMessageContent = null;
+let lastMessageTime = 0;
+
 async function sendMessage() {
   if (!elements.messageInput || !authToken) return;
   
   const message = elements.messageInput.value.trim();
   if (!message) return;
+  
+  // Prevent duplicate requests
+  const currentTime = Date.now();
+  if (isSendingMessage) {
+    console.log("Already sending a message, ignoring duplicate request");
+    return;
+  }
+  
+  // Prevent rapid duplicate messages (within 1 second)
+  if (message === lastMessageContent && (currentTime - lastMessageTime) < 1000) {
+    console.log("Duplicate message detected within 1 second, ignoring");
+    return;
+  }
+  
+  // Set sending state
+  isSendingMessage = true;
+  lastMessageContent = message;
+  lastMessageTime = currentTime;
 
   // Remove welcome elements with animation if present
   if (elements.chatMessages) {
@@ -1023,6 +1046,13 @@ async function sendMessage() {
     });
 
     if (!response.ok) {
+      if (response.status === 429) {
+        const errorData = await response.json();
+        if (errorData.isDuplicate) {
+          console.log('Backend detected duplicate request, ignoring silently');
+          return; // Exit silently without showing error to user
+        }
+      }
       throw new Error(`Failed to send message: ${response.status}`);
     }
 
@@ -1050,6 +1080,9 @@ async function sendMessage() {
     appendMessage("bot", "Sorry, I'm having trouble processing your request right now. Please try again in a moment.");
     showNotification("Failed to send message", "error");
   } finally {
+    // Reset sending state
+    isSendingMessage = false;
+    
     // Hide typing indicator with animation
     if (elements.typingIndicator) {
       elements.typingIndicator.style.transition = 'all 0.3s ease-out';

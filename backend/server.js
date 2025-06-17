@@ -1090,10 +1090,43 @@ function calculateCompletedInstallments(sip) {
   return Math.max(0, installments - 1);
 }
 
+// Global request tracking for duplicate prevention
+const recentRequests = new Map();
+const REQUEST_TIMEOUT = 2000; // 2 seconds
+
+// Clean up old requests periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, timestamp] of recentRequests.entries()) {
+    if (now - timestamp > REQUEST_TIMEOUT) {
+      recentRequests.delete(key);
+    }
+  }
+}, 30000); // Clean every 30 seconds
+
 app.post('/api/chat', authenticateToken, async (req, res) => {
   try {
     const { chatId, title, message } = req.body;
     const userId = new ObjectId(req.user._id);
+    
+    // Create request fingerprint for duplicate detection
+    const requestFingerprint = `${userId.toString()}_${message}_${chatId || 'new'}`;
+    const requestTime = Date.now();
+    
+    // Check for duplicate request
+    if (recentRequests.has(requestFingerprint)) {
+      const lastRequestTime = recentRequests.get(requestFingerprint);
+      if (requestTime - lastRequestTime < REQUEST_TIMEOUT) {
+        console.log('Duplicate request detected:', requestFingerprint);
+        return res.status(429).json({ 
+          error: 'Duplicate request detected. Please wait before sending again.',
+          isDuplicate: true
+        });
+      }
+    }
+    
+    // Record this request
+    recentRequests.set(requestFingerprint, requestTime);
     
     console.log('=== CUSTOMER ID DEBUGGING ===');
     console.log('Full JWT user object:', JSON.stringify(req.user, null, 2));
