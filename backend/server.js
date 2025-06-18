@@ -14,6 +14,8 @@ const axios = require('axios');
 const crypto = require('crypto');
 const FAQ_KB = require('../data/faq.json');
 const Ticket = require('./models/Ticket');
+const multer = require('multer');
+const { GridFSBucket } = require('mongodb');
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
@@ -29,15 +31,39 @@ const openai = new OpenAI({
 });
 
 let mongoClient;
+let gridFSBucket;
 
 // Initialize MongoDB connection
 async function initMongoDB() {
     try {
+        if (!MONGO_URI) {
+            throw new Error('MONGO_URI environment variable is required');
+        }
+        
         mongoClient = new MongoClient(MONGO_URI);
         await mongoClient.connect();
         console.log('MongoDB client connected for customer authentication');
         
         const db = mongoClient.db('financeai');
+        
+        // Test database connection
+        await db.admin().ping();
+        console.log('MongoDB ping successful');
+        
+        // Initialize GridFS bucket for file uploads
+        gridFSBucket = new GridFSBucket(db, {
+            bucketName: 'ticketUploads'
+        });
+        console.log('GridFS bucket initialized successfully');
+        
+        // Test GridFS by checking if the bucket is accessible
+        try {
+            await db.collection('ticketUploads.files').findOne({});
+            console.log('GridFS bucket is accessible');
+        } catch (gridFSError) {
+            console.log('GridFS bucket created (first time setup):', gridFSError.message);
+        }
+        
         try {
             await db.collection('chats').createIndex({ userId: 1, updatedAt: -1 });
             console.log('Chat collection indexes created');
@@ -46,6 +72,8 @@ async function initMongoDB() {
         }
     } catch (error) {
         console.error('MongoDB client connection error:', error);
+        console.error('Please check your MONGO_URI and ensure MongoDB is running');
+        // Don't exit the process, but log the error
     }
 }
 
@@ -64,6 +92,78 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
+
+// Multer configuration for file uploads
+const storage = multer.memoryStorage();
+
+const fileFilter = (req, file, cb) => {
+    // Allow only images and PDFs
+    const allowedMimeTypes = [
+        'image/jpeg',
+        'image/png', 
+        'image/gif',
+        'image/webp',
+        'application/pdf'
+    ];
+    
+    if (allowedMimeTypes.includes(file.mimetype)) {
+        cb(null, true);
+    } else {
+        cb(new Error('Invalid file type. Only images (JPEG, PNG, GIF, WebP) and PDF files are allowed.'), false);
+    }
+};
+
+const upload = multer({
+    storage: storage,
+    fileFilter: fileFilter,
+    limits: {
+        fileSize: 10 * 1024 * 1024, // 10MB limit
+        files: 3 // Maximum 3 files per upload
+    }
+});
+
+// Helper function to upload file to GridFS
+const uploadFileToGridFS = (fileBuffer, filename, originalName, mimetype) => {
+    return new Promise((resolve, reject) => {
+        const uploadStream = gridFSBucket.openUploadStream(filename, {
+            metadata: {
+                originalName: originalName,
+                mimetype: mimetype,
+                uploadDate: new Date()
+            }
+        });
+
+        uploadStream.end(fileBuffer);
+
+        uploadStream.on('finish', () => {
+            resolve(uploadStream.id);
+        });
+
+        uploadStream.on('error', (error) => {
+            reject(error);
+        });
+    });
+};
+
+// Helper function to get file from GridFS
+const getFileFromGridFS = (fileId) => {
+    return new Promise((resolve, reject) => {
+        const downloadStream = gridFSBucket.openDownloadStream(fileId);
+        const chunks = [];
+
+        downloadStream.on('data', (chunk) => {
+            chunks.push(chunk);
+        });
+
+        downloadStream.on('end', () => {
+            resolve(Buffer.concat(chunks));
+        });
+
+        downloadStream.on('error', (error) => {
+            reject(error);
+        });
+    });
+};
 
 // JWT middleware for authentication
 const authenticateToken = (req, res, next) => {
@@ -249,7 +349,10 @@ async function getUserData(customerId) {
     });
 
     return {
-      customer: customer || { name: 'Unknown', id: 'Unknown', rayi_customer_id: 'Unknown' },
+      customer: customer ? { 
+        ...customer, 
+        email: customer.email || 'unknown@email.com' 
+      } : { name: 'Unknown', id: 'Unknown', rayi_customer_id: 'Unknown', email: 'unknown@email.com' },
       customerDetail: customerDetail || null,
       folios: folios || [],
       investments: null,
@@ -1119,7 +1222,7 @@ async function handleTicketCreationFlow(message, chat, customerId) {
       // Start ticket creation process
       return `Great! Let's create your support ticket. I'll guide you through the process step by step.
 
-**Step 1 of 3: Issue Title**
+**Step 1 of 4: Issue Title**
 Please provide a brief title for your issue (e.g., "Unable to complete payment", "Account verification problem", etc.)`;
     } else {
       return `No problem! If you need any other assistance with your investments or have questions about our services, I'm here to help. What else can I assist you with today?`;
@@ -1128,27 +1231,28 @@ Please provide a brief title for your issue (e.g., "Unable to complete payment",
   
   // Check which step we're in based on previous messages
   const ticketCreationMessages = chat.messages.filter(msg => 
-    msg.content.includes('Step 1 of 3') || 
-    msg.content.includes('Step 2 of 3') || 
-    msg.content.includes('Step 3 of 3')
+    msg.content.includes('Step 1 of 4') || 
+    msg.content.includes('Step 2 of 4') || 
+    msg.content.includes('Step 3 of 4') || 
+    msg.content.includes('Step 4 of 4')
   );
   
   if (ticketCreationMessages.length === 0) {
     // This shouldn't happen, but handle gracefully
     return `I understand you want to create a ticket. Let me start the process:
 
-**Step 1 of 3: Issue Title**
+**Step 1 of 4: Issue Title**
 Please provide a brief title for your issue.`;
   }
   
   const latestStep = ticketCreationMessages[ticketCreationMessages.length - 1];
   
-  if (latestStep.content.includes('Step 1 of 3')) {
+  if (latestStep.content.includes('Step 1 of 4')) {
     // User provided issue title, ask for category
     const issueTitle = message.trim();
     
     // Store the title temporarily in chat context
-    return `**Step 2 of 3: Category**
+    return `**Step 2 of 4: Category**
 Thank you! Your issue title: "${issueTitle}"
 
 Now please select a category for your ticket:
@@ -1163,7 +1267,7 @@ Now please select a category for your ticket:
 Please respond with the number (1-7) or the category name.`;
   }
   
-  if (latestStep.content.includes('Step 2 of 3')) {
+  if (latestStep.content.includes('Step 2 of 4')) {
     // User provided category, ask for description
     const categoryInput = message.trim().toLowerCase();
     let selectedCategory = '';
@@ -1196,49 +1300,141 @@ Please respond with the number (1-7) or the category name.`;
 Respond with the number (1-7) or category name.`;
     }
     
-    return `**Step 3 of 3: Description**
+    return `**Step 3 of 4: Description**
 Category selected: ${selectedCategory}
 
 Now please provide a detailed description of your issue. Include any relevant information that would help our support team assist you better.`;
   }
   
-  if (latestStep.content.includes('Step 3 of 3')) {
-    // User provided description, create the ticket
+  if (latestStep.content.includes('Step 3 of 4')) {
+    // User provided description, now ask for file upload (optional)
     const description = message.trim();
     
-    // Extract issue title and category from previous messages
-    const step1Message = chat.messages.find(msg => msg.content.includes('Your issue title:'));
-    const step2Message = chat.messages.find(msg => msg.content.includes('Category selected:'));
+    return `**Step 4 of 4: Supporting Documents (Optional)**
+Thank you for the description.
+
+**Would you like to attach any supporting documents?**
+
+You can upload:
+• Images (JPEG, PNG, GIF, WebP)
+• PDF documents
+• Maximum 3 files, 10MB each
+
+If you want to upload files, please respond with "yes" and I'll guide you through the upload process.
+If you don't need to upload anything, respond with "no" or "skip" to create the ticket.`;
+  }
+  
+  if (latestStep.content.includes('Step 4 of 4')) {
+    // Handle file upload response
+    const userResponse = message.trim().toLowerCase();
     
-    if (!step1Message || !step2Message) {
-      return `I'm sorry, there was an issue retrieving your ticket information. Let's start over. Would you like to create a support ticket?`;
-    }
-    
-    const issueTitleMatch = step1Message.content.match(/Your issue title: "([^"]+)"/);
-    const categoryMatch = step2Message.content.match(/Category selected: ([^\n]+)/);
-    
-    if (!issueTitleMatch || !categoryMatch) {
-      return `I'm sorry, there was an issue processing your ticket information. Let's start over. Would you like to create a support ticket?`;
-    }
-    
-    const issueTitle = issueTitleMatch[1];
-    const category = categoryMatch[1];
-    
-    try {
-      // Get customer email from user data
-      const userData = await getUserData(customerId);
-      const customerEmail = userData.customer?.email || 'unknown@email.com';
+    if (userResponse.includes('yes') || userResponse.includes('upload')) {
+      // User wants to upload files
+      return `**File Upload Instructions**
+
+To upload your supporting documents:
+
+1. **Use the file upload form** that will appear after this message
+2. **Select files** - You can choose up to 3 files
+3. **Supported formats**: Images (JPEG, PNG, GIF, WebP) and PDF documents
+4. **Size limit**: Maximum 10MB per file
+
+Once you've selected your files, click "Create Ticket with Attachments" to complete the process.
+
+*Note: The file upload form will be displayed in the chat interface.*`;
+    } else if (userResponse.includes('no') || userResponse.includes('skip') || userResponse.includes('none')) {
+      // User doesn't want to upload files, create ticket without attachments
       
-      // Create the ticket in database
-      const ticket = await createTicket({
-        customer_id: customerId,
-        customer_email: customerEmail,
-        issue_title: issueTitle,
-        category: category,
-        description: description
-      });
+      // Extract issue title, category, and description from previous messages
+      const step1Message = chat.messages.find(msg => msg.content.includes('Your issue title:'));
+      const step2Message = chat.messages.find(msg => msg.content.includes('Category selected:'));
+      const step3Message = chat.messages.find(msg => msg.content.includes('Step 3 of 4'));
       
-      return `✅ **Ticket Created Successfully!**
+      if (!step1Message || !step2Message || !step3Message) {
+        return `I'm sorry, there was an issue retrieving your ticket information. Let's start over. Would you like to create a support ticket?`;
+      }
+      
+      const issueTitleMatch = step1Message.content.match(/Your issue title: "([^"]+)"/);
+      const categoryMatch = step2Message.content.match(/Category selected: ([^\n\r]+)/);
+      
+      // Find the description from the user's message after Step 3
+      const step3Index = chat.messages.findIndex(msg => msg.content.includes('Step 3 of 4'));
+      const descriptionMessage = chat.messages[step3Index + 1]; // User's response to Step 3
+      const description = descriptionMessage?.content?.trim();
+      
+      if (!issueTitleMatch || !categoryMatch || !description) {
+        return `I'm sorry, there was an issue processing your ticket information. Let's start over. Would you like to create a support ticket?`;
+      }
+      
+      const issueTitle = issueTitleMatch[1];
+      let category = categoryMatch[1].trim();
+      
+      // Clean up category - remove any text after known triggers
+      const cleanupPatterns = [
+        /Now please provide.*$/i,
+        /\n.*$/,
+        /\r.*$/
+      ];
+      
+      for (const pattern of cleanupPatterns) {
+        category = category.replace(pattern, '').trim();
+      }
+      
+      // Validate that the category is one of the allowed values
+      const validCategories = [
+        'General Enquiry',
+        'KYC Related', 
+        'Products Related',
+        'Orders Related',
+        'Payments/Bank Accounts',
+        'Account Related',
+        'Others'
+      ];
+      
+      if (!validCategories.includes(category)) {
+        console.error('Invalid category extracted:', category);
+        return `I'm sorry, there was an issue with the category selection. Let's start over. Would you like to create a support ticket?`;
+      }
+      
+      try {
+        // Validate input data
+        if (!issueTitle || !category || !description) {
+          return `I'm sorry, but I need all the required information to create your ticket. Please provide:
+- Issue title
+- Category
+- Description
+
+Let's start over. Would you like to create a support ticket?`;
+        }
+        
+        // Validate customerId
+        if (!customerId) {
+          console.error('No customerId available for ticket creation');
+          return `I'm sorry, there was an issue with your customer identification. Please try logging in again or contact support directly.`;
+        }
+        
+        // Get customer email from user data
+        const userData = await getUserData(customerId);
+        const customerEmail = userData.customer?.email || 'unknown@email.com';
+        
+        console.log('Creating ticket with data:', {
+          customer_id: customerId,
+          customer_email: customerEmail,
+          issue_title: issueTitle,
+          category: category,
+          description: description
+        });
+        
+        // Create the ticket in database
+        const ticket = await createTicket({
+          customer_id: customerId,
+          customer_email: customerEmail,
+          issue_title: issueTitle,
+          category: category,
+          description: description
+        });
+        
+        return `✅ **Ticket Created Successfully!**
 
 **Ticket ID:** ${ticket.ticket_id}
 **Title:** ${issueTitle}
@@ -1253,65 +1449,269 @@ Your support ticket has been created and assigned to our team. You'll receive up
 - You can reference your ticket using ID: ${ticket.ticket_id}
 
 Is there anything else I can help you with regarding your investments or account?`;
-      
-    } catch (error) {
-      console.error('Error creating ticket:', error);
-      return `I'm sorry, there was an error creating your ticket. Please try again later or contact our support team directly. 
+        
+      } catch (error) {
+        console.error('Error creating ticket:', error);
+        console.error('Error details:', {
+          message: error.message,
+          stack: error.stack,
+          name: error.name,
+          ticketData: {
+            customer_id: customerId,
+            issue_title: issueTitle,
+            category: category,
+            description: description
+          }
+        });
+        
+        // Check if it's a validation error
+        if (error.name === 'ValidationError') {
+          const validationErrors = Object.values(error.errors).map(err => err.message).join(', ');
+          return `I'm sorry, there was a validation error with your ticket data: ${validationErrors}. Please try again or contact our support team directly.`;
+        }
+        
+        return `I'm sorry, there was an error creating your ticket. Please try again later or contact our support team directly. 
 
 In the meantime, is there anything else I can help you with regarding your investments?`;
+      }
+    } else {
+      // User gave an unclear response
+      return `Please respond with:
+- **"yes"** if you want to upload supporting documents
+- **"no"** or **"skip"** if you want to create the ticket without attachments
+
+What would you like to do?`;
     }
   }
   
   // Fallback
   return `I'm here to help you create a support ticket. Let's start:
 
-**Step 1 of 3: Issue Title**
+**Step 1 of 4: Issue Title**
 Please provide a brief title for your issue.`;
 }
 
 // Function to create a ticket in the database
 async function createTicket(ticketData) {
-  const db = mongoClient.db('financeai');
-  const ticketsCollection = db.collection('tickets');
-  
-  // Generate unique ticket ID
-  const ticketId = `TCK${Date.now()}${Math.floor(Math.random() * 1000)}`;
-  
-  const ticket = {
-    customer_id: parseInt(ticketData.customer_id),
-    customer_email: ticketData.customer_email,
-    issue_title: ticketData.issue_title,
-    category: ticketData.category,
-    description: ticketData.description,
-    status: 'Open',
-    priority: 'Medium',
-    ticket_id: ticketId,
-    created_at: new Date(),
-    updated_at: new Date()
-  };
-  
-  const result = await ticketsCollection.insertOne(ticket);
-  
-  return {
-    ...ticket,
-    _id: result.insertedId
-  };
+  try {
+    // Generate unique ticket ID
+    const ticketId = `TCK${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    
+    // Create ticket using Mongoose model
+    const ticket = new Ticket({
+      customer_id: parseInt(ticketData.customer_id),
+      customer_email: ticketData.customer_email,
+      issue_title: ticketData.issue_title,
+      category: ticketData.category,
+      description: ticketData.description,
+      status: 'Open',
+      priority: 'Medium',
+      ticket_id: ticketId
+    });
+    
+    const savedTicket = await ticket.save();
+    console.log('Ticket created successfully:', savedTicket.ticket_id);
+    
+    return savedTicket;
+  } catch (error) {
+    console.error('Error in createTicket function:', error);
+    throw error;
+  }
 }
 
 // =============================================================================
 // TICKET API ENDPOINTS
 // =============================================================================
 
+// Create ticket with optional file uploads
+app.post('/api/tickets/create', authenticateToken, upload.array('attachments', 3), async (req, res) => {
+  let customerId; // Declare outside try block for error logging
+  
+  try {
+    console.log('=== TICKET CREATION REQUEST ===');
+    console.log('Body:', req.body);
+    console.log('Files:', req.files ? req.files.length : 0);
+    console.log('User:', req.user);
+    
+    const {
+      issue_title,
+      category,
+      description
+    } = req.body;
+
+    // Validate required fields
+    if (!issue_title || !category || !description) {
+      console.log('Missing required fields:', { issue_title, category, description });
+      return res.status(400).json({
+        success: false,
+        message: 'Issue title, category, and description are required'
+      });
+    }
+
+    customerId = req.user.customerId || req.user.id;
+    if (!customerId) {
+      console.log('Customer ID not found in user:', req.user);
+      return res.status(400).json({
+        success: false,
+        message: 'Customer ID not found'
+      });
+    }
+
+    // Check if GridFS bucket is initialized
+    if (!gridFSBucket) {
+      console.error('GridFS bucket not initialized');
+      return res.status(500).json({
+        success: false,
+        message: 'File upload system not available'
+      });
+    }
+
+    // Get customer email from user data
+    const userData = await getUserData(customerId);
+    const customerEmail = userData.customer?.email || 'unknown@email.com';
+
+    // Generate unique ticket ID
+    const ticketId = `TCK${Date.now()}${Math.floor(Math.random() * 1000)}`;
+
+    // Process file attachments
+    const attachments = [];
+    if (req.files && req.files.length > 0) {
+      console.log(`Processing ${req.files.length} file(s) for ticket ${ticketId}`);
+      
+      for (const file of req.files) {
+        try {
+          // Generate unique filename
+          const timestamp = Date.now();
+          const randomString = Math.random().toString(36).substring(2, 8);
+          const fileExtension = path.extname(file.originalname);
+          const uniqueFilename = `${ticketId}_${timestamp}_${randomString}${fileExtension}`;
+          
+          // Upload file to GridFS
+          console.log(`Uploading file to GridFS: ${uniqueFilename}`);
+          const gridFSId = await uploadFileToGridFS(
+            file.buffer, 
+            uniqueFilename, 
+            file.originalname, 
+            file.mimetype
+          );
+          console.log(`File uploaded successfully with GridFS ID: ${gridFSId}`);
+          
+          
+          attachments.push({
+            filename: uniqueFilename,
+            originalName: file.originalname,
+            mimetype: file.mimetype,
+            size: file.size,
+            gridFSId: gridFSId
+          });
+          
+          console.log(`File uploaded to GridFS: ${uniqueFilename}`);
+        } catch (fileError) {
+          console.error('Error uploading file:', file.originalname, fileError);
+          // Return specific error for file upload failure
+          return res.status(500).json({
+            success: false,
+            message: `Failed to upload file: ${file.originalname}. ${fileError.message || 'Unknown error'}`
+          });
+        }
+      }
+    }
+
+    // Create ticket with attachments
+    const ticket = new Ticket({
+      customer_id: parseInt(customerId),
+      customer_email: customerEmail,
+      issue_title: issue_title,
+      category: category,
+      description: description,
+      status: 'Open',
+      priority: 'Medium',
+      ticket_id: ticketId,
+      attachments: attachments
+    });
+
+    const savedTicket = await ticket.save();
+    console.log(`Ticket created successfully: ${savedTicket.ticket_id} with ${attachments.length} attachment(s)`);
+
+    res.json({
+      success: true,
+      ticket: savedTicket,
+      message: `Ticket ${savedTicket.ticket_id} created successfully${attachments.length > 0 ? ` with ${attachments.length} attachment(s)` : ''}`
+    });
+
+  } catch (error) {
+    console.error('Error creating ticket with detailed info:', {
+      error: error.message,
+      stack: error.stack,
+      customerId: customerId || 'unknown',
+      userObject: req.user,
+      attachmentsCount: req.files ? req.files.length : 0
+    });
+    res.status(500).json({
+      success: false,
+      message: `Failed to create ticket: ${error.message}`
+    });
+  }
+});
+
+// Download ticket attachment
+app.get('/api/tickets/:ticketId/attachments/:attachmentId', authenticateToken, async (req, res) => {
+  try {
+    const { ticketId, attachmentId } = req.params;
+    const customerId = req.user.customerId || req.user.id;
+
+    // Find the ticket and verify ownership
+    const ticket = await Ticket.findOne({
+      ticket_id: ticketId,
+      customer_id: parseInt(customerId)
+    });
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: 'Ticket not found'
+      });
+    }
+
+    // Find the attachment
+    const attachment = ticket.attachments.id(attachmentId);
+    if (!attachment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Attachment not found'
+      });
+    }
+
+    // Get file from GridFS
+    const fileBuffer = await getFileFromGridFS(attachment.gridFSId);
+    
+    // Set appropriate headers
+    res.set({
+      'Content-Type': attachment.mimetype,
+      'Content-Disposition': `attachment; filename="${attachment.originalName}"`,
+      'Content-Length': attachment.size
+    });
+
+    res.send(fileBuffer);
+
+  } catch (error) {
+    console.error('Error downloading attachment:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to download attachment'
+    });
+  }
+});
+
 // Get customer tickets
 app.get('/api/tickets', authenticateToken, async (req, res) => {
   try {
     const customerId = req.user.customerId || req.user.id;
-    const db = mongoClient.db('financeai');
-    const ticketsCollection = db.collection('tickets');
     
-    const tickets = await ticketsCollection.find({ 
+    // Use Mongoose model to fetch tickets
+    const tickets = await Ticket.find({ 
       customer_id: parseInt(customerId) 
-    }).sort({ created_at: -1 }).toArray();
+    }).sort({ created_at: -1 });
     
     res.json({
       success: true,
@@ -1332,10 +1732,9 @@ app.get('/api/tickets/:ticketId', authenticateToken, async (req, res) => {
   try {
     const { ticketId } = req.params;
     const customerId = req.user.customerId || req.user.id;
-    const db = mongoClient.db('financeai');
-    const ticketsCollection = db.collection('tickets');
     
-    const ticket = await ticketsCollection.findOne({ 
+    // Use Mongoose model to fetch specific ticket
+    const ticket = await Ticket.findOne({ 
       ticket_id: ticketId,
       customer_id: parseInt(customerId)
     });
@@ -1548,9 +1947,10 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
       
       // Check if we're in the middle of ticket creation process
       if (lastBotMessage && (lastBotMessage.content.includes('Would you like to proceed with creating a support ticket?') || 
-          lastBotMessage.content.includes('Step 1 of 3') || 
-          lastBotMessage.content.includes('Step 2 of 3') || 
-          lastBotMessage.content.includes('Step 3 of 3'))) {
+          lastBotMessage.content.includes('Step 1 of 4') || 
+          lastBotMessage.content.includes('Step 2 of 4') || 
+          lastBotMessage.content.includes('Step 3 of 4') || 
+          lastBotMessage.content.includes('Step 4 of 4'))) {
         // User is providing affirmative response during ticket creation
         const ticketResponse = await handleTicketCreationFlow(message, chat, userData.customer?.id);
         
@@ -1631,9 +2031,10 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
       const lastBotMessage = chat.messages.slice(0, -1).reverse().find(msg => msg.sender === 'bot');
       
       // Check if we're in the middle of ticket creation process
-      if (lastBotMessage && (lastBotMessage.content.includes('Step 1 of 3') || 
-          lastBotMessage.content.includes('Step 2 of 3') || 
-          lastBotMessage.content.includes('Step 3 of 3') ||
+      if (lastBotMessage && (lastBotMessage.content.includes('Step 1 of 4') || 
+          lastBotMessage.content.includes('Step 2 of 4') || 
+          lastBotMessage.content.includes('Step 3 of 4') || 
+          lastBotMessage.content.includes('Step 4 of 4') ||
           lastBotMessage.content.includes('Would you like to proceed with creating a support ticket?'))) {
         // User is providing ticket details
         const ticketResponse = await handleTicketCreationFlow(message, chat, userData.customer?.id);
@@ -2149,10 +2550,7 @@ app.use((err, req, res, next) => {
     res.status(500).json({ message: 'Something went wrong on the server.' });
 });
 
-mongoose.connect(process.env.MONGO_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true
-})
+mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log('Connected to MongoDB via Mongoose'))
     .catch(err => console.error('MongoDB Mongoose connection error:', err));
 

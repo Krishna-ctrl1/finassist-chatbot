@@ -76,6 +76,23 @@ function setupEventListeners() {
       }
     });
   }
+  
+  // File upload event listeners
+  document.addEventListener('change', function(e) {
+    if (e.target && e.target.classList.contains('file-upload-input')) {
+      handleFileSelection(e.target);
+    }
+  });
+  
+  document.addEventListener('click', function(e) {
+    if (e.target && e.target.classList.contains('create-ticket-btn')) {
+      e.preventDefault();
+      handleTicketCreation(e.target);
+    } else if (e.target && e.target.classList.contains('skip-upload-btn')) {
+      e.preventDefault();
+      skipFileUpload();
+    }
+  });
 
   // Form submissions
   if (elements.loginForm) {
@@ -1811,8 +1828,373 @@ document.addEventListener('DOMContentLoaded', function() {
   }, 100);
 });
 
+// File upload functionality for ticket creation
+let selectedFiles = [];
+let ticketData = {};
+
+function handleFileSelection(fileInput) {
+  const files = Array.from(fileInput.files);
+  const maxFiles = 3;
+  const maxSize = 10 * 1024 * 1024; // 10MB
+  
+  // Validate file count
+  if (files.length > maxFiles) {
+    showNotification(`You can only upload up to ${maxFiles} files at once.`, 'error');
+    fileInput.value = '';
+    return;
+  }
+  
+  // Validate file types and sizes
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf'];
+  const validFiles = [];
+  
+  for (const file of files) {
+    if (!allowedTypes.includes(file.type)) {
+      showNotification(`File "${file.name}" is not supported. Please upload images (JPEG, PNG, GIF, WebP) or PDF files only.`, 'error');
+      continue;
+    }
+    
+    if (file.size > maxSize) {
+      showNotification(`File "${file.name}" is too large. Maximum size is 10MB.`, 'error');
+      continue;
+    }
+    
+    validFiles.push(file);
+  }
+  
+  if (validFiles.length === 0) {
+    fileInput.value = '';
+    return;
+  }
+  
+  selectedFiles = validFiles;
+  updateFilePreview();
+  
+  // Show success message
+  showNotification(`${validFiles.length} file(s) selected successfully.`, 'success');
+}
+
+function updateFilePreview() {
+  const previewContainer = document.querySelector('.file-preview');
+  if (!previewContainer) return;
+  
+  if (selectedFiles.length === 0) {
+    previewContainer.innerHTML = '';
+    return;
+  }
+  
+  const previewHTML = selectedFiles.map((file, index) => {
+    const fileIcon = getFileIcon(file.type);
+    const fileSize = formatFileSize(file.size);
+    
+    return `
+      <div class="file-preview-item">
+        <div class="file-icon">
+          <i class="${fileIcon}"></i>
+        </div>
+        <div class="file-info">
+          <span class="file-name">${sanitizeInput(file.name)}</span>
+          <span class="file-size">${fileSize}</span>
+        </div>
+        <button type="button" class="remove-file-btn" onclick="removeFile(${index})" aria-label="Remove file">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+    `;
+  }).join('');
+  
+  previewContainer.innerHTML = previewHTML;
+}
+
+function getFileIcon(mimeType) {
+  if (mimeType.startsWith('image/')) {
+    return 'fas fa-image';
+  } else if (mimeType === 'application/pdf') {
+    return 'fas fa-file-pdf';
+  }
+  return 'fas fa-file';
+}
+
+function formatFileSize(bytes) {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function removeFile(index) {
+  selectedFiles.splice(index, 1);
+  updateFilePreview();
+  
+  // Update file input
+  const fileInput = document.querySelector('.file-upload-input');
+  if (fileInput) {
+    fileInput.value = '';
+  }
+  
+  showNotification('File removed.', 'info');
+}
+
+function skipFileUpload() {
+  // Create ticket without attachments by sending "no" message
+  if (elements.messageInput) {
+    elements.messageInput.value = 'no';
+    sendMessage();
+  }
+}
+
+async function handleTicketCreation(button) {
+  if (selectedFiles.length === 0) {
+    showNotification('Please select at least one file or click "Skip Upload" to proceed without attachments.', 'warning');
+    return;
+  }
+  
+  // Extract ticket data from the chat conversation
+  if (!elements.chatMessages) {
+    showNotification('Unable to find ticket information. Please start over.', 'error');
+    return;
+  }
+  
+  const messages = Array.from(elements.chatMessages.querySelectorAll('.message'));
+  const botMessages = messages.filter(msg => msg.classList.contains('bot'));
+  
+  // Find step messages
+  let issueTitle = '';
+  let category = '';
+  let description = '';
+  
+  // Extract data from conversation
+  for (const message of botMessages) {
+    const content = message.textContent || message.innerText;
+    
+    const titleMatch = content.match(/Your issue title: ["']([^"']+)["']/);
+    if (titleMatch) {
+      issueTitle = titleMatch[1];
+    }
+    
+    const categoryMatch = content.match(/Category selected: ([^\n\r]+)/);
+    if (categoryMatch) {
+      category = categoryMatch[1].trim();
+      // Additional cleanup to remove any text after the category
+      const cleanCategory = category.split('Now please provide')[0].trim();
+      category = cleanCategory;
+    }
+  }
+  
+  // Find description from user messages (after Step 3)
+  const userMessages = messages.filter(msg => msg.classList.contains('user'));
+  if (userMessages.length >= 3) {
+    description = userMessages[2].textContent || userMessages[2].innerText || '';
+  }
+  
+  if (!issueTitle || !category || !description) {
+    showNotification('Missing ticket information. Please ensure you have completed all steps.', 'error');
+    return;
+  }
+  
+  // Disable button and show loading state
+  button.disabled = true;
+  button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating Ticket...';
+  
+  try {
+    // Create FormData with ticket information and files
+    const formData = new FormData();
+    formData.append('issue_title', issueTitle);
+    formData.append('category', category);
+    formData.append('description', description);
+    
+    // Add files
+    selectedFiles.forEach((file, index) => {
+      formData.append('attachments', file);
+    });
+    
+    console.log('Creating ticket with attachments...', {
+      issueTitle,
+      category,
+      description: description.substring(0, 100) + '...',
+      fileCount: selectedFiles.length
+    });
+    
+    const response = await fetch(`${API_BASE}/tickets/create`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${authToken}`
+      },
+      body: formData
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || 'Failed to create ticket');
+    }
+    
+    const result = await response.json();
+    console.log('Ticket created successfully:', result);
+    
+    // Show success message in chat
+    const successMessage = `✅ **Ticket Created Successfully!**
+
+**Ticket ID:** ${result.ticket.ticket_id}
+**Title:** ${issueTitle}
+**Category:** ${category}
+**Status:** Open
+**Attachments:** ${selectedFiles.length} file(s)
+
+Your support ticket has been created and assigned to our team. You'll receive updates on the progress via email.
+
+**What's next?**
+- Our support team will review your ticket within 24 hours
+- You'll receive email notifications for any updates
+- You can reference your ticket using ID: ${result.ticket.ticket_id}
+
+Is there anything else I can help you with regarding your investments or account?`;
+    
+    // Clear the file upload interface
+    const fileUploadContainer = document.querySelector('.file-upload-container');
+    if (fileUploadContainer) {
+      fileUploadContainer.remove();
+    }
+    
+    // Add success message to chat
+    appendMessage('bot', successMessage);
+    
+    // Reset state
+    selectedFiles = [];
+    ticketData = {};
+    
+    showNotification(`Ticket ${result.ticket.ticket_id} created successfully!`, 'success');
+    
+  } catch (error) {
+    console.error('Error creating ticket:', error);
+    showNotification(error.message || 'Failed to create ticket. Please try again.', 'error');
+    
+    // Add error message to chat
+    appendMessage('bot', 'I\'m sorry, there was an error creating your ticket with attachments. Please try again or contact our support team directly.');
+  } finally {
+    // Reset button state
+    button.disabled = false;
+    button.innerHTML = '<i class="fas fa-upload"></i> Create Ticket with Attachments';
+  }
+}
+
+// Function to show file upload interface in chat
+function showFileUploadInterface() {
+  if (!elements.chatMessages) return;
+  
+  const uploadInterface = document.createElement('div');
+  uploadInterface.className = 'file-upload-container';
+  uploadInterface.innerHTML = `
+    <div class="file-upload-interface">
+      <div class="file-upload-header">
+        <h3><i class="fas fa-paperclip"></i> Upload Supporting Documents</h3>
+        <p>Select up to 3 files (Images or PDF, max 10MB each)</p>
+      </div>
+      
+      <div class="file-upload-area">
+        <label for="ticketFileUpload" class="file-upload-label">
+          <div class="file-upload-icon">
+            <i class="fas fa-cloud-upload-alt"></i>
+          </div>
+          <div class="file-upload-text">
+            <span class="upload-primary">Click to upload files</span>
+            <span class="upload-secondary">or drag and drop files here</span>
+          </div>
+          <input type="file" id="ticketFileUpload" class="file-upload-input" multiple accept=".jpg,.jpeg,.png,.gif,.webp,.pdf" style="display: none;">
+        </label>
+      </div>
+      
+      <div class="file-preview"></div>
+      
+      <div class="file-upload-actions">
+        <button type="button" class="btn-secondary skip-upload-btn">
+          <i class="fas fa-skip-forward"></i> Skip Upload
+        </button>
+        <button type="button" class="btn-primary create-ticket-btn" disabled>
+          <i class="fas fa-upload"></i> Create Ticket with Attachments
+        </button>
+      </div>
+    </div>
+  `;
+  
+  elements.chatMessages.appendChild(uploadInterface);
+  scrollToBottom();
+  
+  // Update create button state based on file selection
+  const updateCreateButton = () => {
+    const createBtn = uploadInterface.querySelector('.create-ticket-btn');
+    if (createBtn) {
+      createBtn.disabled = selectedFiles.length === 0;
+    }
+  };
+  
+  // Set up file input change handler
+  const fileInput = uploadInterface.querySelector('.file-upload-input');
+  if (fileInput) {
+    fileInput.addEventListener('change', (e) => {
+      handleFileSelection(e.target);
+      updateCreateButton();
+    });
+  }
+  
+  // Set up drag and drop
+  const uploadArea = uploadInterface.querySelector('.file-upload-area');
+  if (uploadArea) {
+    uploadArea.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadArea.classList.add('drag-over');
+    });
+    
+    uploadArea.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      uploadArea.classList.remove('drag-over');
+    });
+    
+    uploadArea.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadArea.classList.remove('drag-over');
+      
+      const files = Array.from(e.dataTransfer.files);
+      if (fileInput) {
+        // Create a new FileList-like object
+        const dt = new DataTransfer();
+        files.forEach(file => dt.items.add(file));
+        fileInput.files = dt.files;
+        
+        handleFileSelection(fileInput);
+        updateCreateButton();
+      }
+    });
+  }
+}
+
+// Check if bot message indicates file upload is needed and show interface
+function checkForFileUploadTrigger(botMessage) {
+  const content = botMessage.toLowerCase();
+  if (content.includes('use the file upload form') && content.includes('will appear after this message')) {
+    setTimeout(() => {
+      showFileUploadInterface();
+    }, 500);
+  }
+}
+
+// Override the appendMessage function to check for file upload triggers
+const originalAppendMessage = appendMessage;
+appendMessage = function(sender, message, animate = true) {
+  originalAppendMessage(sender, message, animate);
+  
+  // Check if this is a bot message that should trigger file upload interface
+  if (sender === 'bot') {
+    checkForFileUploadTrigger(message);
+  }
+};
+
 // Make new functions globally available
 window.toggleChatMenu = toggleChatMenu;
 window.shareChat = shareChat;
 window.renameChat = renameChat;
 window.archiveChat = archiveChat;
+window.handleFileSelection = handleFileSelection;
+window.handleTicketCreation = handleTicketCreation;
+window.skipFileUpload = skipFileUpload;
+window.removeFile = removeFile;

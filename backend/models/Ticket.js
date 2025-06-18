@@ -67,12 +67,38 @@ const ticketSchema = new mongoose.Schema({
     admin_notes: {
         type: String,
         trim: true
-    }
+    },
+    attachments: [{
+        filename: {
+            type: String,
+            required: true
+        },
+        originalName: {
+            type: String,
+            required: true
+        },
+        mimetype: {
+            type: String,
+            required: true
+        },
+        size: {
+            type: Number,
+            required: true
+        },
+        uploadDate: {
+            type: Date,
+            default: Date.now
+        },
+        gridFSId: {
+            type: mongoose.Schema.Types.ObjectId,
+            required: true
+        }
+    }]
 });
 
 // Index for efficient querying
 ticketSchema.index({ customer_id: 1, created_at: -1 });
-ticketSchema.index({ ticket_id: 1 });
+// 'ticket_id' index is ensured by the unique property
 ticketSchema.index({ status: 1 });
 
 // Update the updated_at field on save
