@@ -112,7 +112,7 @@ router.get('/auth/verify', authMiddleware, async (req, res) => {
 router.get('/chat', authMiddleware, async (req, res) => {
     try {
         console.log('Fetching chats for user ID:', req.user.id);
-        const chats = await Chat.find({ userId: req.user.id });
+        const chats = await Chat.find({ userId: req.user.id }).sort({ updatedAt: -1 });
         res.json(chats);
     } catch (error) {
         console.error('Get chats error:', error.message, error.stack);
