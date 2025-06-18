@@ -6,6 +6,13 @@ const ticketSchema = new mongoose.Schema({
         required: true,
         index: true
     },
+    customer_email: {
+        type: String,
+        required: true,
+        lowercase: true,
+        trim: true,
+        index: true
+    },
     issue_title: {
         type: String,
         required: true,

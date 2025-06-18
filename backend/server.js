@@ -1225,9 +1225,14 @@ Now please provide a detailed description of your issue. Include any relevant in
     const category = categoryMatch[1];
     
     try {
+      // Get customer email from user data
+      const userData = await getUserData(customerId);
+      const customerEmail = userData.customer?.email || 'unknown@email.com';
+      
       // Create the ticket in database
       const ticket = await createTicket({
         customer_id: customerId,
+        customer_email: customerEmail,
         issue_title: issueTitle,
         category: category,
         description: description
@@ -1274,6 +1279,7 @@ async function createTicket(ticketData) {
   
   const ticket = {
     customer_id: parseInt(ticketData.customer_id),
+    customer_email: ticketData.customer_email,
     issue_title: ticketData.issue_title,
     category: ticketData.category,
     description: ticketData.description,
