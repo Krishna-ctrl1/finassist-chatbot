@@ -13,6 +13,7 @@ const stringSimilarity = require('string-similarity');
 const axios = require('axios');
 const crypto = require('crypto');
 const FAQ_KB = require('../data/faq.json');
+const Ticket = require('./models/Ticket');
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
@@ -355,19 +356,27 @@ Your task is to classify the following user query into exactly ONE of these cate
    - Financial education
    - Tax implications
    - Any question about specific companies, funds, or financial instruments
-4. "NON-FINANCIAL" - Questions completely unrelated to finance, investments, or money
-5. "AFFIRMATIVE_RESPONSE" - Responses like "yes", "ok", "sure", "please", "yes please" that are answering a previous question
+4. "TICKET_RELATED" - Queries related to raising tickets, support requests, or customer service issues including:
+   - "I want to raise a ticket"
+   - "I need help with..."
+   - "I have a problem with..."
+   - "I want to complain about..."
+   - "I need support for..."
+   - Any expressions of issues, problems, complaints, or need for assistance
+5. "NON-FINANCIAL" - Questions completely unrelated to finance, investments, or money
+6. "AFFIRMATIVE_RESPONSE" - Responses like "yes", "ok", "sure", "please", "yes please" that are answering a previous question
 
 IMPORTANT RULES:
 - If a query has even 1% relation to finance, stocks, investments, or money, classify it as financial
 - Investment scenarios like "what if I had invested X in Y fund Z years ago" are GENERAL-FINANCIAL
 - Questions about specific mutual funds, stocks, or companies are GENERAL-FINANCIAL
-- Only classify as NON-FINANCIAL if the query has absolutely no connection to finance
+- If user expresses any problem, issue, complaint, or need for support/help, classify as TICKET_RELATED
+- Only classify as NON-FINANCIAL if the query has absolutely no connection to finance, tickets, or support
 - If the user is responding "yes", "ok", "sure", "please" to a previous question from the bot, classify as AFFIRMATIVE_RESPONSE
 
 User query: "${message}"${contextInfo}
 
-Respond with ONLY the category name (GREETING, USER-SPECIFIC-FINANCIAL, GENERAL-FINANCIAL, NON-FINANCIAL, or AFFIRMATIVE_RESPONSE). Do not include any explanation.`;
+Respond with ONLY the category name (GREETING, USER-SPECIFIC-FINANCIAL, GENERAL-FINANCIAL, TICKET_RELATED, NON-FINANCIAL, or AFFIRMATIVE_RESPONSE). Do not include any explanation.`;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4.1",
@@ -380,7 +389,7 @@ Respond with ONLY the category name (GREETING, USER-SPECIFIC-FINANCIAL, GENERAL-
 
     const classification = completion.choices[0].message.content.trim().toUpperCase();
     
-    const validCategories = ['GREETING', 'USER-SPECIFIC-FINANCIAL', 'GENERAL-FINANCIAL', 'NON-FINANCIAL', 'AFFIRMATIVE_RESPONSE'];
+    const validCategories = ['GREETING', 'USER-SPECIFIC-FINANCIAL', 'GENERAL-FINANCIAL', 'TICKET_RELATED', 'NON-FINANCIAL', 'AFFIRMATIVE_RESPONSE'];
     if (!validCategories.includes(classification)) {
       console.warn(`Invalid classification received: ${classification}. Defaulting to GENERAL-FINANCIAL`);
       return 'GENERAL-FINANCIAL';
@@ -1096,6 +1105,256 @@ function calculateCompletedInstallments(sip) {
   return Math.max(0, installments - 1);
 }
 
+// =============================================================================
+// TICKET MANAGEMENT FUNCTIONS
+// =============================================================================
+
+// Function to handle ticket creation flow
+async function handleTicketCreationFlow(message, chat, customerId) {
+  const lastBotMessage = chat.messages.slice(0, -1).reverse().find(msg => msg.sender === 'bot');
+  
+  // Check if user confirmed they want to create a ticket
+  if (lastBotMessage && lastBotMessage.content.includes('Would you like to proceed with creating a support ticket?')) {
+    if (message.toLowerCase().includes('yes') || message.toLowerCase().includes('ok') || message.toLowerCase().includes('sure')) {
+      // Start ticket creation process
+      return `Great! Let's create your support ticket. I'll guide you through the process step by step.
+
+**Step 1 of 3: Issue Title**
+Please provide a brief title for your issue (e.g., "Unable to complete payment", "Account verification problem", etc.)`;
+    } else {
+      return `No problem! If you need any other assistance with your investments or have questions about our services, I'm here to help. What else can I assist you with today?`;
+    }
+  }
+  
+  // Check which step we're in based on previous messages
+  const ticketCreationMessages = chat.messages.filter(msg => 
+    msg.content.includes('Step 1 of 3') || 
+    msg.content.includes('Step 2 of 3') || 
+    msg.content.includes('Step 3 of 3')
+  );
+  
+  if (ticketCreationMessages.length === 0) {
+    // This shouldn't happen, but handle gracefully
+    return `I understand you want to create a ticket. Let me start the process:
+
+**Step 1 of 3: Issue Title**
+Please provide a brief title for your issue.`;
+  }
+  
+  const latestStep = ticketCreationMessages[ticketCreationMessages.length - 1];
+  
+  if (latestStep.content.includes('Step 1 of 3')) {
+    // User provided issue title, ask for category
+    const issueTitle = message.trim();
+    
+    // Store the title temporarily in chat context
+    return `**Step 2 of 3: Category**
+Thank you! Your issue title: "${issueTitle}"
+
+Now please select a category for your ticket:
+1. General Enquiry
+2. KYC Related
+3. Products Related
+4. Orders Related
+5. Payments/Bank Accounts
+6. Account Related
+7. Others
+
+Please respond with the number (1-7) or the category name.`;
+  }
+  
+  if (latestStep.content.includes('Step 2 of 3')) {
+    // User provided category, ask for description
+    const categoryInput = message.trim().toLowerCase();
+    let selectedCategory = '';
+    
+    // Map user input to category
+    if (categoryInput.includes('1') || categoryInput.includes('general')) {
+      selectedCategory = 'General Enquiry';
+    } else if (categoryInput.includes('2') || categoryInput.includes('kyc')) {
+      selectedCategory = 'KYC Related';
+    } else if (categoryInput.includes('3') || categoryInput.includes('product')) {
+      selectedCategory = 'Products Related';
+    } else if (categoryInput.includes('4') || categoryInput.includes('order')) {
+      selectedCategory = 'Orders Related';
+    } else if (categoryInput.includes('5') || categoryInput.includes('payment') || categoryInput.includes('bank')) {
+      selectedCategory = 'Payments/Bank Accounts';
+    } else if (categoryInput.includes('6') || categoryInput.includes('account')) {
+      selectedCategory = 'Account Related';
+    } else if (categoryInput.includes('7') || categoryInput.includes('other')) {
+      selectedCategory = 'Others';
+    } else {
+      return `Please select a valid category. Choose from:
+1. General Enquiry
+2. KYC Related
+3. Products Related
+4. Orders Related
+5. Payments/Bank Accounts
+6. Account Related
+7. Others
+
+Respond with the number (1-7) or category name.`;
+    }
+    
+    return `**Step 3 of 3: Description**
+Category selected: ${selectedCategory}
+
+Now please provide a detailed description of your issue. Include any relevant information that would help our support team assist you better.`;
+  }
+  
+  if (latestStep.content.includes('Step 3 of 3')) {
+    // User provided description, create the ticket
+    const description = message.trim();
+    
+    // Extract issue title and category from previous messages
+    const step1Message = chat.messages.find(msg => msg.content.includes('Your issue title:'));
+    const step2Message = chat.messages.find(msg => msg.content.includes('Category selected:'));
+    
+    if (!step1Message || !step2Message) {
+      return `I'm sorry, there was an issue retrieving your ticket information. Let's start over. Would you like to create a support ticket?`;
+    }
+    
+    const issueTitleMatch = step1Message.content.match(/Your issue title: "([^"]+)"/);
+    const categoryMatch = step2Message.content.match(/Category selected: ([^\n]+)/);
+    
+    if (!issueTitleMatch || !categoryMatch) {
+      return `I'm sorry, there was an issue processing your ticket information. Let's start over. Would you like to create a support ticket?`;
+    }
+    
+    const issueTitle = issueTitleMatch[1];
+    const category = categoryMatch[1];
+    
+    try {
+      // Create the ticket in database
+      const ticket = await createTicket({
+        customer_id: customerId,
+        issue_title: issueTitle,
+        category: category,
+        description: description
+      });
+      
+      return `✅ **Ticket Created Successfully!**
+
+**Ticket ID:** ${ticket.ticket_id}
+**Title:** ${issueTitle}
+**Category:** ${category}
+**Status:** Open
+
+Your support ticket has been created and assigned to our team. You'll receive updates on the progress via email.
+
+**What's next?**
+- Our support team will review your ticket within 24 hours
+- You'll receive email notifications for any updates
+- You can reference your ticket using ID: ${ticket.ticket_id}
+
+Is there anything else I can help you with regarding your investments or account?`;
+      
+    } catch (error) {
+      console.error('Error creating ticket:', error);
+      return `I'm sorry, there was an error creating your ticket. Please try again later or contact our support team directly. 
+
+In the meantime, is there anything else I can help you with regarding your investments?`;
+    }
+  }
+  
+  // Fallback
+  return `I'm here to help you create a support ticket. Let's start:
+
+**Step 1 of 3: Issue Title**
+Please provide a brief title for your issue.`;
+}
+
+// Function to create a ticket in the database
+async function createTicket(ticketData) {
+  const db = mongoClient.db('financeai');
+  const ticketsCollection = db.collection('tickets');
+  
+  // Generate unique ticket ID
+  const ticketId = `TCK${Date.now()}${Math.floor(Math.random() * 1000)}`;
+  
+  const ticket = {
+    customer_id: parseInt(ticketData.customer_id),
+    issue_title: ticketData.issue_title,
+    category: ticketData.category,
+    description: ticketData.description,
+    status: 'Open',
+    priority: 'Medium',
+    ticket_id: ticketId,
+    created_at: new Date(),
+    updated_at: new Date()
+  };
+  
+  const result = await ticketsCollection.insertOne(ticket);
+  
+  return {
+    ...ticket,
+    _id: result.insertedId
+  };
+}
+
+// =============================================================================
+// TICKET API ENDPOINTS
+// =============================================================================
+
+// Get customer tickets
+app.get('/api/tickets', authenticateToken, async (req, res) => {
+  try {
+    const customerId = req.user.customerId || req.user.id;
+    const db = mongoClient.db('financeai');
+    const ticketsCollection = db.collection('tickets');
+    
+    const tickets = await ticketsCollection.find({ 
+      customer_id: parseInt(customerId) 
+    }).sort({ created_at: -1 }).toArray();
+    
+    res.json({
+      success: true,
+      tickets: tickets
+    });
+    
+  } catch (error) {
+    console.error('Error fetching tickets:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch tickets'
+    });
+  }
+});
+
+// Get specific ticket
+app.get('/api/tickets/:ticketId', authenticateToken, async (req, res) => {
+  try {
+    const { ticketId } = req.params;
+    const customerId = req.user.customerId || req.user.id;
+    const db = mongoClient.db('financeai');
+    const ticketsCollection = db.collection('tickets');
+    
+    const ticket = await ticketsCollection.findOne({ 
+      ticket_id: ticketId,
+      customer_id: parseInt(customerId)
+    });
+    
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        message: 'Ticket not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      ticket: ticket
+    });
+    
+  } catch (error) {
+    console.error('Error fetching ticket:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch ticket'
+    });
+  }
+});
+
 // Global request tracking for duplicate prevention
 const recentRequests = new Map();
 const REQUEST_TIMEOUT = 2000; // 2 seconds
@@ -1281,6 +1540,42 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
       // Handle affirmative responses by looking at conversation context
       const lastBotMessage = chat.messages.slice(0, -1).reverse().find(msg => msg.sender === 'bot');
       
+      // Check if we're in the middle of ticket creation process
+      if (lastBotMessage && (lastBotMessage.content.includes('Would you like to proceed with creating a support ticket?') || 
+          lastBotMessage.content.includes('Step 1 of 3') || 
+          lastBotMessage.content.includes('Step 2 of 3') || 
+          lastBotMessage.content.includes('Step 3 of 3'))) {
+        // User is providing affirmative response during ticket creation
+        const ticketResponse = await handleTicketCreationFlow(message, chat, userData.customer?.id);
+        
+        const assistantMessage = {
+          sender: 'bot',
+          content: ticketResponse,
+          timestamp: new Date()
+        };
+        
+        chat.messages.push(assistantMessage);
+        chat.updatedAt = new Date();
+        
+        if (chat._id) {
+          await chatsCollection.updateOne(
+            { _id: chat._id },
+            { 
+              $set: { 
+                messages: chat.messages, 
+                updatedAt: chat.updatedAt 
+              },
+              $inc: { __v: 1 }
+            }
+          );
+        } else {
+          const result = await chatsCollection.insertOne(chat);
+          chat._id = result.insertedId;
+        }
+        
+        return res.json(chat);
+      }
+      
       let contextualResponse;
       if (lastBotMessage && lastBotMessage.content.includes('Would you like to see how your current')) {
         // User said yes to seeing portfolio performance
@@ -1324,6 +1619,83 @@ app.post('/api/chat', authenticateToken, async (req, res) => {
       }
       
       return res.json(chat);
+      
+    } else if (queryType === 'TICKET_RELATED') {
+      // Handle ticket-related queries
+      const lastBotMessage = chat.messages.slice(0, -1).reverse().find(msg => msg.sender === 'bot');
+      
+      // Check if we're in the middle of ticket creation process
+      if (lastBotMessage && (lastBotMessage.content.includes('Step 1 of 3') || 
+          lastBotMessage.content.includes('Step 2 of 3') || 
+          lastBotMessage.content.includes('Step 3 of 3') ||
+          lastBotMessage.content.includes('Would you like to proceed with creating a support ticket?'))) {
+        // User is providing ticket details
+        const ticketResponse = await handleTicketCreationFlow(message, chat, userData.customer?.id);
+        
+        const assistantMessage = {
+          sender: 'bot',
+          content: ticketResponse,
+          timestamp: new Date()
+        };
+        
+        chat.messages.push(assistantMessage);
+        chat.updatedAt = new Date();
+        
+        if (chat._id) {
+          await chatsCollection.updateOne(
+            { _id: chat._id },
+            { 
+              $set: { 
+                messages: chat.messages, 
+                updatedAt: chat.updatedAt 
+              },
+              $inc: { __v: 1 }
+            }
+          );
+        } else {
+          const result = await chatsCollection.insertOne(chat);
+          chat._id = result.insertedId;
+        }
+        
+        return res.json(chat);
+      } else {
+        // Initial ticket request
+        const aiResponse = `I understand you need assistance! I can help you raise a support ticket. 
+
+To create your ticket, I'll need:
+1. **Issue Title** - Brief description of your problem
+2. **Category** - Choose from: General Enquiry, KYC Related, Products Related, Orders Related, Payments/Bank Accounts, Account Related, Others
+3. **Description** - Detailed explanation of your issue
+
+Would you like to proceed with creating a support ticket?`;
+        
+        const assistantMessage = {
+          sender: 'bot',
+          content: aiResponse,
+          timestamp: new Date()
+        };
+        
+        chat.messages.push(assistantMessage);
+        chat.updatedAt = new Date();
+        
+        if (chat._id) {
+          await chatsCollection.updateOne(
+            { _id: chat._id },
+            { 
+              $set: { 
+                messages: chat.messages, 
+                updatedAt: chat.updatedAt 
+              },
+              $inc: { __v: 1 }
+            }
+          );
+        } else {
+          const result = await chatsCollection.insertOne(chat);
+          chat._id = result.insertedId;
+        }
+        
+        return res.json(chat);
+      }
       
     } else if (queryType === 'NON-FINANCIAL') {
       const aiResponse = isFirstMessage
