@@ -2018,6 +2018,11 @@ async function handleTicketCreation(button) {
       fileCount: selectedFiles.length
     });
 
+    // Add chatId to the form data
+    if (currentChatId) {
+      formData.append('chatId', currentChatId);
+    }
+
     const response = await fetch(`${API_BASE}/tickets/create`, {
       method: 'POST',
       headers: {
@@ -2058,14 +2063,37 @@ Is there anything else I can help you with regarding your investments or account
       fileUploadContainer.remove();
     }
 
-    // Add success message to chat
-    appendMessage('bot', successMessage);
-
     // Reset state
     selectedFiles = [];
     ticketData = {};
 
     showNotification(`Ticket ${result.ticket.ticket_id} created successfully!`, 'success');
+    
+    // Reload chat to get the success message from backend with retry mechanism
+    if (currentChatId) {
+      let retryCount = 0;
+      const maxRetries = 3;
+      
+      const reloadChat = async () => {
+        try {
+          await loadChat(currentChatId);
+          console.log('Chat reloaded successfully after ticket creation');
+        } catch (error) {
+          console.error('Error reloading chat:', error);
+          if (retryCount < maxRetries) {
+            retryCount++;
+            console.log(`Retrying chat reload (${retryCount}/${maxRetries})...`);
+            setTimeout(reloadChat, 1000);
+          } else {
+            console.error('Failed to reload chat after maximum retries');
+            showNotification('Chat update may be delayed. Please refresh if needed.', 'warning');
+          }
+        }
+      };
+      
+      // Initial delay to allow backend processing
+      setTimeout(reloadChat, 1500);
+    }
 
   } catch (error) {
     console.error('Error creating ticket:', error);

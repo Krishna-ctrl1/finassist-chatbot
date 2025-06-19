@@ -1621,6 +1621,60 @@ app.post('/api/tickets/create', authenticateToken, upload.array('attachments', 3
     const savedTicket = await ticket.save();
     console.log(`Ticket created successfully: ${savedTicket.ticket_id} with ${attachments.length} attachment(s)`);
 
+    // If chatId is provided, add the success message to the chat
+    if (req.body.chatId) {
+      try {
+        const db = mongoClient.db('financeai');
+        const chatsCollection = db.collection('chats');
+        const chatId = new mongoose.Types.ObjectId(req.body.chatId);
+        const successMessage = `✅ Ticket Created Successfully!
+
+Ticket ID: ${savedTicket.ticket_id}
+Title: ${savedTicket.issue_title}
+Category: ${savedTicket.category}
+Status: ${savedTicket.status}
+
+Your support ticket has been created and assigned to our team. You'll receive updates on the progress via email.
+
+What's next?
+- Our support team will review your ticket within 24 hours
+- You'll receive email notifications for any updates
+- You can reference your ticket using ID: ${savedTicket.ticket_id}
+
+Ticket creation process completed. Is there anything else I can help you with regarding your investments or account?`;
+        
+        const assistantMessage = {
+          sender: 'bot',
+          content: successMessage,
+          timestamp: new Date()
+        };
+
+        // Load the current chat and update it with the success message
+        const currentChat = await chatsCollection.findOne({ _id: chatId });
+        if (currentChat) {
+          currentChat.messages.push(assistantMessage);
+          currentChat.updatedAt = new Date();
+          currentChat.__v = (currentChat.__v || 0) + 1;
+          
+          await chatsCollection.updateOne(
+            { _id: chatId },
+            { 
+              $set: { 
+                messages: currentChat.messages, 
+                updatedAt: currentChat.updatedAt 
+              },
+              $inc: { __v: 1 }
+            }
+          );
+        }
+        
+        console.log(`Success message added to chat ${chatId} for ticket ${savedTicket.ticket_id}`);
+      } catch (chatError) {
+        console.error('Error updating chat with ticket success message:', chatError);
+        // Don't fail the ticket creation if chat update fails
+      }
+    }
+
     res.json({
       success: true,
       ticket: savedTicket,
