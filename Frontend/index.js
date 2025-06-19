@@ -12,6 +12,8 @@ const elements = {
   chatHistory: document.getElementById("chatHistory"),
   messageInput: document.getElementById("messageInput"),
   sendBtn: document.getElementById("sendBtn"),
+  wavesBtn: document.getElementById("wavesBtn"),
+  voiceBtn: document.getElementById("voiceBtn"),
   typingIndicator: document.getElementById("typingIndicator"),
   userName: document.getElementById("userName"),
   userInitials: document.getElementById("userInitials"),
@@ -146,6 +148,11 @@ function setupEventListeners() {
   // Send button click handler
   if (elements.sendBtn) {
     elements.sendBtn.addEventListener("click", sendMessage);
+  }
+
+  // Waves button click handler
+  if (elements.wavesBtn) {
+    elements.wavesBtn.addEventListener("click", toggleVoiceOutput);
   }
 }
 
@@ -2259,3 +2266,27 @@ window.handleFileSelection = handleFileSelection;
 window.handleTicketCreation = handleTicketCreation;
 window.skipFileUpload = skipFileUpload;
 window.removeFile = removeFile;
+window.toggleVoiceOutput = toggleVoiceOutput;
+
+// Toggle voice output function for waves button
+function toggleVoiceOutput() {
+  if (!elements.wavesBtn) return;
+  
+  const isActive = elements.wavesBtn.classList.contains('active');
+  
+  if (isActive) {
+    // Deactivate voice output
+    elements.wavesBtn.classList.remove('active');
+    showNotification('Voice output disabled', 'info');
+  } else {
+    // Activate voice output
+    elements.wavesBtn.classList.add('active');
+    showNotification('Voice output enabled', 'success');
+  }
+  
+  // Add visual feedback
+  elements.wavesBtn.style.transform = 'scale(0.95)';
+  setTimeout(() => {
+    elements.wavesBtn.style.transform = 'scale(1)';
+  }, 100);
+}

@@ -222,28 +222,65 @@
                 </div>
                 <div class="chat-input-container">
                     <div class="chat-input-wrapper">
-                        <textarea 
-                            class="chat-input" 
-                            id="messageInput" 
-                            placeholder="Message FinanceAI..." 
-                            rows="1" 
-                            aria-label="Type your message here"
-                            autocomplete="off"
-                            autocorrect="off"
-                            autocapitalize="sentences"
-                            spellcheck="true"
-                            maxlength="2000"
-                        ></textarea>
-                        <button 
-                            class="send-btn" 
-                            id="sendBtn" 
-                            aria-label="Send message" 
-                            type="button"
-                            disabled
-                        >
-                            <i class="fas fa-paper-plane" aria-hidden="true"></i>
-                            <span class="sr-only">Send</span>
-                        </button>
+                        <div class="chat-input-box">
+                            <!-- First row: Text input only -->
+                            <div class="input-row-top">
+                                <textarea 
+                                    class="chat-input" 
+                                    id="messageInput" 
+                                    placeholder="Send a message..." 
+                                    rows="1" 
+                                    aria-label="Type your message here"
+                                    autocomplete="off"
+                                    autocorrect="off"
+                                    autocapitalize="sentences"
+                                    spellcheck="true"
+                                    maxlength="2000"
+                                ></textarea>
+                            </div>
+                            <!-- Second row: Waves button on left, Mic and Send buttons on right -->
+                            <div class="input-row-bottom">
+                                <button 
+                                    class="waves-btn" 
+                                    id="wavesBtn" 
+                                    aria-label="Toggle voice output" 
+                                    type="button"
+                                    title="Toggle voice output"
+                                >
+                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                                        <!-- 1st line (smallest height) - centered -->
+                                        <rect x="2" y="7" width="2.5" height="2" rx="1.25"/>
+                                        <!-- 2nd line (biggest height) - centered -->
+                                        <rect x="5.5" y="3" width="2.5" height="10" rx="1.25"/>
+                                        <!-- 3rd line (medium height) - centered -->
+                                        <rect x="9" y="5" width="2.5" height="6" rx="1.25"/>
+                                        <!-- 4th line (same as 1st height) - centered -->
+                                        <rect x="12.5" y="7" width="2.5" height="2" rx="1.25"/>
+                                    </svg>
+                                </button>
+                                <div class="input-actions">
+                                    <button 
+                                        class="voice-btn" 
+                                        id="voiceBtn" 
+                                        aria-label="Voice input" 
+                                        type="button"
+                                        title="Voice input"
+                                    >
+                                        <i class="fas fa-microphone" aria-hidden="true"></i>
+                                    </button>
+                                    <button 
+                                        class="send-btn" 
+                                        id="sendBtn" 
+                                        aria-label="Send message" 
+                                        type="button"
+                                        disabled
+                                    >
+                                        <i class="fas fa-paper-plane" aria-hidden="true"></i>
+                                        <span class="sr-only">Send</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </main>
