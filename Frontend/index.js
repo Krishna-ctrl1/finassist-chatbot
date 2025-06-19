@@ -741,10 +741,43 @@ function toggleSidebar(event) {
 
 // Close sidebar and restore body scroll
 function closeSidebar() {
-  if (elements.sidebar) {
-    elements.sidebar.classList.remove("active");
-    document.body.style.overflow = '';
+  if (!elements.sidebar) return;
+  
+  const overlay = document.getElementById('sidebarOverlay');
+  const chatScreen = document.getElementById('chatScreen');
+  
+  // Remove active class from sidebar
+  elements.sidebar.classList.remove("active");
+  
+  // Restore body scroll
+  document.body.style.overflow = '';
+  
+  // Hide overlay
+  if (overlay) {
+    overlay.classList.remove('active');
+    overlay.style.opacity = '0';
+    overlay.style.visibility = 'hidden';
   }
+  
+  // Update chat screen state for mobile
+  if (window.innerWidth <= 768 && chatScreen) {
+    chatScreen.classList.add('sidebar-collapsed');
+  }
+  
+  // Force remove any lingering overlay classes
+  if (overlay) {
+    overlay.classList.remove('active');
+    // Force immediate style update
+    overlay.style.setProperty('opacity', '0', 'important');
+    overlay.style.setProperty('visibility', 'hidden', 'important');
+    overlay.style.setProperty('pointer-events', 'none', 'important');
+  }
+  
+  // Ensure body scroll is restored
+  document.body.style.removeProperty('overflow');
+  document.body.classList.remove('sidebar-open');
+  
+  console.log('Sidebar closed properly');
 }
 
 // Chat history functions
@@ -854,19 +887,27 @@ async function loadChat(chatId) {
       elements.chatMessages.innerHTML = "";
     }
 
-    // Render messages
-    chat.messages.forEach((message) => {
-      appendMessage(message.sender, message.content, false);
-    });
+    // Show loading indicator for large chats
+    if (chat.messages.length > 50) {
+      const loadingDiv = document.createElement('div');
+      loadingDiv.className = 'loading-messages';
+      loadingDiv.innerHTML = '<div class="loading-spinner"></div><p>Loading messages...</p>';
+      elements.chatMessages.appendChild(loadingDiv);
+    }
 
-    scrollToBottom();
+    // Render messages with performance optimization
+    await renderMessagesOptimized(chat.messages);
+
+    scrollToBottom(false); // No smooth scroll for initial load
     closeSidebar(); // Use the new function to properly close sidebar
 
     // Update active state in sidebar
     document.querySelectorAll('.chat-history-item').forEach(item => {
-      const deleteBtn = item.querySelector('.delete-chat-btn');
-      if (deleteBtn) {
-        item.classList.toggle('active', deleteBtn.dataset.chatId === chatId);
+      const itemChatId = item.getAttribute('data-chat-id');
+      if (itemChatId === chatId) {
+        item.classList.add('active');
+      } else {
+        item.classList.remove('active');
       }
     });
 
@@ -915,7 +956,7 @@ async function deleteChat(chatId) {
   }
 }
 
-function appendMessage(sender, message, animate = true) {
+function appendMessage(sender, message, animate = true, skipScroll = false) {
   if (!elements.chatMessages) return;
 
   const messageDiv = document.createElement("div");
@@ -954,12 +995,17 @@ function appendMessage(sender, message, animate = true) {
     });
   }
 
-  scrollToBottom();
+  // Only scroll if not skipped (for batch loading)
+  if (!skipScroll) {
+    scrollToBottom();
+  }
 
   // Check for file upload trigger only for new bot messages
   if (sender === 'bot' && animate) {
     checkForFileUploadTrigger(message);
   }
+
+  return messageDiv;
 }
 
 function formatMessage(message) {
@@ -1201,15 +1247,82 @@ const handleWindowResize = debounce(function () {
 window.addEventListener('resize', handleWindowResize);
 
 // Add smooth scrolling to messages
-function scrollToBottom() {
-  if (elements.chatMessages && elements.chatMessages.scrollTo) {
+function scrollToBottom(smooth = true) {
+  if (!elements.chatMessages) return;
+  
+  // Use smooth scrolling only when appropriate (not for initial loads or mobile)
+  const shouldUseSmooth = smooth && !isMobileDevice() && elements.chatMessages.children.length < 100;
+  
+  if (elements.chatMessages.scrollTo && shouldUseSmooth) {
     elements.chatMessages.scrollTo({
       top: elements.chatMessages.scrollHeight,
       behavior: 'smooth'
     });
-  } else if (elements.chatMessages) {
-    // Fallback for older browsers
+  } else {
+    // Direct scroll for better performance
     elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+  }
+}
+
+// Helper function to detect mobile devices
+function isMobileDevice() {
+  return /iPhone|iPad|iPod|Android|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
+         window.innerWidth <= 768;
+}
+
+// Optimized message rendering for better performance with large chat histories
+async function renderMessagesOptimized(messages) {
+  if (!elements.chatMessages || !messages.length) return;
+
+  // Remove loading indicator if present
+  const loadingDiv = elements.chatMessages.querySelector('.loading-messages');
+  if (loadingDiv) {
+    loadingDiv.remove();
+  }
+
+  const isLargeChat = messages.length > 50;
+  const isMobile = isMobileDevice();
+  
+  if (isLargeChat && isMobile) {
+    // For large chats on mobile, render in chunks to prevent UI blocking
+    await renderMessagesInChunks(messages);
+  } else {
+    // For smaller chats or desktop, render normally but without animations
+    messages.forEach(message => {
+      appendMessage(message.sender, message.content, false, true); // no animation, skip scroll
+    });
+  }
+}
+
+// Render messages in chunks to prevent UI blocking on mobile
+async function renderMessagesInChunks(messages) {
+  const chunkSize = 10; // Render 10 messages at a time
+  const chunks = [];
+  
+  // Split messages into chunks
+  for (let i = 0; i < messages.length; i += chunkSize) {
+    chunks.push(messages.slice(i, i + chunkSize));
+  }
+  
+  // Render each chunk with a small delay
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    
+    // Render chunk
+    chunk.forEach(message => {
+      appendMessage(message.sender, message.content, false, true); // no animation, skip scroll
+    });
+    
+    // Show progress for large chats
+    if (chunks.length > 5) {
+      const progress = Math.round(((i + 1) / chunks.length) * 100);
+      console.log(`Rendering messages: ${progress}%`);
+    }
+    
+    // Small delay to prevent UI blocking, except for the last chunk
+    if (i < chunks.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
   }
 }
 
@@ -1690,6 +1803,7 @@ function createChatHistoryItem(chat, index) {
   const chatItem = document.createElement("div");
   chatItem.className = `chat-history-item ${chat._id === currentChatId ? "active" : ""}`;
   chatItem.setAttribute("tabindex", "0");
+  chatItem.setAttribute("data-chat-id", chat._id);
   chatItem.style.animationDelay = `${index * 0.05}s`;
 
   // Get preview text from first user message

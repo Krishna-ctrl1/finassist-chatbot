@@ -167,6 +167,10 @@
   }
 }
 
+@keyframes loadingSpinner {
+  to { transform: rotate(360deg); }
+}
+
 /* Reset and Base Styles */
 * {
   box-sizing: border-box;
@@ -2165,5 +2169,59 @@ body {
   
   .file-icon i {
     font-size: 16px;
+  }
+}
+
+/* Loading Messages Indicator */
+.loading-messages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8);
+  text-align: center;
+  animation: fadeIn 0.4s ease-out;
+}
+
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border);
+  border-top: 3px solid var(--green);
+  border-radius: 50%;
+  margin-bottom: var(--space-4);
+  animation: loadingSpinner 1s linear infinite;
+}
+
+.loading-messages p {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+/* Performance optimizations for mobile */
+@media (max-width: 768px) {
+  /* Reduce animation complexity on mobile */
+  .mobile-device .message {
+    animation: none;
+  }
+  
+  .mobile-device .chat-history-item {
+    animation: none;
+  }
+  
+  /* Improve scrolling performance */
+  .mobile-device .chat-messages {
+    transform: translateZ(0);
+    will-change: scroll-position;
+  }
+  
+  /* Reduce shadows on mobile for better performance */
+  .mobile-device .chat-input-box {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+  
+  .mobile-device .chat-input-box:focus-within {
+    box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.1), 0 2px 6px rgba(0, 0, 0, 0.1);
   }
 }
