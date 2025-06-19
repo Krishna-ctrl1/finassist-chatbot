@@ -53,6 +53,11 @@ const ticketSchema = new mongoose.Schema({
         required: true,
         unique: true
     },
+    chatId: { // Add this field
+        type: mongoose.Schema.Types.ObjectId,
+        required: false,
+        index: true // Add index for efficient querying
+    },
     created_at: {
         type: Date,
         default: Date.now
@@ -98,8 +103,9 @@ const ticketSchema = new mongoose.Schema({
 
 // Index for efficient querying
 ticketSchema.index({ customer_id: 1, created_at: -1 });
-// 'ticket_id' index is ensured by the unique property
+ticketSchema.index({ ticket_id: 1 }); // Explicit index for ticket_id
 ticketSchema.index({ status: 1 });
+ticketSchema.index({ chatId: 1 }); // Add index for chatId
 
 // Update the updated_at field on save
 ticketSchema.pre('save', function(next) {
@@ -108,4 +114,3 @@ ticketSchema.pre('save', function(next) {
 });
 
 module.exports = mongoose.model('Ticket', ticketSchema);
-

@@ -1216,10 +1216,16 @@ function calculateCompletedInstallments(sip) {
 async function handleTicketCreationFlow(message, chat, customerId) {
   const lastBotMessage = chat.messages.slice(0, -1).reverse().find(msg => msg.sender === 'bot');
   
+  // Check if ticket creation is already complete
+  if (lastBotMessage && lastBotMessage.content.includes('Ticket Created Successfully!')) {
+    return `Your ticket has already been created. Please reference the Ticket ID provided in my previous message. 
+
+Is there anything else I can help you with regarding your investments or account?`;
+  }
+  
   // Check if user confirmed they want to create a ticket
   if (lastBotMessage && lastBotMessage.content.includes('Would you like to proceed with creating a support ticket?')) {
     if (message.toLowerCase().includes('yes') || message.toLowerCase().includes('ok') || message.toLowerCase().includes('sure')) {
-      // Start ticket creation process
       return `Great! Let's create your support ticket. I'll guide you through the process step by step.
 
 **Step 1 of 4: Issue Title**
@@ -1238,7 +1244,6 @@ Please provide a brief title for your issue (e.g., "Unable to complete payment",
   );
   
   if (ticketCreationMessages.length === 0) {
-    // This shouldn't happen, but handle gracefully
     return `I understand you want to create a ticket. Let me start the process:
 
 **Step 1 of 4: Issue Title**
@@ -1248,10 +1253,7 @@ Please provide a brief title for your issue.`;
   const latestStep = ticketCreationMessages[ticketCreationMessages.length - 1];
   
   if (latestStep.content.includes('Step 1 of 4')) {
-    // User provided issue title, ask for category
     const issueTitle = message.trim();
-    
-    // Store the title temporarily in chat context
     return `**Step 2 of 4: Category**
 Thank you! Your issue title: "${issueTitle}"
 
@@ -1268,11 +1270,9 @@ Please respond with the number (1-7) or the category name.`;
   }
   
   if (latestStep.content.includes('Step 2 of 4')) {
-    // User provided category, ask for description
     const categoryInput = message.trim().toLowerCase();
     let selectedCategory = '';
     
-    // Map user input to category
     if (categoryInput.includes('1') || categoryInput.includes('general')) {
       selectedCategory = 'General Enquiry';
     } else if (categoryInput.includes('2') || categoryInput.includes('kyc')) {
@@ -1307,9 +1307,7 @@ Now please provide a detailed description of your issue. Include any relevant in
   }
   
   if (latestStep.content.includes('Step 3 of 4')) {
-    // User provided description, now ask for file upload (optional)
     const description = message.trim();
-    
     return `**Step 4 of 4: Supporting Documents (Optional)**
 Thank you for the description.
 
@@ -1325,11 +1323,9 @@ If you don't need to upload anything, respond with "no" or "skip" to create the 
   }
   
   if (latestStep.content.includes('Step 4 of 4')) {
-    // Handle file upload response
     const userResponse = message.trim().toLowerCase();
     
     if (userResponse.includes('yes') || userResponse.includes('upload')) {
-      // User wants to upload files
       return `**File Upload Instructions**
 
 To upload your supporting documents:
@@ -1343,8 +1339,6 @@ Once you've selected your files, click "Create Ticket with Attachments" to compl
 
 *Note: The file upload form will be displayed in the chat interface.*`;
     } else if (userResponse.includes('no') || userResponse.includes('skip') || userResponse.includes('none')) {
-      // User doesn't want to upload files, create ticket without attachments
-      
       // Extract issue title, category, and description from previous messages
       const step1Message = chat.messages.find(msg => msg.content.includes('Your issue title:'));
       const step2Message = chat.messages.find(msg => msg.content.includes('Category selected:'));
@@ -1356,10 +1350,8 @@ Once you've selected your files, click "Create Ticket with Attachments" to compl
       
       const issueTitleMatch = step1Message.content.match(/Your issue title: "([^"]+)"/);
       const categoryMatch = step2Message.content.match(/Category selected: ([^\n\r]+)/);
-      
-      // Find the description from the user's message after Step 3
       const step3Index = chat.messages.findIndex(msg => msg.content.includes('Step 3 of 4'));
-      const descriptionMessage = chat.messages[step3Index + 1]; // User's response to Step 3
+      const descriptionMessage = chat.messages[step3Index + 1];
       const description = descriptionMessage?.content?.trim();
       
       if (!issueTitleMatch || !categoryMatch || !description) {
@@ -1369,7 +1361,6 @@ Once you've selected your files, click "Create Ticket with Attachments" to compl
       const issueTitle = issueTitleMatch[1];
       let category = categoryMatch[1].trim();
       
-      // Clean up category - remove any text after known triggers
       const cleanupPatterns = [
         /Now please provide.*$/i,
         /\n.*$/,
@@ -1380,7 +1371,6 @@ Once you've selected your files, click "Create Ticket with Attachments" to compl
         category = category.replace(pattern, '').trim();
       }
       
-      // Validate that the category is one of the allowed values
       const validCategories = [
         'General Enquiry',
         'KYC Related', 
@@ -1397,7 +1387,6 @@ Once you've selected your files, click "Create Ticket with Attachments" to compl
       }
       
       try {
-        // Validate input data
         if (!issueTitle || !category || !description) {
           return `I'm sorry, but I need all the required information to create your ticket. Please provide:
 - Issue title
@@ -1407,13 +1396,11 @@ Once you've selected your files, click "Create Ticket with Attachments" to compl
 Let's start over. Would you like to create a support ticket?`;
         }
         
-        // Validate customerId
         if (!customerId) {
           console.error('No customerId available for ticket creation');
           return `I'm sorry, there was an issue with your customer identification. Please try logging in again or contact support directly.`;
         }
         
-        // Get customer email from user data
         const userData = await getUserData(customerId);
         const customerEmail = userData.customer?.email || 'unknown@email.com';
         
@@ -1425,7 +1412,6 @@ Let's start over. Would you like to create a support ticket?`;
           description: description
         });
         
-        // Create the ticket in database
         const ticket = await createTicket({
           customer_id: customerId,
           customer_email: customerEmail,
@@ -1434,7 +1420,7 @@ Let's start over. Would you like to create a support ticket?`;
           description: description
         });
         
-        return `✅ **Ticket Created Successfully!**
+        const successMessage = `✅ **Ticket Created Successfully!**
 
 **Ticket ID:** ${ticket.ticket_id}
 **Title:** ${issueTitle}
@@ -1448,7 +1434,9 @@ Your support ticket has been created and assigned to our team. You'll receive up
 - You'll receive email notifications for any updates
 - You can reference your ticket using ID: ${ticket.ticket_id}
 
-Is there anything else I can help you with regarding your investments or account?`;
+**Ticket creation process completed.** Is there anything else I can help you with regarding your investments or account?`;
+        
+        return successMessage;
         
       } catch (error) {
         console.error('Error creating ticket:', error);
@@ -1464,7 +1452,6 @@ Is there anything else I can help you with regarding your investments or account
           }
         });
         
-        // Check if it's a validation error
         if (error.name === 'ValidationError') {
           const validationErrors = Object.values(error.errors).map(err => err.message).join(', ');
           return `I'm sorry, there was a validation error with your ticket data: ${validationErrors}. Please try again or contact our support team directly.`;
@@ -1475,7 +1462,6 @@ Is there anything else I can help you with regarding your investments or account
 In the meantime, is there anything else I can help you with regarding your investments?`;
       }
     } else {
-      // User gave an unclear response
       return `Please respond with:
 - **"yes"** if you want to upload supporting documents
 - **"no"** or **"skip"** if you want to create the ticket without attachments
@@ -1484,7 +1470,6 @@ What would you like to do?`;
     }
   }
   
-  // Fallback
   return `I'm here to help you create a support ticket. Let's start:
 
 **Step 1 of 4: Issue Title**
@@ -1506,7 +1491,9 @@ async function createTicket(ticketData) {
       description: ticketData.description,
       status: 'Open',
       priority: 'Medium',
-      ticket_id: ticketId
+      ticket_id: ticketId,
+      chatId: ticketData.chatId || null, // Store chatId if provided
+      attachments: ticketData.attachments || [] // Store attachments if provided
     });
     
     const savedTicket = await ticket.save();
@@ -1627,7 +1614,8 @@ app.post('/api/tickets/create', authenticateToken, upload.array('attachments', 3
       status: 'Open',
       priority: 'Medium',
       ticket_id: ticketId,
-      attachments: attachments
+      attachments: attachments,
+      chatId: req.body.chatId ? new mongoose.Types.ObjectId(req.body.chatId) : null // Store chatId if provided
     });
 
     const savedTicket = await ticket.save();
@@ -1699,6 +1687,46 @@ app.get('/api/tickets/:ticketId/attachments/:attachmentId', authenticateToken, a
     res.status(500).json({
       success: false,
       message: 'Failed to download attachment'
+    });
+  }
+});
+
+// Check if a ticket exists for a given chatId
+app.get('/api/tickets/check/:chatId', authenticateToken, async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const customerId = req.user.customerId || req.user.id;
+
+    // Validate chatId format
+    if (!mongoose.Types.ObjectId.isValid(chatId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid chat ID format'
+      });
+    }
+
+    // Find ticket associated with chatId and customerId
+    const ticket = await Ticket.findOne({
+      chatId: new mongoose.Types.ObjectId(chatId),
+      customer_id: parseInt(customerId)
+    });
+
+    res.json({
+      success: true,
+      hasTicket: !!ticket,
+      ticket: ticket ? {
+        ticket_id: ticket.ticket_id,
+        status: ticket.status,
+        issue_title: ticket.issue_title,
+        category: ticket.category
+      } : null
+    });
+
+  } catch (error) {
+    console.error('Error checking ticket for chat:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check ticket'
     });
   }
 });

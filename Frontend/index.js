@@ -25,10 +25,10 @@ const elements = {
 // Debounce utility function
 function debounce(fn, ms) {
   let timeout;
-  return function(...args) {
+  return function (...args) {
     const self = this;
     clearTimeout(timeout);
-    timeout = setTimeout(function() {
+    timeout = setTimeout(function () {
       fn.apply(self, args);
     }, ms);
   };
@@ -50,18 +50,18 @@ function setupEventListeners() {
       this.style.height = "auto";
       const newHeight = Math.min(this.scrollHeight, 120);
       this.style.height = newHeight + "px";
-      
+
       // On mobile, ensure the input stays visible when content expands
       if (window.innerWidth <= 768 && document.body.classList.contains('keyboard-open')) {
         setTimeout(() => {
-          this.scrollIntoView({ 
-            behavior: 'smooth', 
+          this.scrollIntoView({
+            behavior: 'smooth',
             block: 'end',
             inline: 'nearest'
           });
         }, 50);
       }
-      
+
       // Enable/disable send button based on input
       updateSendButtonState();
     });
@@ -76,15 +76,15 @@ function setupEventListeners() {
       }
     });
   }
-  
+
   // File upload event listeners
-  document.addEventListener('change', function(e) {
+  document.addEventListener('change', function (e) {
     if (e.target && e.target.classList.contains('file-upload-input')) {
       handleFileSelection(e.target);
     }
   });
-  
-  document.addEventListener('click', function(e) {
+
+  document.addEventListener('click', function (e) {
     if (e.target && e.target.classList.contains('create-ticket-btn')) {
       e.preventDefault();
       handleTicketCreation(e.target);
@@ -123,7 +123,7 @@ function setupEventListeners() {
   document.addEventListener("click", function (e) {
     const toggleBtn = document.querySelector(".sidebar-toggle");
     const overlay = document.getElementById("sidebarOverlay");
-    
+
     if (
       elements.sidebar && elements.sidebar.classList.contains("active") &&
       !elements.sidebar.contains(e.target) &&
@@ -132,11 +132,11 @@ function setupEventListeners() {
       elements.sidebar.classList.remove("active");
     }
   });
-  
+
   // Handle overlay click
   const overlay = document.getElementById("sidebarOverlay");
   if (overlay) {
-    overlay.addEventListener("click", function() {
+    overlay.addEventListener("click", function () {
       if (elements.sidebar) {
         elements.sidebar.classList.remove("active");
       }
@@ -152,14 +152,14 @@ function setupEventListeners() {
 // Form validation functions
 const validateLoginForm = debounce(() => {
   if (!elements.loginForm) return;
-  
+
   const email = elements.loginForm.querySelector("#loginEmail");
   const password = elements.loginForm.querySelector("#loginPassword");
   const emailError = elements.loginForm.querySelector("#loginEmailError");
   const passwordError = elements.loginForm.querySelector("#loginPasswordError");
-  
+
   if (!email || !password) return;
-  
+
   let isValid = true;
 
   // Email validation
@@ -187,16 +187,16 @@ const validateLoginForm = debounce(() => {
 
 const validateSignupForm = debounce(() => {
   if (!elements.signupForm) return;
-  
+
   const name = elements.signupForm.querySelector("#signupName");
   const email = elements.signupForm.querySelector("#signupEmail");
   const password = elements.signupForm.querySelector("#signupPassword");
   const nameError = elements.signupForm.querySelector("#signupNameError");
   const emailError = elements.signupForm.querySelector("#signupEmailError");
   const passwordError = elements.signupForm.querySelector("#signupPasswordError");
-  
+
   if (!name || !email || !password) return;
-  
+
   let isValid = true;
 
   // Name validation
@@ -247,7 +247,7 @@ function sanitizeInput(input) {
 async function checkAuthStatus() {
   // Try to get token from memory first, then localStorage
   authToken = authToken || (typeof localStorage !== 'undefined' ? localStorage.getItem("authToken") : null);
-  
+
   if (!authToken) {
     console.log("No authentication token found");
     showAuthScreen();
@@ -258,7 +258,7 @@ async function checkAuthStatus() {
     console.log("Verifying authentication token...");
     const response = await fetch(`${API_BASE}/auth/verify`, {
       method: 'GET',
-      headers: { 
+      headers: {
         'Authorization': `Bearer ${authToken}`,
         'Content-Type': 'application/json'
       },
@@ -288,7 +288,7 @@ async function checkAuthStatus() {
 async function handleLogin(e) {
   e.preventDefault();
   console.log("Attempting login...");
-  
+
   setButtonLoading(elements.loginBtn, true, "Signing In...");
 
   const formData = new FormData(e.target);
@@ -317,11 +317,11 @@ async function handleLogin(e) {
       localStorage.setItem("authToken", data.token);
     }
     currentUser = data.user;
-    
+
     console.log("Login successful for user:", currentUser.name);
     showChatScreen(data.user);
     showNotification("Welcome back!", "success");
-    
+
     // Load chat history after a brief delay
     setTimeout(() => loadChatHistory(), 100);
   } catch (error) {
@@ -335,7 +335,7 @@ async function handleLogin(e) {
 async function handleSignup(e) {
   e.preventDefault();
   console.log("Attempting signup...");
-  
+
   setButtonLoading(elements.signupBtn, true, "Creating Account...");
 
   const formData = new FormData(e.target);
@@ -365,11 +365,11 @@ async function handleSignup(e) {
       localStorage.setItem("authToken", data.token);
     }
     currentUser = data.user;
-    
+
     console.log("Signup successful for user:", currentUser.name);
     showChatScreen(data.user);
     showNotification("Account created successfully! Welcome to FinanceAI!", "success");
-    
+
     setTimeout(() => loadChatHistory(), 100);
   } catch (error) {
     console.error("Signup error:", error);
@@ -382,7 +382,7 @@ async function handleSignup(e) {
 // UI helper functions
 function setButtonLoading(button, isLoading, text) {
   if (!button) return;
-  
+
   if (isLoading) {
     button.disabled = true;
     button.classList.add('btn-loading');
@@ -399,12 +399,12 @@ function setButtonLoading(button, isLoading, text) {
 // Update send button state based on input
 function updateSendButtonState() {
   if (!elements.sendBtn || !elements.messageInput) return;
-  
+
   const hasText = elements.messageInput.value.trim().length > 0;
   const isCurrentlyDisabled = elements.sendBtn.disabled;
-  
+
   elements.sendBtn.disabled = !hasText;
-  
+
   // Animate button state changes
   if (hasText && isCurrentlyDisabled) {
     // Animate to enabled state
@@ -426,22 +426,22 @@ function showNotification(message, type = "info") {
     // Create notification element
     const notification = document.createElement("div");
     notification.className = `notification ${type}`;
-    
-    const iconClass = type === 'success' ? 'fa-check-circle' : 
-                     type === 'error' ? 'fa-exclamation-circle' : 
-                     type === 'warning' ? 'fa-exclamation-triangle' : 
-                     'fa-info-circle';
-    
+
+    const iconClass = type === 'success' ? 'fa-check-circle' :
+      type === 'error' ? 'fa-exclamation-circle' :
+      type === 'warning' ? 'fa-exclamation-triangle' :
+      'fa-info-circle';
+
     notification.innerHTML = `
       <div class="notification-content">
         <i class="fas ${iconClass}"></i>
         <span>${sanitizeInput(message)}</span>
       </div>
     `;
-    
+
     // Add to DOM
     document.body.appendChild(notification);
-    
+
     // Add haptic feedback on mobile
     if ('vibrate' in navigator && window.innerWidth <= 768) {
       try {
@@ -454,14 +454,14 @@ function showNotification(message, type = "info") {
         console.warn('Vibration not supported:', vibrateError);
       }
     }
-    
+
     // Remove after delay with exit animation
     setTimeout(() => {
       if (notification.parentNode) {
         notification.style.transition = 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)';
         notification.style.opacity = '0';
         notification.style.transform = 'translateX(100px) scale(0.9)';
-        
+
         setTimeout(() => {
           if (notification.parentNode) {
             notification.parentNode.removeChild(notification);
@@ -506,19 +506,19 @@ function showAuthScreen() {
 
 function showChatScreen(user) {
   currentUser = user;
-  
+
   // Smooth transition from auth to chat
   if (elements.authScreen) {
     elements.authScreen.style.opacity = '0';
     elements.authScreen.style.transform = 'scale(0.95)';
-    
+
     setTimeout(() => {
       elements.authScreen.style.display = "none";
       if (elements.chatScreen) {
         elements.chatScreen.style.display = "flex";
         elements.chatScreen.style.opacity = '0';
         elements.chatScreen.style.transform = 'scale(1.05)';
-        
+
         // Animate in the chat screen
         requestAnimationFrame(() => {
           elements.chatScreen.style.transition = 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)';
@@ -528,7 +528,7 @@ function showChatScreen(user) {
       }
     }, 200);
   }
-  
+
   // Update user info in header with animation
   if (elements.userName) {
     elements.userName.style.opacity = '0';
@@ -538,7 +538,7 @@ function showChatScreen(user) {
       elements.userName.style.opacity = '1';
     }, 100);
   }
-  
+
   if (elements.userInitials) {
     elements.userInitials.style.transform = 'scale(0)';
     elements.userInitials.textContent = sanitizeInput(user.name.charAt(0).toUpperCase());
@@ -547,16 +547,16 @@ function showChatScreen(user) {
       elements.userInitials.style.transform = 'scale(1)';
     }, 200);
   }
-  
+
   // Update profile dropdown information
   updateProfileDropdown(user);
-  
+
   // Reset chat area to welcome state
   resetChatArea();
-  
+
   // Initialize send button state
   updateSendButtonState();
-  
+
   // Focus input on desktop with delay for animation
   if (window.innerWidth > 768 && elements.messageInput) {
     setTimeout(() => elements.messageInput.focus(), 600);
@@ -565,7 +565,7 @@ function showChatScreen(user) {
 
 function resetChatArea() {
   if (!elements.chatMessages) return;
-  
+
   elements.chatMessages.innerHTML = `
     <div class="welcome-card">
       <h2>Welcome to FinanceAI! 👋</h2>
@@ -612,31 +612,31 @@ function resetChatArea() {
       </div>
     </div>
   `;
-  
+
   // Update reference to typing indicator
   elements.typingIndicator = document.getElementById("typingIndicator");
 }
 
 function logout() {
   console.log("Logging out user...");
-  
+
   // Close profile dropdown first
   const dropdown = document.getElementById('profileDropdown');
   const userMenu = document.querySelector('.user-menu');
   if (dropdown) dropdown.classList.remove('active');
   if (userMenu) userMenu.classList.remove('active');
-  
+
   authToken = null;
   if (typeof localStorage !== 'undefined') {
     localStorage.removeItem("authToken");
   }
   currentUser = null;
   currentChatId = null;
-  
+
   // Reset UI state
   resetChatArea();
   if (elements.chatHistory) elements.chatHistory.innerHTML = "";
-  
+
   showAuthScreen();
   showNotification("You have been logged out.", "info");
 }
@@ -648,12 +648,12 @@ function toggleSidebar(event) {
     console.error('Sidebar element not found');
     return;
   }
-  
+
   const isCurrentlyOpen = elements.sidebar.classList.contains("active") || window.innerWidth > 768;
   const overlay = document.getElementById('sidebarOverlay');
   const toggleBtn = document.querySelector('.sidebar-toggle');
   const collapseBtn = document.querySelector('.sidebar-collapse-btn');
-  
+
   // Add visual feedback to button that was clicked
   const clickedBtn = event?.target.closest('button');
   if (clickedBtn) {
@@ -662,7 +662,7 @@ function toggleSidebar(event) {
       clickedBtn.style.transform = 'scale(1)';
     }, 100);
   }
-  
+
   if (window.innerWidth <= 768) {
     // Mobile behavior - toggle sidebar visibility
     if (isCurrentlyOpen) {
@@ -687,7 +687,7 @@ function toggleSidebar(event) {
   } else {
     // Desktop behavior - toggle collapsed state
     const isCollapsed = elements.sidebar.classList.contains("collapsed");
-    
+
     if (isCollapsed) {
       // Expand sidebar
       elements.sidebar.classList.remove("collapsed");
@@ -725,7 +725,7 @@ async function loadChatHistory() {
     console.log("Loading chat history...");
     const response = await fetch(`${API_BASE}/chat`, {
       method: 'GET',
-      headers: { 
+      headers: {
         'Authorization': `Bearer ${authToken}`,
         'Content-Type': 'application/json'
       },
@@ -748,14 +748,14 @@ async function loadChatHistory() {
 
 function renderChatHistory(chats) {
   if (!elements.chatHistory) return;
-  
+
   // Fade out existing content
   elements.chatHistory.style.opacity = '0';
   elements.chatHistory.style.transform = 'translateY(20px)';
-  
+
   setTimeout(() => {
     elements.chatHistory.innerHTML = "";
-    
+
     if (chats.length === 0) {
       elements.chatHistory.innerHTML = `
         <div class="chat-history-empty stagger-animation">
@@ -768,7 +768,7 @@ function renderChatHistory(chats) {
         elements.chatHistory.appendChild(chatItem);
       });
     }
-    
+
     // Fade in new content
     requestAnimationFrame(() => {
       elements.chatHistory.style.transition = 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)';
@@ -784,7 +784,7 @@ function formatDate(dateString) {
   const now = new Date();
   const diffTime = Math.abs(now - date);
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  
+
   if (diffDays === 1) return 'Today';
   if (diffDays === 2) return 'Yesterday';
   if (diffDays <= 7) return `${diffDays} days ago`;
@@ -794,12 +794,12 @@ function formatDate(dateString) {
 // Chat functions
 async function loadChat(chatId) {
   if (!authToken) return;
-  
+
   try {
     console.log(`Loading chat: ${chatId}`);
     const response = await fetch(`${API_BASE}/chat/${chatId}`, {
       method: 'GET',
-      headers: { 
+      headers: {
         'Authorization': `Bearer ${authToken}`,
         'Content-Type': 'application/json'
       },
@@ -813,20 +813,20 @@ async function loadChat(chatId) {
     console.log(`Loaded chat with ${chat.messages.length} messages`);
 
     currentChatId = chatId;
-    
+
     // Clear current messages
     if (elements.chatMessages) {
       elements.chatMessages.innerHTML = "";
     }
-    
+
     // Render messages
     chat.messages.forEach((message) => {
       appendMessage(message.sender, message.content, false);
     });
-    
+
     scrollToBottom();
     closeSidebar(); // Use the new function to properly close sidebar
-    
+
     // Update active state in sidebar
     document.querySelectorAll('.chat-history-item').forEach(item => {
       const deleteBtn = item.querySelector('.delete-chat-btn');
@@ -834,7 +834,7 @@ async function loadChat(chatId) {
         item.classList.toggle('active', deleteBtn.dataset.chatId === chatId);
       }
     });
-    
+
   } catch (error) {
     console.error("Failed to load chat:", error);
     showNotification("Failed to load chat", "error");
@@ -847,12 +847,12 @@ async function deleteChat(chatId) {
   }
 
   if (!authToken) return;
-  
+
   try {
     console.log(`Deleting chat: ${chatId}`);
     const response = await fetch(`${API_BASE}/chat/${chatId}`, {
       method: "DELETE",
-      headers: { 
+      headers: {
         'Authorization': `Bearer ${authToken}`,
         'Content-Type': 'application/json'
       },
@@ -863,17 +863,17 @@ async function deleteChat(chatId) {
     }
 
     console.log("Chat deleted successfully");
-    
+
     // If this was the current chat, reset the view
     if (chatId === currentChatId) {
       currentChatId = null;
       resetChatArea();
     }
-    
+
     // Reload chat history
     await loadChatHistory();
     showNotification("Chat deleted successfully", "success");
-    
+
   } catch (error) {
     console.error("Failed to delete chat:", error);
     showNotification("Failed to delete chat", "error");
@@ -882,21 +882,21 @@ async function deleteChat(chatId) {
 
 function appendMessage(sender, message, animate = true) {
   if (!elements.chatMessages) return;
-  
+
   const messageDiv = document.createElement("div");
   messageDiv.className = `message ${sender}`;
-  
-  const avatar = sender === "user" 
+
+  const avatar = sender === "user"
     ? sanitizeInput(currentUser ? currentUser.name.charAt(0).toUpperCase() : "U")
     : '<i class="fas fa-robot" aria-label="FinanceAI assistant"></i>';
-  
+
   messageDiv.innerHTML = `
     <div class="message-content">
       <div class="message-avatar">${avatar}</div>
       <div class="message-bubble">${formatMessage(message)}</div>
     </div>
   `;
-  
+
   if (animate) {
     // More sophisticated animation based on sender
     if (sender === 'user') {
@@ -907,9 +907,9 @@ function appendMessage(sender, message, animate = true) {
       messageDiv.style.transform = 'translateX(-50px) scale(0.9) rotateX(15deg)';
     }
   }
-  
+
   elements.chatMessages.appendChild(messageDiv);
-  
+
   if (animate) {
     // Trigger animation with physics-based easing
     requestAnimationFrame(() => {
@@ -918,8 +918,13 @@ function appendMessage(sender, message, animate = true) {
       messageDiv.style.transform = 'translateX(0) scale(1) rotateX(0deg)';
     });
   }
-  
+
   scrollToBottom();
+
+  // Check for file upload trigger only for new bot messages
+  if (sender === 'bot' && animate) {
+    checkForFileUploadTrigger(message);
+  }
 }
 
 function formatMessage(message) {
@@ -931,8 +936,6 @@ function formatMessage(message) {
     .replace(/\*(.*?)\*/g, '<em>$1</em>'); // Italic text
 }
 
-// This function is now defined above in the resize handler section
-
 // Global variables for request management
 let isSendingMessage = false;
 let lastMessageContent = null;
@@ -940,23 +943,23 @@ let lastMessageTime = 0;
 
 async function sendMessage() {
   if (!elements.messageInput || !authToken) return;
-  
+
   const message = elements.messageInput.value.trim();
   if (!message) return;
-  
+
   // Prevent duplicate requests
   const currentTime = Date.now();
   if (isSendingMessage) {
     console.log("Already sending a message, ignoring duplicate request");
     return;
   }
-  
+
   // Prevent rapid duplicate messages (within 1 second)
   if (message === lastMessageContent && (currentTime - lastMessageTime) < 1000) {
     console.log("Duplicate message detected within 1 second, ignoring");
     return;
   }
-  
+
   // Set sending state
   isSendingMessage = true;
   lastMessageContent = message;
@@ -966,14 +969,14 @@ async function sendMessage() {
   if (elements.chatMessages) {
     const welcomeCard = elements.chatMessages.querySelector(".welcome-card");
     const quickActions = elements.chatMessages.querySelector(".quick-actions");
-    
+
     if (welcomeCard) {
       welcomeCard.style.transition = 'all 0.4s ease-out';
       welcomeCard.style.opacity = '0';
       welcomeCard.style.transform = 'translateY(-20px) scale(0.95)';
       setTimeout(() => welcomeCard.remove(), 400);
     }
-    
+
     if (quickActions) {
       quickActions.style.transition = 'all 0.4s ease-out';
       quickActions.style.opacity = '0';
@@ -984,18 +987,18 @@ async function sendMessage() {
 
   // Add user message with enhanced animation
   appendMessage("user", message);
-  
+
   // Animate input clearing
   elements.messageInput.style.transition = 'all 0.2s ease-out';
   elements.messageInput.style.transform = 'scale(0.98)';
-  
+
   setTimeout(() => {
     elements.messageInput.value = "";
     elements.messageInput.style.height = "auto";
     elements.messageInput.style.transform = 'scale(1)';
     updateSendButtonState();
   }, 100);
-  
+
   // Animate send button to loading state
   if (elements.sendBtn) {
     elements.sendBtn.disabled = true;
@@ -1004,13 +1007,13 @@ async function sendMessage() {
       elements.sendBtn.style.transform = 'scale(1)';
     }, 100);
   }
-  
+
   // Show typing indicator with animation
   if (elements.typingIndicator) {
     elements.typingIndicator.style.display = "flex";
     elements.typingIndicator.style.opacity = '0';
     elements.typingIndicator.style.transform = 'translateY(20px) scale(0.9)';
-    
+
     requestAnimationFrame(() => {
       elements.typingIndicator.style.transition = 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)';
       elements.typingIndicator.style.opacity = '1';
@@ -1021,19 +1024,19 @@ async function sendMessage() {
   try {
     // Generate title for new chats
     const title = currentChatId ? "" : (message.substring(0, 50) + (message.length > 50 ? "..." : ""));
-    
+
     console.log("Sending message...", { chatId: currentChatId, hasTitle: !!title });
-    
+
     const response = await fetch(`${API_BASE}/chat`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${authToken}`,
       },
-      body: JSON.stringify({ 
-        chatId: currentChatId, 
-        title, 
-        message 
+      body: JSON.stringify({
+        chatId: currentChatId,
+        title,
+        message
       }),
     });
 
@@ -1057,16 +1060,16 @@ async function sendMessage() {
     // Add AI response (get the last message that's from assistant or bot)
     const aiResponses = chat.messages.filter(msg => msg.sender === "assistant" || msg.sender === "bot");
     const lastAiResponse = aiResponses[aiResponses.length - 1];
-    
+
     if (lastAiResponse) {
       setTimeout(() => {
         appendMessage("bot", lastAiResponse.content);
       }, 800); // Slightly longer delay for better UX
     }
-    
+
     // Reload chat history to update sidebar
     loadChatHistory();
-    
+
   } catch (error) {
     console.error("Failed to send message:", error);
     appendMessage("bot", "Sorry, I'm having trouble processing your request right now. Please try again in a moment.");
@@ -1074,24 +1077,24 @@ async function sendMessage() {
   } finally {
     // Reset sending state
     isSendingMessage = false;
-    
+
     // Hide typing indicator with animation
     if (elements.typingIndicator) {
       elements.typingIndicator.style.transition = 'all 0.3s ease-out';
       elements.typingIndicator.style.opacity = '0';
       elements.typingIndicator.style.transform = 'translateY(20px) scale(0.9)';
-      
+
       setTimeout(() => {
         elements.typingIndicator.style.display = "none";
       }, 300);
     }
-    
+
     // Re-enable send button with animation
     if (elements.sendBtn) {
       elements.sendBtn.style.transition = 'all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)';
       elements.sendBtn.disabled = false;
       elements.sendBtn.style.transform = 'scale(1.05)';
-      
+
       setTimeout(() => {
         elements.sendBtn.style.transform = 'scale(1)';
       }, 200);
@@ -1110,37 +1113,37 @@ function startNewChat() {
   console.log("Starting new chat...");
   currentChatId = null;
   resetChatArea();
-  
+
   // Remove active state from all chat items
   document.querySelectorAll('.chat-history-item').forEach(item => {
     item.classList.remove('active');
   });
-  
+
   // Close sidebar properly
   closeSidebar();
-  
+
   // Focus input on desktop
   if (window.innerWidth > 768 && elements.messageInput) {
     setTimeout(() => elements.messageInput.focus(), 100);
   }
-  
+
   showNotification("New chat started", "success");
 }
 
 // Handle window resize for responsive behavior
-const handleWindowResize = debounce(function() {
+const handleWindowResize = debounce(function () {
   // Close sidebar on resize to larger screen
   if (window.innerWidth > 768 && elements.sidebar) {
     elements.sidebar.classList.remove('active');
     document.body.style.overflow = '';
-    
+
     // Hide overlay
     const overlay = document.getElementById('sidebarOverlay');
     if (overlay) {
       overlay.style.opacity = '0';
       overlay.style.visibility = 'hidden';
     }
-    
+
     // Reset toggle button
     const toggleBtn = document.querySelector('.sidebar-toggle');
     if (toggleBtn) {
@@ -1167,13 +1170,13 @@ function scrollToBottom() {
 // Enhanced focus management for better UX
 function enhanceFocusManagement() {
   // Add focus rings for keyboard navigation
-  document.addEventListener('keydown', function(e) {
+  document.addEventListener('keydown', function (e) {
     if (e.key === 'Tab') {
       document.body.classList.add('keyboard-navigation');
     }
   });
-  
-  document.addEventListener('mousedown', function() {
+
+  document.addEventListener('mousedown', function () {
     document.body.classList.remove('keyboard-navigation');
   });
 }
@@ -1222,24 +1225,24 @@ function toggleTheme() {
   toggleProfileDropdown();
 }
 // Initialize enhanced features
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
   enhanceFocusManagement();
-  
+
   // Add intersection observer for element animations
   if ('IntersectionObserver' in window) {
     const observerOptions = {
       threshold: 0.1,
       rootMargin: '50px'
     };
-    
-    const observer = new IntersectionObserver(function(entries) {
+
+    const observer = new IntersectionObserver(function (entries) {
       entries.forEach(entry => {
         if (entry.isIntersecting) {
           entry.target.classList.add('animate-in');
         }
       });
     }, observerOptions);
-    
+
     // Observe elements for animation with error handling
     setTimeout(() => {
       try {
@@ -1258,23 +1261,23 @@ document.addEventListener('DOMContentLoaded', function() {
 // Enhanced mobile optimizations
 function initializeMobileOptimizations() {
   const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  
+
   if (isMobile) {
     // Prevent zoom on input focus
     const viewport = document.querySelector('meta[name="viewport"]');
     if (viewport) {
       viewport.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover';
     }
-    
+
     // Add mobile-specific class for CSS targeting
     document.body.classList.add('mobile-device');
-    
+
     // Improve scroll performance
     document.body.style.webkitOverflowScrolling = 'touch';
-    
+
     // Add touch feedback for buttons
     addTouchFeedback();
-    
+
     // Handle keyboard appearance on mobile
     handleMobileKeyboard();
   }
@@ -1284,14 +1287,14 @@ function addTouchFeedback() {
   const interactiveElements = document.querySelectorAll(
     '.send-btn, .auth-btn, .quick-action, .chat-history-item, .new-chat-btn, .logout-btn, .sidebar-toggle'
   );
-  
+
   interactiveElements.forEach(element => {
-    element.addEventListener('touchstart', function() {
+    element.addEventListener('touchstart', function () {
       this.style.transform = 'scale(0.98)';
       this.style.transition = 'transform 0.1s ease';
     }, { passive: true });
-    
-    element.addEventListener('touchend', function() {
+
+    element.addEventListener('touchend', function () {
       setTimeout(() => {
         this.style.transform = '';
         this.style.transition = '';
@@ -1309,16 +1312,16 @@ function handleMobileKeyboard() {
     document.getElementById('signupEmail'),
     document.getElementById('signupPassword')
   ].filter(Boolean);
-  
+
   const allInputs = [...inputElements, ...authInputs];
-  
+
   allInputs.forEach(input => {
     if (input) {
       input.addEventListener('focus', () => {
         // Add keyboard-open class immediately on focus
         setTimeout(() => {
           document.body.classList.add('keyboard-open');
-          
+
           // Enhanced scroll behavior for mobile
           if (input.scrollIntoView) {
             // For chat input, ensure it's visible above the keyboard
@@ -1328,8 +1331,8 @@ function handleMobileKeyboard() {
                 container.classList.add('keyboard-open');
                 // Scroll to ensure input is visible
                 setTimeout(() => {
-                  input.scrollIntoView({ 
-                    behavior: 'smooth', 
+                  input.scrollIntoView({
+                    behavior: 'smooth',
                     block: 'end',
                     inline: 'nearest'
                   });
@@ -1337,22 +1340,22 @@ function handleMobileKeyboard() {
               }
             } else {
               // For auth inputs, scroll to center
-              input.scrollIntoView({ 
-                behavior: 'smooth', 
-                block: 'center' 
+              input.scrollIntoView({
+                behavior: 'smooth',
+                block: 'center'
               });
             }
           }
         }, 100);
       });
-      
+
       input.addEventListener('blur', () => {
         // Remove keyboard-open class when input loses focus
         setTimeout(() => {
           // Check if any input still has focus
           const activeElement = document.activeElement;
           const isInputFocused = allInputs.some(inp => inp === activeElement);
-          
+
           if (!isInputFocused) {
             document.body.classList.remove('keyboard-open');
             const container = document.querySelector('.chat-input-container');
@@ -1364,18 +1367,18 @@ function handleMobileKeyboard() {
       });
     }
   });
-  
+
   // Enhanced viewport height monitoring
   let initialViewportHeight = window.innerHeight;
   let keyboardDetectionTimeout;
-  
+
   const handleResize = () => {
     clearTimeout(keyboardDetectionTimeout);
-    
+
     keyboardDetectionTimeout = setTimeout(() => {
       const currentHeight = window.innerHeight;
       const heightDifference = initialViewportHeight - currentHeight;
-      
+
       // More intelligent keyboard detection
       if (heightDifference > 150) {
         document.body.classList.add('keyboard-open');
@@ -1392,9 +1395,9 @@ function handleMobileKeyboard() {
       }
     }, 100);
   };
-  
+
   window.addEventListener('resize', handleResize);
-  
+
   // Additional iOS-specific handling
   if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
     // Visual viewport API support for better iOS handling
@@ -1403,7 +1406,7 @@ function handleMobileKeyboard() {
         const viewportHeight = window.visualViewport.height;
         const windowHeight = window.innerHeight;
         const heightDifference = windowHeight - viewportHeight;
-        
+
         if (heightDifference > 100) {
           document.body.classList.add('keyboard-open');
           const container = document.querySelector('.chat-input-container');
@@ -1418,7 +1421,7 @@ function handleMobileKeyboard() {
           }
         }
       };
-      
+
       window.visualViewport.addEventListener('resize', handleViewportChange);
     }
   }
@@ -1433,7 +1436,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-
 // Performance optimizations
 function initializePerformanceOptimizations() {
   // Use requestIdleCallback for non-critical operations
@@ -1443,7 +1445,7 @@ function initializePerformanceOptimizations() {
       const style = document.createElement('style');
       style.textContent = '.preload-animations * { transition: none !important; animation: none !important; }';
       document.head.appendChild(style);
-      
+
       // Remove preload class after DOM is ready
       setTimeout(() => {
         document.body.classList.remove('preload-animations');
@@ -1453,7 +1455,7 @@ function initializePerformanceOptimizations() {
       }, 100);
     });
   }
-  
+
   // Optimize images and assets loading
   if ('loading' in HTMLImageElement.prototype) {
     const images = document.querySelectorAll('img[data-src]');
@@ -1469,18 +1471,18 @@ function initializeProgressiveEnhancements() {
   if ('serviceWorker' in navigator) {
     // Could register SW here for offline functionality
   }
-  
+
   // Web App Manifest support
   if ('share' in navigator) {
     // Could add native sharing functionality
   }
-  
+
   // Improved error handling with user feedback
   window.addEventListener('error', (event) => {
     console.error('Application error:', event.error);
     showNotification('Something went wrong. Please refresh the page.', 'error');
   });
-  
+
   window.addEventListener('unhandledrejection', (event) => {
     console.error('Unhandled promise rejection:', event.reason);
     showNotification('Connection issue detected. Please check your internet.', 'warning');
@@ -1502,11 +1504,11 @@ function toggleProfileDropdown() {
   const dropdown = document.getElementById('profileDropdown');
   const userMenu = document.querySelector('.user-menu');
   const chevron = document.getElementById('profileChevron');
-  
+
   if (!dropdown) return;
-  
+
   const isActive = dropdown.classList.contains('active');
-  
+
   if (isActive) {
     dropdown.classList.remove('active');
     userMenu?.classList.remove('active');
@@ -1517,10 +1519,10 @@ function toggleProfileDropdown() {
 }
 
 // Close profile dropdown when clicking outside
-document.addEventListener('click', function(e) {
+document.addEventListener('click', function (e) {
   const dropdown = document.getElementById('profileDropdown');
   const userMenu = document.querySelector('.user-menu');
-  
+
   if (dropdown && !userMenu?.contains(e.target)) {
     dropdown.classList.remove('active');
     userMenu?.classList.remove('active');
@@ -1543,7 +1545,7 @@ function updateProfileDropdown(user) {
   const profileName = document.getElementById('profileName');
   const profileEmail = document.getElementById('profileEmail');
   const profileAvatar = document.getElementById('profileAvatar');
-  
+
   if (profileName) profileName.textContent = sanitizeInput(user.name);
   if (profileEmail) profileEmail.textContent = sanitizeInput(user.email || 'user@example.com');
   if (profileAvatar) profileAvatar.textContent = sanitizeInput(user.name.charAt(0).toUpperCase());
@@ -1570,19 +1572,19 @@ let searchTimeout;
 function searchChats() {
   const searchInput = document.getElementById('chatSearch');
   const searchClear = document.getElementById('searchClear');
-  
+
   if (!searchInput) return;
-  
+
   const query = searchInput.value.trim().toLowerCase();
-  
+
   // Show/hide clear button
   if (searchClear) {
     searchClear.style.display = query ? 'flex' : 'none';
   }
-  
+
   // Clear previous timeout
   clearTimeout(searchTimeout);
-  
+
   // Debounce search
   searchTimeout = setTimeout(() => {
     if (!query) {
@@ -1590,19 +1592,19 @@ function searchChats() {
       renderChatHistory(allChats);
       return;
     }
-    
+
     // Filter chats based on search query
     const filteredChats = allChats.filter(chat => {
       const title = chat.title || '';
       const firstUserMessage = chat.messages.find(msg => msg.sender === 'user');
       const preview = firstUserMessage ? firstUserMessage.content : '';
-      
+
       return (
         title.toLowerCase().includes(query) ||
         preview.toLowerCase().includes(query)
       );
     });
-    
+
     renderChatHistory(filteredChats);
   }, 300);
 }
@@ -1610,16 +1612,16 @@ function searchChats() {
 function clearSearch() {
   const searchInput = document.getElementById('chatSearch');
   const searchClear = document.getElementById('searchClear');
-  
+
   if (searchInput) {
     searchInput.value = '';
     searchInput.focus();
   }
-  
+
   if (searchClear) {
     searchClear.style.display = 'none';
   }
-  
+
   // Show all chats
   renderChatHistory(allChats);
 }
@@ -1629,7 +1631,7 @@ function initializeSearch() {
   const searchInput = document.getElementById('chatSearch');
   if (searchInput) {
     searchInput.addEventListener('input', searchChats);
-    searchInput.addEventListener('keydown', function(e) {
+    searchInput.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') {
         clearSearch();
       }
@@ -1643,11 +1645,11 @@ function createChatHistoryItem(chat, index) {
   chatItem.className = `chat-history-item ${chat._id === currentChatId ? "active" : ""}`;
   chatItem.setAttribute("tabindex", "0");
   chatItem.style.animationDelay = `${index * 0.05}s`;
-  
+
   // Get preview text from first user message
   const firstUserMessage = chat.messages.find(msg => msg.sender === 'user');
   const preview = firstUserMessage ? firstUserMessage.content : "New chat";
-  
+
   chatItem.innerHTML = `
     <div class="chat-history-content">
       <h4>${sanitizeInput(chat.title || preview)}</h4>
@@ -1679,7 +1681,7 @@ function createChatHistoryItem(chat, index) {
       </div>
     </div>
   `;
-  
+
   // Click handlers
   chatItem.onclick = (e) => {
     if (!e.target.closest(".chat-menu")) {
@@ -1691,35 +1693,35 @@ function createChatHistoryItem(chat, index) {
       }, 100);
     }
   };
-  
+
   chatItem.onkeydown = (e) => {
     if (e.key === "Enter" && !e.target.closest(".chat-menu")) {
       loadChat(chat._id);
     }
   };
-  
+
   return chatItem;
 }
 
 // Chat menu functions
 function toggleChatMenu(chatId, event) {
   event.stopPropagation();
-  
+
   const menu = document.getElementById(`chatMenu-${chatId}`);
   if (!menu) return;
-  
+
   // Close all other menus
   document.querySelectorAll('.chat-menu-dropdown.active').forEach(dropdown => {
     if (dropdown !== menu) {
       dropdown.classList.remove('active');
     }
   });
-  
+
   menu.classList.toggle('active');
 }
 
 // Close chat menus when clicking outside
-document.addEventListener('click', function(e) {
+document.addEventListener('click', function (e) {
   if (!e.target.closest('.chat-menu')) {
     document.querySelectorAll('.chat-menu-dropdown.active').forEach(dropdown => {
       dropdown.classList.remove('active');
@@ -1731,7 +1733,7 @@ function shareChat(chatId) {
   // Close menu
   const menu = document.getElementById(`chatMenu-${chatId}`);
   if (menu) menu.classList.remove('active');
-  
+
   showNotification('Share functionality coming soon!', 'info');
 }
 
@@ -1739,17 +1741,17 @@ async function renameChat(chatId) {
   // Close menu
   const menu = document.getElementById(`chatMenu-${chatId}`);
   if (menu) menu.classList.remove('active');
-  
+
   const chat = allChats.find(c => c._id === chatId);
   if (!chat) return;
-  
+
   const currentTitle = chat.title || chat.messages.find(msg => msg.sender === 'user')?.content || 'New chat';
   const newTitle = prompt('Enter new chat title:', currentTitle);
-  
+
   if (newTitle && newTitle.trim() && newTitle.trim() !== currentTitle) {
     try {
       console.log(`Renaming chat ${chatId} to: ${newTitle.trim()}`);
-      
+
       const response = await fetch(`${API_BASE}/chat/${chatId}`, {
         method: 'PUT',
         headers: {
@@ -1758,20 +1760,20 @@ async function renameChat(chatId) {
         },
         body: JSON.stringify({ title: newTitle.trim() })
       });
-      
+
       if (!response.ok) {
         throw new Error(`Failed to rename chat: ${response.status}`);
       }
-      
+
       const result = await response.json();
       console.log('Chat renamed successfully:', result);
-      
+
       // Update local data
       chat.title = newTitle.trim();
-      
+
       // Reload chat history to reflect changes
       await loadChatHistory();
-      
+
       showNotification('Chat renamed successfully!', 'success');
     } catch (error) {
       console.error('Failed to rename chat:', error);
@@ -1784,21 +1786,21 @@ function archiveChat(chatId) {
   // Close menu
   const menu = document.getElementById(`chatMenu-${chatId}`);
   if (menu) menu.classList.remove('active');
-  
+
   showNotification('Archive functionality coming soon!', 'info');
 }
 
 // Update the renderChatHistory function to use the new createChatHistoryItem
 function renderChatHistory(chats) {
   if (!elements.chatHistory) return;
-  
+
   // Fade out existing content
   elements.chatHistory.style.opacity = '0';
   elements.chatHistory.style.transform = 'translateY(20px)';
-  
+
   setTimeout(() => {
     elements.chatHistory.innerHTML = "";
-    
+
     if (chats.length === 0) {
       elements.chatHistory.innerHTML = `
         <div class="chat-history-empty stagger-animation">
@@ -1811,7 +1813,7 @@ function renderChatHistory(chats) {
         elements.chatHistory.appendChild(chatItem);
       });
     }
-    
+
     // Fade in new content
     requestAnimationFrame(() => {
       elements.chatHistory.style.transition = 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)';
@@ -1822,7 +1824,7 @@ function renderChatHistory(chats) {
 }
 
 // Initialize search when DOM is loaded
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
   setTimeout(() => {
     initializeSearch();
   }, 100);
@@ -1836,40 +1838,40 @@ function handleFileSelection(fileInput) {
   const files = Array.from(fileInput.files);
   const maxFiles = 3;
   const maxSize = 10 * 1024 * 1024; // 10MB
-  
+
   // Validate file count
   if (files.length > maxFiles) {
     showNotification(`You can only upload up to ${maxFiles} files at once.`, 'error');
     fileInput.value = '';
     return;
   }
-  
+
   // Validate file types and sizes
   const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf'];
   const validFiles = [];
-  
+
   for (const file of files) {
     if (!allowedTypes.includes(file.type)) {
       showNotification(`File "${file.name}" is not supported. Please upload images (JPEG, PNG, GIF, WebP) or PDF files only.`, 'error');
       continue;
     }
-    
+
     if (file.size > maxSize) {
       showNotification(`File "${file.name}" is too large. Maximum size is 10MB.`, 'error');
       continue;
     }
-    
+
     validFiles.push(file);
   }
-  
+
   if (validFiles.length === 0) {
     fileInput.value = '';
     return;
   }
-  
+
   selectedFiles = validFiles;
   updateFilePreview();
-  
+
   // Show success message
   showNotification(`${validFiles.length} file(s) selected successfully.`, 'success');
 }
@@ -1877,16 +1879,16 @@ function handleFileSelection(fileInput) {
 function updateFilePreview() {
   const previewContainer = document.querySelector('.file-preview');
   if (!previewContainer) return;
-  
+
   if (selectedFiles.length === 0) {
     previewContainer.innerHTML = '';
     return;
   }
-  
+
   const previewHTML = selectedFiles.map((file, index) => {
     const fileIcon = getFileIcon(file.type);
     const fileSize = formatFileSize(file.size);
-    
+
     return `
       <div class="file-preview-item">
         <div class="file-icon">
@@ -1902,7 +1904,7 @@ function updateFilePreview() {
       </div>
     `;
   }).join('');
-  
+
   previewContainer.innerHTML = previewHTML;
 }
 
@@ -1926,13 +1928,13 @@ function formatFileSize(bytes) {
 function removeFile(index) {
   selectedFiles.splice(index, 1);
   updateFilePreview();
-  
+
   // Update file input
   const fileInput = document.querySelector('.file-upload-input');
   if (fileInput) {
     fileInput.value = '';
   }
-  
+
   showNotification('File removed.', 'info');
 }
 
@@ -1949,30 +1951,30 @@ async function handleTicketCreation(button) {
     showNotification('Please select at least one file or click "Skip Upload" to proceed without attachments.', 'warning');
     return;
   }
-  
+
   // Extract ticket data from the chat conversation
   if (!elements.chatMessages) {
     showNotification('Unable to find ticket information. Please start over.', 'error');
     return;
   }
-  
+
   const messages = Array.from(elements.chatMessages.querySelectorAll('.message'));
   const botMessages = messages.filter(msg => msg.classList.contains('bot'));
-  
+
   // Find step messages
   let issueTitle = '';
   let category = '';
   let description = '';
-  
+
   // Extract data from conversation
   for (const message of botMessages) {
     const content = message.textContent || message.innerText;
-    
+
     const titleMatch = content.match(/Your issue title: ["']([^"']+)["']/);
     if (titleMatch) {
       issueTitle = titleMatch[1];
     }
-    
+
     const categoryMatch = content.match(/Category selected: ([^\n\r]+)/);
     if (categoryMatch) {
       category = categoryMatch[1].trim();
@@ -1981,41 +1983,41 @@ async function handleTicketCreation(button) {
       category = cleanCategory;
     }
   }
-  
+
   // Find description from user messages (after Step 3)
   const userMessages = messages.filter(msg => msg.classList.contains('user'));
   if (userMessages.length >= 3) {
     description = userMessages[2].textContent || userMessages[2].innerText || '';
   }
-  
+
   if (!issueTitle || !category || !description) {
     showNotification('Missing ticket information. Please ensure you have completed all steps.', 'error');
     return;
   }
-  
+
   // Disable button and show loading state
   button.disabled = true;
   button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating Ticket...';
-  
+
   try {
     // Create FormData with ticket information and files
     const formData = new FormData();
     formData.append('issue_title', issueTitle);
     formData.append('category', category);
     formData.append('description', description);
-    
+
     // Add files
     selectedFiles.forEach((file, index) => {
       formData.append('attachments', file);
     });
-    
+
     console.log('Creating ticket with attachments...', {
       issueTitle,
       category,
       description: description.substring(0, 100) + '...',
       fileCount: selectedFiles.length
     });
-    
+
     const response = await fetch(`${API_BASE}/tickets/create`, {
       method: 'POST',
       headers: {
@@ -2023,15 +2025,15 @@ async function handleTicketCreation(button) {
       },
       body: formData
     });
-    
+
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.message || 'Failed to create ticket');
     }
-    
+
     const result = await response.json();
     console.log('Ticket created successfully:', result);
-    
+
     // Show success message in chat
     const successMessage = `✅ **Ticket Created Successfully!**
 
@@ -2049,26 +2051,26 @@ Your support ticket has been created and assigned to our team. You'll receive up
 - You can reference your ticket using ID: ${result.ticket.ticket_id}
 
 Is there anything else I can help you with regarding your investments or account?`;
-    
+
     // Clear the file upload interface
     const fileUploadContainer = document.querySelector('.file-upload-container');
     if (fileUploadContainer) {
       fileUploadContainer.remove();
     }
-    
+
     // Add success message to chat
     appendMessage('bot', successMessage);
-    
+
     // Reset state
     selectedFiles = [];
     ticketData = {};
-    
+
     showNotification(`Ticket ${result.ticket.ticket_id} created successfully!`, 'success');
-    
+
   } catch (error) {
     console.error('Error creating ticket:', error);
     showNotification(error.message || 'Failed to create ticket. Please try again.', 'error');
-    
+
     // Add error message to chat
     appendMessage('bot', 'I\'m sorry, there was an error creating your ticket with attachments. Please try again or contact our support team directly.');
   } finally {
@@ -2081,7 +2083,7 @@ Is there anything else I can help you with regarding your investments or account
 // Function to show file upload interface in chat
 function showFileUploadInterface() {
   if (!elements.chatMessages) return;
-  
+
   const uploadInterface = document.createElement('div');
   uploadInterface.className = 'file-upload-container';
   uploadInterface.innerHTML = `
@@ -2090,7 +2092,7 @@ function showFileUploadInterface() {
         <h3><i class="fas fa-paperclip"></i> Upload Supporting Documents</h3>
         <p>Select up to 3 files (Images or PDF, max 10MB each)</p>
       </div>
-      
+
       <div class="file-upload-area">
         <label for="ticketFileUpload" class="file-upload-label">
           <div class="file-upload-icon">
@@ -2103,9 +2105,9 @@ function showFileUploadInterface() {
           <input type="file" id="ticketFileUpload" class="file-upload-input" multiple accept=".jpg,.jpeg,.png,.gif,.webp,.pdf" style="display: none;">
         </label>
       </div>
-      
+
       <div class="file-preview"></div>
-      
+
       <div class="file-upload-actions">
         <button type="button" class="btn-secondary skip-upload-btn">
           <i class="fas fa-skip-forward"></i> Skip Upload
@@ -2116,10 +2118,10 @@ function showFileUploadInterface() {
       </div>
     </div>
   `;
-  
+
   elements.chatMessages.appendChild(uploadInterface);
   scrollToBottom();
-  
+
   // Update create button state based on file selection
   const updateCreateButton = () => {
     const createBtn = uploadInterface.querySelector('.create-ticket-btn');
@@ -2127,7 +2129,7 @@ function showFileUploadInterface() {
       createBtn.disabled = selectedFiles.length === 0;
     }
   };
-  
+
   // Set up file input change handler
   const fileInput = uploadInterface.querySelector('.file-upload-input');
   if (fileInput) {
@@ -2136,7 +2138,7 @@ function showFileUploadInterface() {
       updateCreateButton();
     });
   }
-  
+
   // Set up drag and drop
   const uploadArea = uploadInterface.querySelector('.file-upload-area');
   if (uploadArea) {
@@ -2144,23 +2146,23 @@ function showFileUploadInterface() {
       e.preventDefault();
       uploadArea.classList.add('drag-over');
     });
-    
+
     uploadArea.addEventListener('dragleave', (e) => {
       e.preventDefault();
       uploadArea.classList.remove('drag-over');
     });
-    
+
     uploadArea.addEventListener('drop', (e) => {
       e.preventDefault();
       uploadArea.classList.remove('drag-over');
-      
+
       const files = Array.from(e.dataTransfer.files);
       if (fileInput) {
         // Create a new FileList-like object
         const dt = new DataTransfer();
         files.forEach(file => dt.items.add(file));
         fileInput.files = dt.files;
-        
+
         handleFileSelection(fileInput);
         updateCreateButton();
       }
@@ -2171,23 +2173,15 @@ function showFileUploadInterface() {
 // Check if bot message indicates file upload is needed and show interface
 function checkForFileUploadTrigger(botMessage) {
   const content = botMessage.toLowerCase();
+  if (content.includes('ticket created successfully')) {
+    return; // Skip file upload trigger if ticket is already created
+  }
   if (content.includes('use the file upload form') && content.includes('will appear after this message')) {
     setTimeout(() => {
       showFileUploadInterface();
     }, 500);
   }
 }
-
-// Override the appendMessage function to check for file upload triggers
-const originalAppendMessage = appendMessage;
-appendMessage = function(sender, message, animate = true) {
-  originalAppendMessage(sender, message, animate);
-  
-  // Check if this is a bot message that should trigger file upload interface
-  if (sender === 'bot') {
-    checkForFileUploadTrigger(message);
-  }
-};
 
 // Make new functions globally available
 window.toggleChatMenu = toggleChatMenu;
