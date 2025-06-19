@@ -519,6 +519,9 @@ function showChatScreen(user) {
         elements.chatScreen.style.opacity = '0';
         elements.chatScreen.style.transform = 'scale(1.05)';
 
+        // Initialize sidebar state and header visibility
+        initializeSidebarState();
+
         // Animate in the chat screen
         requestAnimationFrame(() => {
           elements.chatScreen.style.transition = 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)';
@@ -641,6 +644,22 @@ function logout() {
   showNotification("You have been logged out.", "info");
 }
 
+// Initialize sidebar state and header visibility based on screen size
+function initializeSidebarState() {
+  const chatScreen = document.getElementById('chatScreen');
+  if (!chatScreen || !elements.sidebar) return;
+
+  if (window.innerWidth <= 768) {
+    // Mobile: sidebar is closed by default, show header elements
+    elements.sidebar.classList.remove('active');
+    chatScreen.classList.add('sidebar-collapsed');
+  } else {
+    // Desktop: sidebar is open by default, hide header elements
+    elements.sidebar.classList.remove('collapsed');
+    chatScreen.classList.remove('sidebar-collapsed');
+  }
+}
+
 // Sidebar functions
 function toggleSidebar(event) {
   console.log("Toggling sidebar...");
@@ -653,6 +672,7 @@ function toggleSidebar(event) {
   const overlay = document.getElementById('sidebarOverlay');
   const toggleBtn = document.querySelector('.sidebar-toggle');
   const collapseBtn = document.querySelector('.sidebar-collapse-btn');
+  const chatScreen = document.getElementById('chatScreen');
 
   // Add visual feedback to button that was clicked
   const clickedBtn = event?.target.closest('button');
@@ -673,6 +693,8 @@ function toggleSidebar(event) {
         overlay.style.opacity = '0';
         overlay.style.visibility = 'hidden';
       }
+      // Show header elements when sidebar is closed
+      if (chatScreen) chatScreen.classList.add('sidebar-collapsed');
       console.log('Sidebar closed on mobile');
     } else {
       // Open sidebar
@@ -682,6 +704,8 @@ function toggleSidebar(event) {
         overlay.style.opacity = '1';
         overlay.style.visibility = 'visible';
       }
+      // Hide header elements when sidebar is open
+      if (chatScreen) chatScreen.classList.remove('sidebar-collapsed');
       console.log('Sidebar opened on mobile');
     }
   } else {
@@ -693,12 +717,16 @@ function toggleSidebar(event) {
       elements.sidebar.classList.remove("collapsed");
       elements.sidebar.style.width = '260px';
       elements.sidebar.style.transform = 'translateX(0)';
+      // Hide header elements when sidebar is expanded
+      if (chatScreen) chatScreen.classList.remove('sidebar-collapsed');
       console.log('Sidebar expanded on desktop');
     } else {
       // Collapse sidebar
       elements.sidebar.classList.add("collapsed");
       elements.sidebar.style.width = '0';
       elements.sidebar.style.transform = 'translateX(-100%)';
+      // Show header elements when sidebar is collapsed
+      if (chatScreen) chatScreen.classList.add('sidebar-collapsed');
       console.log('Sidebar collapsed on desktop');
     }
   }
@@ -1132,10 +1160,16 @@ function startNewChat() {
 
 // Handle window resize for responsive behavior
 const handleWindowResize = debounce(function () {
-  // Close sidebar on resize to larger screen
+  const chatScreen = document.getElementById('chatScreen');
+  
   if (window.innerWidth > 768 && elements.sidebar) {
+    // Desktop behavior
     elements.sidebar.classList.remove('active');
+    elements.sidebar.classList.remove('collapsed');
     document.body.style.overflow = '';
+    
+    // Hide header elements when sidebar is visible on desktop
+    if (chatScreen) chatScreen.classList.remove('sidebar-collapsed');
 
     // Hide overlay
     const overlay = document.getElementById('sidebarOverlay');
@@ -1149,6 +1183,11 @@ const handleWindowResize = debounce(function () {
     if (toggleBtn) {
       toggleBtn.style.transform = 'scale(1) rotate(0deg)';
     }
+  } else if (window.innerWidth <= 768 && elements.sidebar) {
+    // Mobile behavior - sidebar closed by default, show header elements
+    elements.sidebar.classList.remove('active');
+    elements.sidebar.classList.remove('collapsed');
+    if (chatScreen) chatScreen.classList.add('sidebar-collapsed');
   }
 }, 150);
 

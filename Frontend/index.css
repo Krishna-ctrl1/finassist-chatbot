@@ -19,6 +19,7 @@
   
   --border: #e5e7eb;
   --border-light: #f3f4f6;
+  --border-hover: #d1d5db;
   --border-focus: #10a37f;
   
   --green: #10a37f;
@@ -397,29 +398,29 @@ body {
 }
 
 .sidebar-toggle {
-  display: none;
-  position: fixed;
-  top: var(--space-4);
-  left: var(--space-4);
-  z-index: 100;
-  background: var(--green);
-  border: none;
-  border-radius: var(--rounded-full);
-  width: 48px;
-  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--rounded);
+  width: 36px;
+  height: 36px;
   cursor: pointer;
   transition: all 0.2s ease;
-  color: white;
+  color: var(--text-secondary);
+  flex-shrink: 0;
 }
 
 .sidebar-toggle:hover {
-  background: var(--green-hover);
-  transform: scale(1.05);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-hover);
 }
 
 .sidebar-toggle i {
-  color: white;
-  font-size: 20px;
+  font-size: 16px;
 }
 
 .sidebar-header {
@@ -446,8 +447,8 @@ body {
 }
 
 .sidebar-logo {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   background: var(--green);
   border-radius: var(--rounded);
   display: flex;
@@ -458,12 +459,12 @@ body {
 
 .sidebar-logo i {
   color: white;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .sidebar-brand-text {
   font-family: var(--font-family);
-  font-size: 0.875rem;
+  font-size: 1rem;
   font-weight: 700;
   color: var(--text-sidebar);
   white-space: nowrap;
@@ -473,8 +474,8 @@ body {
 
 /* Sidebar Collapse Button */
 .sidebar-collapse-btn {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   background: transparent;
   border: none;
   border-radius: var(--rounded);
@@ -493,7 +494,7 @@ body {
 }
 
 .sidebar-collapse-btn i {
-  font-size: 12px;
+  font-size: 14px;
 }
 
 /* Sidebar Content */
@@ -831,6 +832,72 @@ body {
   backdrop-filter: blur(8px);
   flex-shrink: 0;
   z-index: 10;
+}
+
+.chat-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.chat-header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.new-chat-header-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--green);
+  border: none;
+  border-radius: var(--rounded);
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: white;
+  flex-shrink: 0;
+}
+
+.new-chat-header-btn:hover {
+  background: var(--green-hover);
+  transform: scale(1.05);
+}
+
+.new-chat-header-btn i {
+  font-size: 16px;
+}
+
+.chat-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-title h3 {
+  font-family: var(--font-family);
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Initially hide the header buttons and title - they will be shown conditionally */
+.sidebar-toggle,
+.new-chat-header-btn,
+.chat-title {
+  display: none;
+}
+
+/* Show buttons when sidebar is collapsed */
+.sidebar-collapsed .sidebar-toggle,
+.sidebar-collapsed .new-chat-header-btn,
+.sidebar-collapsed .chat-title {
+  display: flex;
 }
 
 .chat-avatar {
@@ -1401,19 +1468,8 @@ body {
   }
 
   .sidebar-toggle {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: fixed;
-    top: var(--space-3);
-    left: var(--space-3);
-    z-index: 100;
-    background: var(--bg-primary);
-    border: 1px solid var(--border);
-    border-radius: var(--rounded-lg);
-    width: 40px;
-    height: 40px;
-    box-shadow: var(--shadow-sm);
+    width: 32px;
+    height: 32px;
   }
 
   .chat-screen {
@@ -1432,7 +1488,6 @@ body {
 
   .chat-header {
     padding: var(--space-3) var(--space-4);
-    padding-left: 56px;
     flex-shrink: 0;
   }
 
@@ -1601,15 +1656,12 @@ body {
   }
 
   .sidebar-toggle {
-    width: 36px;
-    height: 36px;
-    top: var(--space-2);
-    left: var(--space-2);
+    width: 28px;
+    height: 28px;
   }
 
   .chat-header {
     padding: var(--space-2) var(--space-3);
-    padding-left: 48px;
   }
 }
 
