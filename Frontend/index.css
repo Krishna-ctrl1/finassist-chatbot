@@ -231,22 +231,22 @@
     padding: 0;
   }
   50% {
-    width: 200px;
+    width: 290px;
     border-radius: 24px;
-    padding: 0 20px;
+    padding: 0 24px;
   }
   100% {
-    width: 190px;
+    width: 280px;
     border-radius: 24px;
-    padding: 0 20px;
+    padding: 0 24px;
   }
 }
 
 @keyframes contractMagic {
   0% {
-    width: 190px;
+    width: 280px;
     border-radius: 24px;
-    padding: 0 20px;
+    padding: 0 24px;
   }
   50% {
     width: 54px;
@@ -3384,9 +3384,10 @@ body {
 }
 
 .chat-launcher.expanded {
-  width: 190px;
+  width: 280px;
   height: 64px;
   border-radius: 24px;
+  padding: 0 24px;
   animation: expandMagic 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
   box-shadow: 
     0 12px 40px rgba(235, 128, 33, 0.5),
@@ -3401,7 +3402,7 @@ body {
 
 .launcher-text {
   opacity: 0;
-  margin-left: var(--space-3);
+  margin-left: var(--space-2);
   font-size: 15px;
   font-weight: 600;
   white-space: nowrap;
@@ -3411,8 +3412,10 @@ body {
     0 1px 3px rgba(0, 0, 0, 0.3),
     0 0 10px rgba(255, 255, 255, 0.2);
   position: relative;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.3px;
   filter: blur(4px);
+  overflow: visible;
+  text-overflow: unset;
 }
 
 .chat-launcher.expanded .launcher-text {
@@ -3480,9 +3483,10 @@ body {
   }
   
   .chat-launcher.expanded {
-    width: 170px;
+    width: 260px;
     height: 60px;
     border-radius: 22px;
+    padding: 0 20px;
   }
 }
 
@@ -3510,9 +3514,10 @@ body {
   }
   
   .chat-launcher.expanded {
-    width: 150px;
+    width: 240px;
     height: 56px;
     border-radius: 20px;
+    padding: 0 18px;
   }
   
   .launcher-text {
