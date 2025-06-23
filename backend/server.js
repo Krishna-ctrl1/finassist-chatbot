@@ -30,7 +30,7 @@ function searchFAQs(userQuery) {
     const normalizedQuestion = faq.Question?.toLowerCase() || '';
     const similarity = stringSimilarity.compareTwoStrings(normalizedQuery, normalizedQuestion);
     
-    if (similarity > 0.7) { // High confidence match
+    if (similarity > 0.8) { // Increased threshold for direct matches
       return {
         faq: faq,
         confidence: similarity,
@@ -39,49 +39,84 @@ function searchFAQs(userQuery) {
     }
   }
 
-  // Keyword-based search for bank account related queries
-  const bankKeywords = ['bank account', 'bank accounts', 'add bank', 'another bank', 'how many bank', 'primary bank', 'redemption bank'];
-  const isBankQuery = bankKeywords.some(keyword => normalizedQuery.includes(keyword));
-  
-  if (isBankQuery) {
-    const bankFAQ = FAQ_KB.find(faq => 
-      faq.Question?.toLowerCase().includes('bank account') && 
-      faq.Question?.toLowerCase().includes('how many')
-    );
+  // Specific FAQ patterns - only match very specific phrases
+  const specificPatterns = [
+    {
+      keywords: ['bank account', 'bank accounts', 'add bank', 'another bank', 'how many bank', 'primary bank'],
+      requiredWords: ['bank', 'account'],
+      excludeWords: ['nav', 'mutual fund performance', 'returns', 'portfolio'],
+      findFAQ: () => FAQ_KB.find(faq => 
+        faq.Question?.toLowerCase().includes('bank account') && 
+        faq.Question?.toLowerCase().includes('how many')
+      )
+    },
+    {
+      keywords: ['what is sip', 'sip means', 'systematic investment plan'],
+      requiredWords: ['sip'],
+      excludeWords: ['portfolio', 'nav', 'returns'],
+      findFAQ: () => FAQ_KB.find(faq => 
+        faq.Question?.toLowerCase().includes('what is a sip')
+      )
+    },
+    {
+      keywords: ['what is nav', 'nav means', 'net asset value'],
+      requiredWords: ['nav'],
+      excludeWords: ['portfolio', 'sip', 'bank'],
+      findFAQ: () => FAQ_KB.find(faq => 
+        faq.Question?.toLowerCase().includes('what is nav')
+      )
+    },
+    {
+      keywords: ['what is mutual fund', 'mutual fund means', 'how does mutual fund work'],
+      requiredWords: ['mutual', 'fund'],
+      excludeWords: ['nvidia', 'specific fund', 'find fund', 'recommend fund', 'search fund'],
+      findFAQ: () => FAQ_KB.find(faq => 
+        faq.Question?.toLowerCase().includes('what is a mutual fund')
+      )
+    },
+    {
+      keywords: ['kyc', 'kyc registration', 'kyc documents', 'kyc process'],
+      requiredWords: ['kyc'],
+      excludeWords: ['portfolio', 'nav', 'returns'],
+      findFAQ: () => FAQ_KB.find(faq => 
+        faq.Question?.toLowerCase().includes('kyc registration')
+      )
+    }
+  ];
+
+  // Check specific patterns
+  for (const pattern of specificPatterns) {
+    const hasKeyword = pattern.keywords.some(keyword => normalizedQuery.includes(keyword));
+    const hasRequiredWords = pattern.requiredWords.every(word => normalizedQuery.includes(word));
+    const hasExcludedWords = pattern.excludeWords.some(word => normalizedQuery.includes(word));
     
-    if (bankFAQ) {
-      return {
-        faq: bankFAQ,
-        confidence: 0.9,
-        matchType: 'keyword_bank'
-      };
+    if (hasKeyword && hasRequiredWords && !hasExcludedWords) {
+      const faq = pattern.findFAQ();
+      if (faq) {
+        return {
+          faq: faq,
+          confidence: 0.9,
+          matchType: 'specific_pattern'
+        };
+      }
     }
   }
 
-  // General keyword matching
-  const keywordMatches = FAQ_KB.map(faq => {
-    const questionWords = (faq.Question?.toLowerCase() || '').split(/\s+/);
-    const queryWords = normalizedQuery.split(/\s+/);
-    
-    let matchCount = 0;
-    queryWords.forEach(word => {
-      if (word.length > 2 && questionWords.some(qWord => qWord.includes(word) || word.includes(qWord))) {
-        matchCount++;
-      }
-    });
-    
-    const matchRatio = matchCount / Math.max(queryWords.length, 1);
+  // Only allow very high similarity matches for general questions
+  const highSimilarityMatches = FAQ_KB.map(faq => {
+    const normalizedQuestion = faq.Question?.toLowerCase() || '';
+    const similarity = stringSimilarity.compareTwoStrings(normalizedQuery, normalizedQuestion);
     
     return {
       faq: faq,
-      confidence: matchRatio,
-      matchType: 'keyword'
+      confidence: similarity,
+      matchType: 'high_similarity'
     };
-  }).filter(match => match.confidence > 0.3);
+  }).filter(match => match.confidence > 0.75); // Very high threshold
 
-  // Return best keyword match if found
-  if (keywordMatches.length > 0) {
-    return keywordMatches.sort((a, b) => b.confidence - a.confidence)[0];
+  // Return best high similarity match if found
+  if (highSimilarityMatches.length > 0) {
+    return highSimilarityMatches.sort((a, b) => b.confidence - a.confidence)[0];
   }
 
   return null;
@@ -2602,15 +2637,16 @@ ${userDataString}
 
 FAQ KNOWLEDGE BASE:
 ${
-  FAQ_KB
+  FAQ_KB && FAQ_KB.length > 0
     ? FAQ_KB.map(
         (faq) => `
-Category: ${faq.category}
-Q: ${faq.question}
-A: ${faq.answer}
+--- FAQ ${faq['s.no'] || 'N/A'} ---
+Category: ${faq['Category '] || faq.Category || 'Unknown'}
+Question: ${faq.Question || 'No question'}
+Answer: ${faq.Answer || 'No answer'}
 `
-      ).join("---")
-    : "FAQ data not available"
+      ).join('')
+    : "FAQ data not available - Please refer user to contact support for specific questions."
 }
 
 FAQ HANDLING RULES:
