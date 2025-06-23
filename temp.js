@@ -124,239 +124,6 @@ function searchFAQs(userQuery) {
 
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
-// Mock financial data for fallback when API is unavailable
-const getMockStockData = (query) => {
-  const mockData = {
-    'aapl': { symbol: 'AAPL', price: '$193.42', change: '+1.2%', company: 'Apple Inc.' },
-    'apple': { symbol: 'AAPL', price: '$193.42', change: '+1.2%', company: 'Apple Inc.' },
-    'tsla': { symbol: 'TSLA', price: '$248.50', change: '-0.8%', company: 'Tesla Inc.' },
-    'tesla': { symbol: 'TSLA', price: '$248.50', change: '-0.8%', company: 'Tesla Inc.' },
-    'msft': { symbol: 'MSFT', price: '$428.90', change: '+0.5%', company: 'Microsoft Corp.' },
-    'microsoft': { symbol: 'MSFT', price: '$428.90', change: '+0.5%', company: 'Microsoft Corp.' },
-    'googl': { symbol: 'GOOGL', price: '$175.40', change: '+1.1%', company: 'Alphabet Inc.' },
-    'google': { symbol: 'GOOGL', price: '$175.40', change: '+1.1%', company: 'Alphabet Inc.' },
-    'amzn': { symbol: 'AMZN', price: '$186.20', change: '+0.3%', company: 'Amazon.com Inc.' },
-    'amazon': { symbol: 'AMZN', price: '$186.20', change: '+0.3%', company: 'Amazon.com Inc.' }
-  };
-  
-  const queryLower = query.toLowerCase();
-  for (const [key, data] of Object.entries(mockData)) {
-    if (queryLower.includes(key)) {
-      return {
-        title: `${data.company} (${data.symbol}) Stock Price`,
-        description: `Current stock price: ${data.price} (${data.change}). Real-time quote and market data for ${data.company}. Market cap, trading volume, and financial metrics.`,
-        url: `https://finance.yahoo.com/quote/${data.symbol}`
-      };
-    }
-  }
-  
-  return {
-    title: 'Stock Price Information',
-    description: 'For real-time stock data, please configure your Brave Search API key or use a financial data provider.',
-    url: 'https://finance.yahoo.com'
-  };
-};
-
-// Web search functionality using Brave API with fallback
-const searchWeb = async (query) => {
-  try {
-    console.log(`Searching with query: ${query}`);
-    
-    // Check if API key is configured
-    if (!process.env.BRAVE_API_KEY || process.env.BRAVE_API_KEY === 'your_brave_search_api_key_here') {
-      console.log('⚠️ Brave API key not configured, using mock data fallback');
-      const mockResult = getMockStockData(query);
-      return [mockResult];
-    }
-    
-    // Use Brave Search API for current financial data, stock prices, etc.
-    const url = new URL('https://api.search.brave.com/res/v1/web/search');
-    url.searchParams.append('q', query);
-    url.searchParams.append('count', '10'); // Increased count for better results
-    url.searchParams.append('result_filter', 'web');
-    url.searchParams.append('freshness', 'pd'); // Past day for fresh data
-    url.searchParams.append('country', 'US'); // Focus on US markets initially
-    url.searchParams.append('safe_search', 'moderate');
-
-    const response = await fetch(url.toString(), {
-      method: 'GET',
-      headers: {
-        'X-Subscription-Token': process.env.BRAVE_API_KEY,
-        'Accept': 'application/json',
-        'Accept-Encoding': 'gzip'
-      }
-    });
-
-    console.log(`Brave API response status: ${response.status}`);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`Brave API error: ${response.status} ${response.statusText}`, errorText);
-      
-      // Fallback to mock data if API fails
-      console.log('🔄 Falling back to mock data due to API error');
-      const mockResult = getMockStockData(query);
-      return [mockResult];
-    }
-
-    const data = await response.json();
-    console.log(`Search results count: ${data.web?.results?.length || 0}`);
-    
-    // Log first few results for debugging
-    if (data.web?.results?.length > 0) {
-      console.log('First search result:', {
-        title: data.web.results[0].title,
-        description: data.web.results[0].description?.substring(0, 100),
-        url: data.web.results[0].url
-      });
-    }
-    
-    return data.web?.results || [];
-  } catch (error) {
-    console.error('Error in web search:', error);
-    
-    // Fallback to mock data on any error
-    console.log('🔄 Falling back to mock data due to search error');
-    const mockResult = getMockStockData(query);
-    return [mockResult];
-  }
-};
-
-// Enhanced function to extract financial data from search results
-const extractFinancialData = (searchResults, query) => {
-  if (!searchResults || searchResults.length === 0) {
-    return {
-      query: query,
-      timestamp: new Date().toISOString(),
-      results: [],
-      summary: 'No search results found',
-      error: 'No data available'
-    };
-  }
-
-  console.log(`Processing ${searchResults.length} search results for query: ${query}`);
-
-  let extractedData = {
-    query: query,
-    timestamp: new Date().toISOString(),
-    results: [],
-    summary: '',
-    financialData: {
-      stockPrice: null,
-      currency: null,
-      change: null,
-      changePercent: null,
-      marketCap: null,
-      source: null
-    }
-  };
-
-  // Prioritize financial data sources
-  const prioritySources = [
-    'yahoo.com', 'finance.yahoo.com', 'google.com/finance', 'bloomberg.com', 
-    'reuters.com', 'marketwatch.com', 'cnbc.com', 'investing.com',
-    'moneycontrol.com', 'nseindia.com', 'bseindia.com'
-  ];
-
-  // Sort results by priority (financial sources first)
-  const sortedResults = searchResults.sort((a, b) => {
-    const aIsPriority = prioritySources.some(source => a.url?.includes(source));
-    const bIsPriority = prioritySources.some(source => b.url?.includes(source));
-    
-    if (aIsPriority && !bIsPriority) return -1;
-    if (!aIsPriority && bIsPriority) return 1;
-    return 0;
-  });
-
-  // Process search results and extract relevant financial information
-  sortedResults.forEach((result, index) => {
-    if (index < 8) { // Use top 8 results for better data coverage
-      const resultData = {
-        title: result.title || '',
-        description: result.description || '',
-        url: result.url || '',
-        snippet: result.description || '',
-        isPrioritySource: prioritySources.some(source => result.url?.includes(source))
-      };
-      
-      // Extract potential financial data from title and description
-      const text = `${result.title} ${result.description}`.toLowerCase();
-      
-      // Look for stock price patterns
-      const pricePatterns = [
-        /\$([0-9,]+\.?[0-9]*)/g,
-        /([0-9,]+\.?[0-9]*)\s*(?:usd|dollars?)/gi,
-        /price[:\s]*\$?([0-9,]+\.?[0-9]*)/gi,
-        /([0-9,]+\.?[0-9]*)\s*per\s*share/gi,
-        /₹([0-9,]+\.?[0-9]*)/g, // For Indian stocks
-        /trading\s*at\s*\$?([0-9,]+\.?[0-9]*)/gi,
-        /current\s*price[:\s]*\$?([0-9,]+\.?[0-9]*)/gi,
-        /stock\s*price[:\s]*\$?([0-9,]+\.?[0-9]*)/gi
-      ];
-      
-      // Look for percentage changes
-      const changePatterns = [
-        /([+-]?[0-9]+\.?[0-9]*)%/g,
-        /(up|down|gained?|lost?)\s*([0-9]+\.?[0-9]*)%/gi,
-        /([+-]?[0-9]+\.?[0-9]*)\s*percent/gi
-      ];
-      
-      pricePatterns.forEach(pattern => {
-        const matches = text.match(pattern);
-        if (matches && !extractedData.financialData.stockPrice) {
-          extractedData.financialData.stockPrice = matches[0];
-          extractedData.financialData.source = result.url;
-        }
-      });
-      
-      changePatterns.forEach(pattern => {
-        const matches = text.match(pattern);
-        if (matches && !extractedData.financialData.changePercent) {
-          extractedData.financialData.changePercent = matches[0];
-        }
-      });
-      
-      extractedData.results.push(resultData);
-    }
-  });
-
-  // Create a comprehensive summary from the search results
-  if (extractedData.results.length > 0) {
-    // Prioritize descriptions from financial sources
-    const priorityDescriptions = extractedData.results
-      .filter(r => r.isPrioritySource)
-      .map(r => r.description)
-      .filter(d => d && d.length > 10);
-      
-    const allDescriptions = extractedData.results
-      .map(r => r.description)
-      .filter(d => d && d.length > 10);
-    
-    const descriptionsToUse = priorityDescriptions.length > 0 ? priorityDescriptions : allDescriptions;
-    
-    extractedData.summary = descriptionsToUse
-      .slice(0, 3)
-      .join(' | ')
-      .substring(0, 800);
-      
-    // Add extracted financial data to summary if found
-    if (extractedData.financialData.stockPrice) {
-      extractedData.summary = `EXTRACTED PRICE: ${extractedData.financialData.stockPrice}` + 
-        (extractedData.financialData.changePercent ? ` (${extractedData.financialData.changePercent})` : '') +
-        ` | ${extractedData.summary}`;
-    }
-  }
-
-  console.log('Extracted financial data:', {
-    hasPrice: !!extractedData.financialData.stockPrice,
-    hasChange: !!extractedData.financialData.changePercent,
-    resultCount: extractedData.results.length,
-    summaryLength: extractedData.summary.length
-  });
-
-  return extractedData;
-};
-
 const app = express();
 
 // Configuration
@@ -2439,25 +2206,23 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
     switch (queryType) {
       case "GREETING":
       case "NON-FINANCIAL":
-        maxTokens = 200;
+        maxTokens = 150;
         break;
       case "USER-SPECIFIC-FINANCIAL":
-        maxTokens = processedMessage.includes("details") ? 800 : 600;
+        maxTokens = processedMessage.includes("details") ? 500 : 300;
         break;
       case "GENERAL-FINANCIAL":
         maxTokens =
           processedMessage.includes("analysis") ||
-          processedMessage.includes("recommend") ||
-          processedMessage.includes("stock") ||
-          processedMessage.includes("price")
-            ? 1000
-            : 700;
+          processedMessage.includes("recommend")
+            ? 600
+            : 400;
         break;
       case "AFFIRMATIVE_RESPONSE":
-        maxTokens = 600; // Allow more tokens for contextual responses
+        maxTokens = 400; // Allow more tokens for contextual responses
         break;
       default:
-        maxTokens = 500;
+        maxTokens = 300;
     }
 
     let systemPrompt;
@@ -2822,15 +2587,14 @@ Order Details: ${JSON.stringify(userData.orderDetails, null, 2)}
         )}`;
       }
 
-      systemPrompt = `You are a specialized financial advisor AI assistant. Provide DIRECT, COMPACT, and ACTIONABLE responses.
+      systemPrompt = `You are a specialized financial advisor AI assistant. Provide CORRECT, COMPLETE, PRECISE, and DIRECT responses. No vague or incomplete answers.
 
-CRITICAL RESPONSE RULES:
-- NO verbose disclaimers about data availability
-- NO lengthy explanations about search limitations
-- NO mentions of "latest web search" or "verified data"
-- ALWAYS be direct and confident
-- ALWAYS provide specific numbers and figures
-- Keep responses concise but complete
+RESPONSE REQUIREMENTS:
+- ALWAYS give specific numbers, percentages, and exact figures
+- ALWAYS provide complete calculations with step-by-step breakdown
+- ALWAYS include precise timestamps and data sources
+- ALWAYS format responses clearly with proper structure
+- NO generic responses - every answer must be specific and actionable
 
 AUTHORIZATION SCOPE:
 You are authorized to discuss:
@@ -3030,24 +2794,6 @@ REMEMBER: Every response must be CORRECT (factually accurate), COMPLETE (no miss
 The goal is to be the most accurate, helpful, and professionally formatted financial advisor AI that provides definitive answers with complete supporting data.`;
     }
 
-    // Define web search functions for OpenAI
-    const functions = [
-      {
-        name: "search_web",
-        description: "Search the web for current financial data, stock prices, mutual fund information, market data, or any real-time information",
-        parameters: {
-          type: "object",
-          properties: {
-            query: {
-              type: "string",
-              description: "Search query for current data (e.g., 'AAPL stock price current', 'Tesla stock price today', 'SBI Bluechip Fund NAV current')"
-            }
-          },
-          required: ["query"]
-        }
-      }
-    ];
-
     const completion = await openai.chat.completions.create({
       model: "gpt-4.1",
       messages: [
@@ -3057,119 +2803,10 @@ The goal is to be the most accurate, helpful, and professionally formatted finan
       ],
       max_tokens: maxTokens,
       temperature: 0.7,
-      functions: functions,
-      function_call: "auto"
     });
 
-    let aiResponse;
-    
-    // Check if the model wants to call the web search function
-    if (completion.choices[0].message.function_call) {
-      const functionCall = completion.choices[0].message.function_call;
-      
-      if (functionCall.name === "search_web") {
-        try {
-          const functionArgs = JSON.parse(functionCall.arguments);
-          const searchQuery = functionArgs.query;
-          
-          console.log(`Performing web search for: ${searchQuery}`);
-          
-          // Perform the web search
-          const searchResults = await searchWeb(searchQuery);
-          const extractedData = extractFinancialData(searchResults, searchQuery);
-          
-          // Enhanced system prompt for processing search results
-          const searchResultPrompt = systemPrompt + `
-
-**SEARCH DATA RECEIVED - PROCESS IMMEDIATELY:**
-
-**EXTRACTED PRICE DATA:**
-${extractedData.financialData?.stockPrice ? `Stock Price: ${extractedData.financialData.stockPrice}` : 'No specific price found'}
-${extractedData.financialData?.changePercent ? `Change: ${extractedData.financialData.changePercent}` : ''}
-${extractedData.financialData?.source ? `Source: ${extractedData.financialData.source}` : ''}
-
-**CRITICAL RESPONSE REQUIREMENTS:**
-1. START immediately with the specific data
-2. NO mentions of "search limitations" or "data availability"
-3. NO verbose explanations about search quality
-4. BE DIRECT and confident
-5. Provide EXACT figures with professional formatting
-6. Give actionable investment guidance
-
-**FORBIDDEN PHRASES:**
-- "There is no current, verified data found"
-- "latest web search"
-- "comprehensive comparison based on"
-- "most recently available, reliable data"
-- "as of [date], therefore I will provide"
-
-**RESPONSE FORMAT:**
-**[COMPANY/FUND NAME] - Current Data**
-Price: [EXACT FIGURE]
-Change: [EXACT CHANGE]
-[Brief analysis and context]
-[Investment guidance]
-[One strategic question]`;
-
-          // Create a follow-up completion with the search results
-          const followUpCompletion = await openai.chat.completions.create({
-            model: "gpt-4.1",
-            messages: [
-              { role: "system", content: searchResultPrompt },
-              ...recentMessages,
-              { role: "user", content: processedMessage },
-              {
-                role: "function",
-                name: "search_web",
-                content: JSON.stringify({
-                  query: searchQuery,
-                  results: extractedData,
-                  timestamp: new Date().toISOString(),
-                  debug: {
-                    totalResults: extractedData.results?.length || 0,
-                    prioritySources: extractedData.results?.filter(r => r.isPrioritySource).length || 0,
-                    extractedPrice: extractedData.financialData?.stockPrice || 'none',
-                    extractedChange: extractedData.financialData?.changePercent || 'none',
-                    summaryPreview: extractedData.summary?.substring(0, 200) || 'empty'
-                  }
-                })
-              }
-            ],
-            max_tokens: maxTokens + 200, // Extra tokens for comprehensive response
-            temperature: 0.7
-          });
-          
-          aiResponse = followUpCompletion.choices[0].message.content;
-          
-          // Post-process to ensure formatting is correct
-          if (aiResponse) {
-            // Ensure proper formatting with markdown headers
-            aiResponse = aiResponse.replace(/\*\*([^*]+)\*\*/g, '**$1**'); // Ensure bold formatting
-            
-            // Add disclaimers if missing for financial data
-            if (extractedData.financialData?.stockPrice && !aiResponse.includes('market risks')) {
-              aiResponse += '\n\n*Data as of ' + new Date().toLocaleString() + ' - Market prices change constantly. Past performance doesn\'t guarantee future results.*';
-            }
-          }
-          
-        } catch (error) {
-          console.error('Error in web search function call:', error);
-          aiResponse = `I attempted to search for current information about "${functionCall.arguments}" but encountered an issue. Let me provide you with general guidance instead.\n\nFor the most current stock prices and financial data, I recommend checking:\n- Yahoo Finance\n- Google Finance\n- Your broker's app\n\nHow else can I assist you with your investment planning or portfolio analysis?`;
-        }
-      } else {
-        aiResponse = "I tried to call a function but encountered an error. How else can I help you with your investments?";
-      }
-    } else {
-      aiResponse = completion.choices[0].message.content;
-    }
-    
-    // Final formatting and validation
+    let aiResponse = completion.choices[0].message.content;
     aiResponse = stripHashtags(aiResponse);
-    
-    // Ensure response is complete (minimum length check)
-    if (aiResponse && aiResponse.length < 50) {
-      aiResponse += "\n\nWould you like more detailed information about this topic or have any other investment questions?";
-    }
 
     const assistantMessage = {
       sender: "bot",
