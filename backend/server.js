@@ -1951,6 +1951,7 @@ Let's start over. Would you like to create a support ticket?`;
           issue_title: issueTitle,
           category: category,
           description: description,
+          chatId: chat._id, // Link ticket to chat
         });
 
         return `✅ **Ticket Created Successfully!**
@@ -2027,6 +2028,7 @@ async function createTicket(ticketData) {
       status: "Open",
       priority: "Medium",
       ticket_id: ticketId,
+      chatId: ticketData.chatId, // Include chat ID if provided
     });
 
     const savedTicket = await ticket.save();
@@ -2150,6 +2152,9 @@ app.post(
         }
       }
 
+      // Get chatId from request body if provided
+      const { chatId } = req.body;
+
       // Create ticket with attachments
       const ticket = new Ticket({
         customer_id: parseInt(customerId),
@@ -2161,12 +2166,94 @@ app.post(
         priority: "Medium",
         ticket_id: ticketId,
         attachments: attachments,
+        chatId: chatId, // Link ticket to chat if provided
       });
 
       const savedTicket = await ticket.save();
       console.log(
         `Ticket created successfully: ${savedTicket.ticket_id} with ${attachments.length} attachment(s)`
       );
+
+      // Create confirmation message
+      const confirmationMessage = `✅ **Ticket Created Successfully!**
+
+**Ticket ID:** ${savedTicket.ticket_id}
+**Title:** ${issue_title}
+**Category:** ${category}
+**Status:** Open
+**Attachments:** ${attachments.length} file(s)
+
+Your support ticket has been created and assigned to our team. You'll receive updates on the progress via email.
+
+**What's next?**
+- Our support team will review your ticket within 24 hours
+- You'll receive email notifications for any updates
+- You can reference your ticket using ID: ${savedTicket.ticket_id}
+
+Is there anything else I can help you with regarding your investments or account?`;
+
+      // If chatId is provided, add confirmation message to chat
+      console.log(`Attempting to add confirmation to chat. ChatId: ${chatId}, User ID: ${req.user._id}`);
+      
+      if (chatId) {
+        try {
+          const userId = new ObjectId(req.user._id);
+          const db = mongoClient.db("financeai");
+          const chatsCollection = db.collection("chats");
+
+          console.log(`Looking for chat with ID: ${chatId}, userId: ${userId}`);
+
+          // Find the chat
+          const chat = await chatsCollection.findOne({
+            _id: new ObjectId(chatId),
+            userId: userId,
+          });
+
+          if (chat) {
+            console.log(`Chat found. Current message count: ${chat.messages?.length || 0}`);
+            
+            // Add confirmation message to chat
+            const assistantMessage = {
+              sender: "bot",
+              content: confirmationMessage,
+              timestamp: new Date(),
+            };
+
+            if (!chat.messages) {
+              chat.messages = [];
+            }
+            chat.messages.push(assistantMessage);
+            chat.updatedAt = new Date();
+
+            // Update the chat in database
+            const updateResult = await chatsCollection.updateOne(
+              { _id: chat._id },
+              {
+                $set: {
+                  messages: chat.messages,
+                  updatedAt: chat.updatedAt,
+                },
+                $inc: { __v: 1 },
+              }
+            );
+
+            console.log(`Chat update result:`, updateResult);
+            console.log(`Confirmation message added to chat ${chatId}. New message count: ${chat.messages.length}`);
+          } else {
+            console.error(`Chat not found for chatId: ${chatId}, userId: ${userId}`);
+          }
+        } catch (chatError) {
+          console.error(`Error updating chat ${chatId} with confirmation:`, chatError);
+          console.error(`Chat error details:`, {
+            name: chatError.name,
+            message: chatError.message,
+            stack: chatError.stack
+          });
+          // Don't fail the ticket creation, just log the error
+        }
+      } else {
+        console.log(`No chatId provided in request body. Available keys:`, Object.keys(req.body));
+      }
 
       res.json({
         success: true,
@@ -2176,6 +2263,7 @@ app.post(
             ? ` with ${attachments.length} attachment(s)`
             : ""
         }`,
+        confirmationMessage: confirmationMessage,
       });
     } catch (error) {
       console.error("Error creating ticket with detailed info:", {
