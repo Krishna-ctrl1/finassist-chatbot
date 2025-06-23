@@ -915,6 +915,139 @@ body {
   display: flex;
 }
 
+/* When chat is opened from floating launcher, open in full screen */
+.chat-screen.launcher-mode {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  z-index: 10000;
+  background: var(--bg-primary);
+}
+
+.chat-screen.launcher-mode .sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  height: 100dvh;
+  width: 280px;
+  transform: translateX(-100%);
+  z-index: 10001;
+  box-shadow: var(--shadow-lg);
+}
+
+.chat-screen.launcher-mode .sidebar.active {
+  transform: translateX(0);
+}
+
+.chat-screen.launcher-mode .chat-widget {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-screen.launcher-mode .chat-main {
+  width: 100%;
+  height: 100%;
+  margin-left: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-screen.launcher-mode .chat-input-container {
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
+.chat-screen.launcher-mode .chat-input-wrapper {
+  max-width: min(768px, calc(100vw - var(--space-12)));
+}
+
+/* Show header buttons when in launcher mode */
+.chat-screen.launcher-mode .sidebar-toggle,
+.chat-screen.launcher-mode .new-chat-header-btn,
+.chat-screen.launcher-mode .chat-title {
+  display: flex;
+}
+
+/* Show close button in launcher mode */
+.chat-screen.launcher-mode .close-chat-btn {
+  display: flex !important;
+}
+
+/* Fix message alignment in launcher mode */
+.chat-screen.launcher-mode .chat-messages {
+  flex: 1;
+  padding: var(--space-6);
+  padding-bottom: calc(120px + var(--space-6));
+}
+
+.chat-screen.launcher-mode .message {
+  max-width: 100%;
+}
+
+.chat-screen.launcher-mode .message.user {
+  justify-content: flex-end;
+}
+
+.chat-screen.launcher-mode .message.bot {
+  justify-content: flex-start;
+}
+
+/* Don't show overlay in launcher mode */
+.chat-screen.launcher-mode .sidebar-overlay {
+  display: none !important;
+}
+
+/* Mobile adjustments for launcher mode */
+@media (max-width: 768px) {
+  .chat-screen.launcher-mode .chat-messages {
+    padding: var(--space-4);
+    padding-bottom: calc(120px + var(--space-4));
+  }
+  
+  .chat-screen.launcher-mode .chat-input-container {
+    padding: var(--space-3);
+  }
+  
+  .chat-screen.launcher-mode .chat-input-wrapper {
+    max-width: calc(100vw - var(--space-6));
+  }
+}
+
+/* Close button styles */
+.close-chat-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--rounded);
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  margin-right: var(--space-2);
+}
+
+.close-chat-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-hover);
+  transform: scale(1.05);
+}
+
+.close-chat-btn i {
+  font-size: 16px;
+}
+
 .chat-avatar {
   width: 32px;
   height: 32px;
@@ -2225,3 +2358,599 @@ body {
     box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.1), 0 2px 6px rgba(0, 0, 0, 0.1);
   }
 }
+.chat-launcher {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 60px;
+  height: 60px;
+  background: var(--green);
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 24px;
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+  z-index: 9999;
+  transition: all 0.3s ease;
+}
+
+.chat-launcher:hover {
+  transform: scale(1.05);
+}
+
+.chat-tooltip {
+  position: absolute;
+  right: 70px;
+  background: #333;
+  color: white;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 13px;
+  white-space: nowrap;
+  opacity: 1;
+  transition: opacity 0.4s ease-in-out;
+}
+
+/* Landing Area Styles */
+.landing-area {
+  display: none;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  background: var(--bg-primary);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.landing-area.hidden {
+  display: none;
+}
+
+.landing-area:not(.hidden) {
+  display: block;
+}
+
+.landing-container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: var(--space-6);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.landing-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-8);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.landing-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.landing-logo {
+  width: 48px;
+  height: 48px;
+  background: var(--green);
+  border-radius: var(--rounded-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 24px;
+}
+
+.landing-title {
+  font-family: var(--font-family);
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.logout-btn-landing {
+  background: var(--error);
+  color: white;
+  border: none;
+  border-radius: var(--rounded);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.875rem;
+}
+
+.logout-btn-landing:hover {
+  background: #dc2626;
+  transform: translateY(-1px);
+}
+
+.landing-content {
+  flex: 1;
+}
+
+.finance-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+  gap: var(--space-6);
+  animation: fadeIn 0.8s ease-out;
+}
+
+.finance-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--rounded-xl);
+  padding: var(--space-6);
+  box-shadow: var(--shadow);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.finance-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--green);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.card-icon {
+  width: 32px;
+  height: 32px;
+  background: var(--green-light);
+  border-radius: var(--rounded);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--green);
+  font-size: 1rem;
+}
+
+.card-header h3 {
+  font-family: var(--font-family);
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.card-content {
+  color: var(--text-primary);
+}
+
+/* Portfolio Card */
+.portfolio-value {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.portfolio-value .value {
+  font-size: 1.875rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.change {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--rounded);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.change.positive {
+  background: var(--green-light);
+  color: var(--green);
+}
+
+.change.negative {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--error);
+}
+
+.portfolio-breakdown,
+.sip-list,
+.transaction-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.asset-item,
+.sip-item,
+.transaction-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.asset-item:last-child,
+.sip-item:last-child,
+.transaction-item:last-child {
+  border-bottom: none;
+}
+
+.asset-name,
+.sip-name {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.asset-value,
+.sip-amount {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* SIP Card */
+.sip-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  background: var(--bg-primary);
+  border-radius: var(--rounded);
+}
+
+.sip-total .label {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.sip-total .value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* Transaction Card */
+.transaction-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.transaction-type {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.transaction-date {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.transaction-amount {
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.transaction-amount.credit {
+  color: var(--green);
+}
+
+.transaction-amount.debit {
+  color: var(--error);
+}
+
+/* Market Card */
+.market-indices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.index-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-3);
+  background: var(--bg-primary);
+  border-radius: var(--rounded);
+}
+
+.index-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.index-values {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+}
+
+.index-value {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.index-change {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--rounded);
+}
+
+.index-change.positive {
+  background: var(--green-light);
+  color: var(--green);
+}
+
+.index-change.negative {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--error);
+}
+
+/* Goals Card */
+.goal-item {
+  margin-bottom: var(--space-4);
+}
+
+.goal-item:last-child {
+  margin-bottom: 0;
+}
+
+.goal-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-2);
+}
+
+.goal-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.goal-progress {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background: var(--border-light);
+  border-radius: var(--rounded-full);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--green), #34d399);
+  border-radius: var(--rounded-full);
+  transition: width 0.3s ease;
+}
+
+/* Actions Card */
+.action-buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--space-3);
+}
+
+.action-btn {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--rounded);
+  padding: var(--space-4) var(--space-3);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  text-align: center;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.action-btn:hover {
+  background: var(--green-light);
+  border-color: var(--green);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+}
+
+.action-btn i {
+  font-size: 1.25rem;
+  color: var(--green);
+}
+
+.action-btn span {
+  font-size: 0.75rem;
+  line-height: 1.2;
+}
+
+/* Enhanced floating launcher button */
+.chat-launcher {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 60px;
+  height: 60px;
+  background: var(--green);
+  color: white;
+  border-radius: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 24px;
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+  z-index: 9999;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  border: none;
+  outline: none;
+}
+
+.chat-launcher:hover {
+  transform: scale(1.1) rotate(5deg);
+  box-shadow: 0 8px 25px rgba(16, 163, 127, 0.4);
+}
+
+.chat-launcher:active {
+  transform: scale(0.95);
+}
+
+/* Automatic expansion animation */
+@keyframes expandLauncher {
+  0% {
+    width: 60px;
+    border-radius: 50%;
+  }
+  100% {
+    width: 180px;
+    border-radius: 30px;
+  }
+}
+
+@keyframes contractLauncher {
+  0% {
+    width: 180px;
+    border-radius: 30px;
+  }
+  100% {
+    width: 60px;
+    border-radius: 50%;
+  }
+}
+
+.chat-launcher.expanded {
+  width: 180px;
+  border-radius: 30px;
+  animation: expandLauncher 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.chat-launcher.contracting {
+  animation: contractLauncher 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.launcher-text {
+  opacity: 0;
+  margin-left: var(--space-2);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: opacity 0.3s ease;
+}
+
+.chat-launcher.expanded .launcher-text {
+  opacity: 1;
+}
+
+/* Mobile responsive adjustments for landing */
+@media (max-width: 768px) {
+  .landing-container {
+    padding: var(--space-4);
+  }
+  
+  .landing-header {
+    flex-direction: column;
+    gap: var(--space-4);
+    text-align: center;
+  }
+  
+  .landing-brand {
+    justify-content: center;
+  }
+  
+  .landing-title {
+    font-size: 1.5rem;
+  }
+  
+  .finance-grid {
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+  }
+  
+  .finance-card {
+    padding: var(--space-4);
+  }
+  
+  .portfolio-value {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
+  }
+  
+  .portfolio-value .value {
+    font-size: 1.5rem;
+  }
+  
+  .action-buttons {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .chat-launcher {
+    width: 56px;
+    height: 56px;
+    font-size: 20px;
+    bottom: 16px;
+    right: 16px;
+  }
+  
+  .chat-launcher.expanded {
+    width: 160px;
+  }
+}
+
+@media (max-width: 480px) {
+  .landing-container {
+    padding: var(--space-3);
+  }
+  
+  .finance-card {
+    padding: var(--space-3);
+  }
+  
+  .action-buttons {
+    grid-template-columns: 1fr;
+  }
+  
+  .chat-launcher {
+    width: 52px;
+    height: 52px;
+    font-size: 18px;
+  }
+  
+  .chat-launcher.expanded {
+    width: 140px;
+  }
+}
+
+

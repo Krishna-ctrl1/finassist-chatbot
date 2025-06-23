@@ -514,32 +514,18 @@ function showAuthScreen() {
 function showChatScreen(user) {
   currentUser = user;
 
-  // Smooth transition from auth to chat
+  // Smooth transition from auth to landing area
   if (elements.authScreen) {
     elements.authScreen.style.opacity = '0';
     elements.authScreen.style.transform = 'scale(0.95)';
 
     setTimeout(() => {
       elements.authScreen.style.display = "none";
-      if (elements.chatScreen) {
-        elements.chatScreen.style.display = "flex";
-        elements.chatScreen.style.opacity = '0';
-        elements.chatScreen.style.transform = 'scale(1.05)';
-
-        // Initialize sidebar state and header visibility
-        initializeSidebarState();
-
-        // Animate in the chat screen
-        requestAnimationFrame(() => {
-          elements.chatScreen.style.transition = 'all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)';
-          elements.chatScreen.style.opacity = '1';
-          elements.chatScreen.style.transform = 'scale(1)';
-        });
-      }
+      showLandingArea(user);
     }, 200);
   }
 
-  // Update user info in header with animation
+  // Update user info in header with animation for chat screen use
   if (elements.userName) {
     elements.userName.style.opacity = '0';
     elements.userName.textContent = sanitizeInput(user.name);
@@ -566,11 +552,6 @@ function showChatScreen(user) {
 
   // Initialize send button state
   updateSendButtonState();
-
-  // Focus input on desktop with delay for animation
-  if (window.innerWidth > 768 && elements.messageInput) {
-    setTimeout(() => elements.messageInput.focus(), 600);
-  }
 }
 
 function resetChatArea() {
@@ -675,11 +656,12 @@ function toggleSidebar(event) {
     return;
   }
 
-  const isCurrentlyOpen = elements.sidebar.classList.contains("active") || window.innerWidth > 768;
+  const chatScreen = document.getElementById('chatScreen');
+  const isLauncherMode = chatScreen && chatScreen.classList.contains('launcher-mode');
+  const isCurrentlyOpen = elements.sidebar.classList.contains("active");
   const overlay = document.getElementById('sidebarOverlay');
   const toggleBtn = document.querySelector('.sidebar-toggle');
   const collapseBtn = document.querySelector('.sidebar-collapse-btn');
-  const chatScreen = document.getElementById('chatScreen');
 
   // Add visual feedback to button that was clicked
   const clickedBtn = event?.target.closest('button');
@@ -690,8 +672,8 @@ function toggleSidebar(event) {
     }, 100);
   }
 
-  if (window.innerWidth <= 768) {
-    // Mobile behavior - toggle sidebar visibility
+  // In launcher mode or mobile, always use mobile-style behavior
+  if (isLauncherMode || window.innerWidth <= 768) {
     if (isCurrentlyOpen) {
       // Close sidebar
       elements.sidebar.classList.remove("active");
@@ -700,9 +682,7 @@ function toggleSidebar(event) {
         overlay.style.opacity = '0';
         overlay.style.visibility = 'hidden';
       }
-      // Show header elements when sidebar is closed
-      if (chatScreen) chatScreen.classList.add('sidebar-collapsed');
-      console.log('Sidebar closed on mobile');
+      console.log('Sidebar closed in launcher/mobile mode');
     } else {
       // Open sidebar
       elements.sidebar.classList.add("active");
@@ -711,12 +691,10 @@ function toggleSidebar(event) {
         overlay.style.opacity = '1';
         overlay.style.visibility = 'visible';
       }
-      // Hide header elements when sidebar is open
-      if (chatScreen) chatScreen.classList.remove('sidebar-collapsed');
-      console.log('Sidebar opened on mobile');
+      console.log('Sidebar opened in launcher/mobile mode');
     }
   } else {
-    // Desktop behavior - toggle collapsed state
+    // Desktop behavior - toggle collapsed state (only when not in launcher mode)
     const isCollapsed = elements.sidebar.classList.contains("collapsed");
 
     if (isCollapsed) {
@@ -1187,6 +1165,19 @@ function sendQuickMessage(message) {
   if (elements.messageInput) {
     elements.messageInput.value = message;
     sendMessage();
+  }
+}
+
+function toggleFullChat() {
+  const chatScreen = document.getElementById("chatScreen");
+  if (!chatScreen) return;
+
+  chatScreen.classList.toggle("hidden");
+
+  if (!chatScreen.classList.contains("hidden")) {
+    // Show chat screen fully
+    const messageInput = document.getElementById("messageInput");
+    if (messageInput) messageInput.focus();
   }
 }
 
@@ -1724,6 +1715,8 @@ window.showAccountSettings = showAccountSettings;
 window.showPreferences = showPreferences;
 window.clearSearch = clearSearch;
 window.searchChats = searchChats;
+window.openChatFromLanding = openChatFromLanding;
+window.closeChatToLanding = closeChatToLanding;
 
 // Search functionality
 let searchTimeout;
@@ -2403,4 +2396,315 @@ function toggleVoiceOutput() {
   setTimeout(() => {
     elements.wavesBtn.style.transform = 'scale(1)';
   }, 100);
+}
+function toggleChatView() {
+  const chatScreen = document.getElementById("chatScreen");
+  const launcher = document.getElementById("chatLauncher");
+
+  if (!chatScreen || !launcher) return;
+
+  const isVisible = chatScreen.style.display === "flex";
+
+  if (isVisible) {
+    chatScreen.style.display = "none";
+    launcher.innerHTML = `<i class="fas fa-comment-dots"></i>`;
+  } else {
+    chatScreen.style.display = "flex";
+    launcher.innerHTML = `<i class="fas fa-times"></i>`;
+    
+    // Optional: focus the message input after showing chat
+    const input = document.getElementById("messageInput");
+    if (input) setTimeout(() => input.focus(), 100);
+  }
+}
+function openChatFromLanding() {
+  const chatScreen = document.getElementById("chatScreen");
+  const launcher = document.getElementById("chatLauncher");
+  const chatWidget = document.getElementById("chatWidget");
+  const closeBtn = document.querySelector(".close-chat-btn");
+
+  if (!chatScreen) return;
+
+  // Add launcher-mode class to properly handle layout
+  chatScreen.classList.add("launcher-mode");
+  chatScreen.style.display = "flex";
+  
+  // Show the chat widget that was hidden
+  if (chatWidget) {
+    chatWidget.classList.remove("hidden");
+  }
+  
+  // Show the close button in launcher mode
+  if (closeBtn) {
+    closeBtn.style.display = "flex";
+  }
+  
+  // Hide the floating launcher
+  if (launcher) {
+    launcher.style.display = "none";
+  }
+  
+  // Focus the message input after a short delay
+  setTimeout(() => {
+    const messageInput = document.getElementById("messageInput");
+    if (messageInput) {
+      messageInput.focus();
+    }
+  }, 300);
+}
+
+function closeChatToLanding() {
+  const chatScreen = document.getElementById("chatScreen");
+  const launcher = document.getElementById("chatLauncher");
+  const chatWidget = document.getElementById("chatWidget");
+  const closeBtn = document.querySelector(".close-chat-btn");
+
+  if (!chatScreen) return;
+
+  // Remove launcher-mode class
+  chatScreen.classList.remove("launcher-mode");
+  chatScreen.style.display = "none";
+  
+  // Hide the chat widget
+  if (chatWidget) {
+    chatWidget.classList.add("hidden");
+  }
+  
+  // Hide the close button when leaving launcher mode
+  if (closeBtn) {
+    closeBtn.style.display = "none";
+  }
+  
+  // Show the floating launcher again
+  if (launcher) {
+    launcher.style.display = "flex";
+  }
+}
+
+function showLandingArea(user) {
+  console.log("Showing landing area for user:", user.name);
+  
+  // Hide other screens
+  if (elements.authScreen) elements.authScreen.style.display = "none";
+  if (elements.chatScreen) elements.chatScreen.style.display = "none";
+  
+  // Show landing area
+  const landingArea = document.getElementById("landingArea");
+  if (landingArea) {
+    landingArea.classList.remove("hidden");
+    landingArea.style.display = "block";
+    
+    // Update user info in landing header
+    const landingUserName = document.getElementById("landingUserName");
+    const landingUserInitials = document.getElementById("landingUserInitials");
+    
+    if (landingUserName) {
+      landingUserName.textContent = sanitizeInput(user.name);
+    }
+    if (landingUserInitials) {
+      landingUserInitials.textContent = sanitizeInput(user.name.charAt(0).toUpperCase());
+    }
+    
+    // Load real dashboard data
+    loadDashboardData();
+    
+    // Show floating launcher after a delay
+    setTimeout(() => {
+      showFloatingLauncher();
+    }, 1000);
+  }
+}
+
+// Function to load real dashboard data from backend
+async function loadDashboardData() {
+  try {
+    console.log('Loading dashboard data...');
+    const response = await fetch(`${API_BASE}/dashboard/data`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${authToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch dashboard data: ${response.status}`);
+    }
+
+    const result = await response.json();
+    console.log('Dashboard data loaded:', result.data);
+    
+    if (result.success && result.data) {
+      updateLandingAreaWithData(result.data);
+    }
+  } catch (error) {
+    console.error('Error loading dashboard data:', error);
+    showNotification('Failed to load dashboard data', 'warning');
+  }
+}
+
+// Function to update landing area with real data
+function updateLandingAreaWithData(data) {
+  try {
+    // Update portfolio overview
+    const portfolioValue = document.querySelector('.portfolio-value .value');
+    const portfolioChange = document.querySelector('.portfolio-value .change');
+    const assetItems = document.querySelectorAll('.asset-item');
+    
+    if (portfolioValue && data.portfolio) {
+      portfolioValue.textContent = `₹${formatCurrency(data.portfolio.totalValue)}`;
+    }
+    
+    if (portfolioChange && data.portfolio) {
+      const changeClass = data.portfolio.returnPercentage >= 0 ? 'positive' : 'negative';
+      portfolioChange.className = `change ${changeClass}`;
+      portfolioChange.textContent = `${data.portfolio.returnPercentage >= 0 ? '+' : ''}${data.portfolio.returnPercentage.toFixed(1)}%`;
+    }
+    
+    // Update asset breakdown
+    if (assetItems.length >= 2 && data.portfolio.assets.length >= 2) {
+      assetItems[0].querySelector('.asset-value').textContent = `₹${formatCurrency(data.portfolio.assets[0]?.value || 0)}`;
+      assetItems[1].querySelector('.asset-value').textContent = `₹${formatCurrency(data.portfolio.assets[1]?.value || 0)}`;
+    }
+    
+    // Update SIP data
+    const sipTotal = document.querySelector('.sip-total .value');
+    const sipItems = document.querySelectorAll('.sip-item');
+    
+    if (sipTotal && data.sip) {
+      sipTotal.textContent = `₹${formatCurrency(data.sip.totalMonthlyInvestment)}`;
+    }
+    
+    if (sipItems.length >= 2 && data.sip.activeSIPs.length >= 2) {
+      sipItems[0].querySelector('.sip-name').textContent = data.sip.activeSIPs[0]?.name || 'Investment 1';
+      sipItems[0].querySelector('.sip-amount').textContent = `₹${formatCurrency(data.sip.activeSIPs[0]?.amount || 0)}`;
+      sipItems[1].querySelector('.sip-name').textContent = data.sip.activeSIPs[1]?.name || 'Investment 2';
+      sipItems[1].querySelector('.sip-amount').textContent = `₹${formatCurrency(data.sip.activeSIPs[1]?.amount || 0)}`;
+    }
+    
+    // Update recent transactions
+    const transactionItems = document.querySelectorAll('.transaction-item');
+    
+    if (transactionItems.length >= 3 && data.transactions.length >= 3) {
+      for (let i = 0; i < Math.min(3, data.transactions.length); i++) {
+        const transaction = data.transactions[i];
+        const item = transactionItems[i];
+        
+        item.querySelector('.transaction-type').textContent = transaction.type;
+        item.querySelector('.transaction-date').textContent = formatTransactionDate(transaction.date);
+        
+        const amountEl = item.querySelector('.transaction-amount');
+        amountEl.textContent = `${transaction.isCredit ? '+' : '-'}₹${formatCurrency(transaction.amount)}`;
+        amountEl.className = `transaction-amount ${transaction.isCredit ? 'credit' : 'debit'}`;
+      }
+    }
+    
+    // Update market data
+    const niftyValue = document.querySelector('.index-item:first-child .index-value');
+    const niftyChange = document.querySelector('.index-item:first-child .index-change');
+    const sensexValue = document.querySelector('.index-item:last-child .index-value');
+    const sensexChange = document.querySelector('.index-item:last-child .index-change');
+    
+    if (niftyValue && data.market?.nifty) {
+      niftyValue.textContent = data.market.nifty.value.toFixed(2);
+      if (niftyChange) {
+        const changeClass = data.market.nifty.change >= 0 ? 'positive' : 'negative';
+        niftyChange.className = `index-change ${changeClass}`;
+        niftyChange.textContent = `${data.market.nifty.change >= 0 ? '+' : ''}${data.market.nifty.change}%`;
+      }
+    }
+    
+    if (sensexValue && data.market?.sensex) {
+      sensexValue.textContent = data.market.sensex.value.toFixed(2);
+      if (sensexChange) {
+        const changeClass = data.market.sensex.change >= 0 ? 'positive' : 'negative';
+        sensexChange.className = `index-change ${changeClass}`;
+        sensexChange.textContent = `${data.market.sensex.change >= 0 ? '+' : ''}${data.market.sensex.change}%`;
+      }
+    }
+    
+    // Update goals
+    const goalItems = document.querySelectorAll('.goal-item');
+    
+    if (goalItems.length >= 2 && data.goals.length >= 2) {
+      for (let i = 0; i < Math.min(2, data.goals.length); i++) {
+        const goal = data.goals[i];
+        const item = goalItems[i];
+        
+        item.querySelector('.goal-name').textContent = goal.name;
+        item.querySelector('.goal-progress').textContent = `₹${formatCurrency(goal.current)} / ₹${formatCurrency(goal.target)}`;
+        item.querySelector('.progress-fill').style.width = `${goal.progress}%`;
+      }
+    }
+    
+    console.log('Landing area updated with real data');
+  } catch (error) {
+    console.error('Error updating landing area with data:', error);
+  }
+}
+
+// Helper functions for formatting
+function formatCurrency(amount) {
+  if (amount >= 10000000) { // 1 crore
+    return `${(amount / 10000000).toFixed(1)}Cr`;
+  } else if (amount >= 100000) { // 1 lakh
+    return `${(amount / 100000).toFixed(1)}L`;
+  } else if (amount >= 1000) { // 1 thousand
+    return `${(amount / 1000).toFixed(1)}K`;
+  } else {
+    return amount.toFixed(0);
+  }
+}
+
+function formatTransactionDate(dateString) {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffTime = Math.abs(now - date);
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays <= 7) return `${diffDays} days ago`;
+  return date.toLocaleDateString();
+}
+
+function showFloatingLauncher() {
+  const launcher = document.getElementById("chatLauncher");
+  const tooltip = document.getElementById("chatTooltip");
+  if (!launcher) return;
+
+  launcher.style.display = "flex"; // Show button
+  
+  // Add initial text content to launcher
+  launcher.innerHTML = `
+    <i class="fas fa-comment-dots"></i>
+    <span class="launcher-text">Need help with finance?</span>
+  `;
+  
+  // Auto-expand animation after login
+  setTimeout(() => {
+    launcher.classList.add("expanded");
+    
+    // Auto-contract after 5 seconds if user doesn't interact
+    setTimeout(() => {
+      if (!launcher.matches(':hover')) {
+        launcher.classList.remove("expanded");
+        launcher.classList.add("contracting");
+        
+        // Remove contracting class after animation
+        setTimeout(() => {
+          launcher.classList.remove("contracting");
+          launcher.innerHTML = `<i class="fas fa-comment-dots"></i>`;
+        }, 400);
+      }
+    }, 5000);
+  }, 500);
+
+  // Tooltip fade
+  if (tooltip) {
+    tooltip.style.opacity = "1";
+    setTimeout(() => {
+      tooltip.style.opacity = "0";
+    }, 4000);
+  }
 }

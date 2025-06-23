@@ -80,10 +80,211 @@
             </div>
         </div>
 
+        <!-- Landing Area -->
+        <div id="landingArea" class="landing-area hidden">
+            <div class="landing-container">
+                <div class="landing-header">
+                    <div class="landing-brand">
+                        <div class="landing-logo">
+                            <i class="fas fa-chart-line" aria-label="FinanceAI logo"></i>
+                        </div>
+                        <h1 class="landing-title">FinanceAI Dashboard</h1>
+                    </div>
+                    <div class="user-info">
+                        <div class="user-avatar" id="landingUserInitials">U</div>
+                        <span class="user-name" id="landingUserName">User</span>
+                        <button class="logout-btn-landing" onclick="logout()" aria-label="Logout">
+                            <i class="fas fa-sign-out-alt"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="landing-content">
+                    <div class="finance-grid">
+                        <!-- Portfolio Overview -->
+                        <div class="finance-card portfolio-card">
+                            <div class="card-header">
+                                <div class="card-icon">
+                                    <i class="fas fa-chart-pie"></i>
+                                </div>
+                                <h3>Portfolio Overview</h3>
+                            </div>
+                            <div class="card-content">
+                                <div class="portfolio-value">
+                                    <span class="value">₹2,45,680</span>
+                                    <span class="change positive">+12.5%</span>
+                                </div>
+                                <div class="portfolio-breakdown">
+                                    <div class="asset-item">
+                                        <span class="asset-name">Mutual Funds</span>
+                                        <span class="asset-value">₹1,85,420</span>
+                                    </div>
+                                    <div class="asset-item">
+                                        <span class="asset-name">Stocks</span>
+                                        <span class="asset-value">₹60,260</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SIP Status -->
+                        <div class="finance-card sip-card">
+                            <div class="card-header">
+                                <div class="card-icon">
+                                    <i class="fas fa-calendar-check"></i>
+                                </div>
+                                <h3>SIP Status</h3>
+                            </div>
+                            <div class="card-content">
+                                <div class="sip-total">
+                                    <span class="label">Monthly Investment</span>
+                                    <span class="value">₹15,000</span>
+                                </div>
+                                <div class="sip-list">
+                                    <div class="sip-item">
+                                        <span class="sip-name">HDFC Top 100</span>
+                                        <span class="sip-amount">₹8,000</span>
+                                    </div>
+                                    <div class="sip-item">
+                                        <span class="sip-name">Axis Bluechip</span>
+                                        <span class="sip-amount">₹7,000</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Recent Transactions -->
+                        <div class="finance-card transactions-card">
+                            <div class="card-header">
+                                <div class="card-icon">
+                                    <i class="fas fa-receipt"></i>
+                                </div>
+                                <h3>Recent Transactions</h3>
+                            </div>
+                            <div class="card-content">
+                                <div class="transaction-list">
+                                    <div class="transaction-item">
+                                        <div class="transaction-info">
+                                            <span class="transaction-type">SIP - HDFC Top 100</span>
+                                            <span class="transaction-date">Today</span>
+                                        </div>
+                                        <span class="transaction-amount debit">-₹8,000</span>
+                                    </div>
+                                    <div class="transaction-item">
+                                        <div class="transaction-info">
+                                            <span class="transaction-type">Dividend Credit</span>
+                                            <span class="transaction-date">2 days ago</span>
+                                        </div>
+                                        <span class="transaction-amount credit">+₹1,250</span>
+                                    </div>
+                                    <div class="transaction-item">
+                                        <div class="transaction-info">
+                                            <span class="transaction-type">SIP - Axis Bluechip</span>
+                                            <span class="transaction-date">3 days ago</span>
+                                        </div>
+                                        <span class="transaction-amount debit">-₹7,000</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Market Summary -->
+                        <div class="finance-card market-card">
+                            <div class="card-header">
+                                <div class="card-icon">
+                                    <i class="fas fa-chart-line"></i>
+                                </div>
+                                <h3>Market Summary</h3>
+                            </div>
+                            <div class="card-content">
+                                <div class="market-indices">
+                                    <div class="index-item">
+                                        <span class="index-name">NIFTY 50</span>
+                                        <div class="index-values">
+                                            <span class="index-value">19,674.50</span>
+                                            <span class="index-change positive">+1.2%</span>
+                                        </div>
+                                    </div>
+                                    <div class="index-item">
+                                        <span class="index-name">SENSEX</span>
+                                        <div class="index-values">
+                                            <span class="index-value">65,832.10</span>
+                                            <span class="index-change positive">+0.8%</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Goals Progress -->
+                        <div class="finance-card goals-card">
+                            <div class="card-header">
+                                <div class="card-icon">
+                                    <i class="fas fa-bullseye"></i>
+                                </div>
+                                <h3>Financial Goals</h3>
+                            </div>
+                            <div class="card-content">
+                                <div class="goal-item">
+                                    <div class="goal-info">
+                                        <span class="goal-name">Emergency Fund</span>
+                                        <span class="goal-progress">₹85K / ₹1L</span>
+                                    </div>
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: 85%"></div>
+                                    </div>
+                                </div>
+                                <div class="goal-item">
+                                    <div class="goal-info">
+                                        <span class="goal-name">House Down Payment</span>
+                                        <span class="goal-progress">₹12L / ₹20L</span>
+                                    </div>
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: 60%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Quick Actions -->
+                        <div class="finance-card actions-card">
+                            <div class="card-header">
+                                <div class="card-icon">
+                                    <i class="fas fa-bolt"></i>
+                                </div>
+                                <h3>Quick Actions</h3>
+                            </div>
+                            <div class="card-content">
+                                <div class="action-buttons">
+                                    <button class="action-btn" onclick="openChatFromLanding()">
+                                        <i class="fas fa-robot"></i>
+                                        <span>Ask AI Assistant</span>
+                                    </button>
+                                    <button class="action-btn">
+                                        <i class="fas fa-plus"></i>
+                                        <span>Start New SIP</span>
+                                    </button>
+                                    <button class="action-btn">
+                                        <i class="fas fa-file-download"></i>
+                                        <span>Download Report</span>
+                                    </button>
+                                    <button class="action-btn">
+                                        <i class="fas fa-calculator"></i>
+                                        <span>SIP Calculator</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Chat Screen -->
-        <div id="chatScreen" class="chat-screen">
+        <div id="chatScreen" class="chat-screen hidden">
             <!-- Mobile overlay for sidebar -->
             <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+            
             <aside class="sidebar" id="sidebar">
                 <div class="sidebar-header">
                     <div class="sidebar-brand">
@@ -118,173 +319,197 @@
                     </div>
                 </div>
             </aside>
-            <main class="chat-main">
-                <div class="chat-header">
-                    <div class="chat-header-left">
-                        <button class="sidebar-toggle" onclick="toggleSidebar(event)" aria-label="Toggle sidebar menu">
-                            <i class="fas fa-bars"></i>
-                        </button>
-                        <button class="new-chat-header-btn" onclick="startNewChat()" aria-label="Start new chat">
-                            <i class="fas fa-plus"></i>
-                        </button>
-                        <div class="chat-title">
-                            <h3>FinanceAI Assistant</h3>
-                        </div>
-                    </div>
-                    <div class="chat-header-right">
-                        <div class="user-menu" onclick="toggleProfileDropdown()" role="button" tabindex="0" onkeydown="if(event.key === 'Enter') toggleProfileDropdown()">
-                            <div class="user-avatar" id="userInitials">U</div>
-                            <span class="user-name" id="userName">User</span>
-                            <i class="fas fa-chevron-down profile-chevron" id="profileChevron"></i>
+
+            <div id="chatWidget" class="chat-widget">
+                <main class="chat-main">
+                    <div class="chat-header">
+                        <div class="chat-header-left">
+                            <button class="sidebar-toggle" onclick="toggleSidebar(event)" aria-label="Toggle sidebar menu">
+                                <i class="fas fa-bars"></i>
+                            </button>
+                            <button class="new-chat-header-btn" onclick="startNewChat()" aria-label="Start new chat">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                            <div class="chat-title">
+                                <h3>FinanceAI Assistant</h3>
+                            </div>
                         </div>
                         
-                        <!-- Profile Dropdown -->
-                        <div class="profile-dropdown" id="profileDropdown">
-                            <div class="profile-dropdown-content">
-                                <div class="profile-header">
-                                    <div class="profile-avatar" id="profileAvatar">U</div>
-                                    <div class="profile-info">
-                                        <h3 id="profileName">User</h3>
-                                        <p id="profileEmail">user@example.com</p>
+                        <div class="chat-header-right">
+                            <button class="close-chat-btn" onclick="closeChatToLanding()" aria-label="Close chat" style="display: none;">
+                                <i class="fas fa-times"></i>
+                            </button>
+                            <div class="user-menu" onclick="toggleProfileDropdown()" role="button" tabindex="0" onkeydown="if(event.key === 'Enter') toggleProfileDropdown()">
+                                <div class="user-avatar" id="userInitials">U</div>
+                                <span class="user-name" id="userName">User</span>
+                                <i class="fas fa-chevron-down profile-chevron" id="profileChevron"></i>
+                            </div>
+                            
+                            <!-- Profile Dropdown -->
+                            <div class="profile-dropdown" id="profileDropdown">
+                                <div class="profile-dropdown-content">
+                                    <div class="profile-header">
+                                        <div class="profile-avatar" id="profileAvatar">U</div>
+                                        <div class="profile-info">
+                                            <h3 id="profileName">User</h3>
+                                            <p id="profileEmail">user@example.com</p>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="profile-menu">
+                                        <button class="profile-menu-item" onclick="showAccountSettings()">
+                                            <i class="fas fa-user-cog"></i>
+                                            <span>Account Settings</span>
+                                        </button>
+                                        
+                                        <button class="profile-menu-item" onclick="showPreferences()">
+                                            <i class="fas fa-cog"></i>
+                                            <span>Preferences</span>
+                                        </button>
+                                        
+                                        <button class="profile-menu-item" onclick="toggleTheme()">
+                                            <i class="fas fa-moon"></i>
+                                            <span>Toggle System Theme</span>
+                                        </button>
+                                        
+                                        <hr class="profile-divider">
+                                        
+                                        <button class="profile-menu-item logout-item" onclick="logout()">
+                                            <i class="fas fa-sign-out-alt"></i>
+                                            <span>Log out</span>
+                                        </button>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="chat-messages" id="chatMessages">
+                        <div class="welcome-card">
+                            <h2>Welcome to FinanceAI! 👋</h2>
+                            <p>I'm your personal financial assistant. Ask me anything about your investments, SIPs, portfolio, or financial planning.</p>
+                        </div>
+                        
+                        <div class="quick-actions">
+                            <div class="quick-action" role="button" tabindex="0" onclick="sendQuickMessage('What is the status of my SIP?')" onkeydown="if(event.key === 'Enter') sendQuickMessage('What is the status of my SIP?')">
+                                <div class="quick-action-icon">
+                                    <i class="fas fa-calendar-check" aria-hidden="true"></i>
+                                </div>
+                                <h4>SIP Status</h4>
+                                <p>Check your current SIP investments</p>
+                            </div>
+                            
+                            <div class="quick-action" role="button" tabindex="0" onclick="sendQuickMessage('Show me my portfolio')" onkeydown="if(event.key === 'Enter') sendQuickMessage('Show me my portfolio')">
+                                <div class="quick-action-icon">
+                                    <i class="fas fa-chart-pie" aria-hidden="true"></i>
+                                </div>
+                                <h4>Portfolio Overview</h4>
+                                <p>View your investment portfolio</p>
+                            </div>
+                            
+                            <div class="quick-action" role="button" tabindex="0" onclick="sendQuickMessage('What are my recent transactions?')" onkeydown="if(event.key === 'Enter') sendQuickMessage('What are my recent transactions?')">
+                                <div class="quick-action-icon">
+                                    <i class="fas fa-receipt" aria-hidden="true"></i>
+                                </div>
+                                <h4>Transactions</h4>
+                                <p>Review recent financial activities</p>
+                            </div>
+                            
+                            <div class="quick-action" role="button" tabindex="0" onclick="sendQuickMessage('What is my account balance?')" onkeydown="if(event.key === 'Enter') sendQuickMessage('What is my account balance?')">
+                                <div class="quick-action-icon">
+                                    <i class="fas fa-wallet" aria-hidden="true"></i>
+                                </div>
+                                <h4>Balance Inquiry</h4>
+                                <p>Check your available balance</p>
+                            </div>
+                        </div>
+                        
+                        <div class="typing-indicator" id="typingIndicator">
+                            <div class="message-avatar">
+                                <i class="fas fa-robot" aria-label="FinanceAI assistant"></i>
+                            </div>
+                            <div class="typing-dots">
+                                <div class="typing-dot"></div>
+                                <div class="typing-dot"></div>
+                                <div class="typing-dot"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="chat-input-container">
+                        <div class="chat-input-wrapper">
+                            <div class="chat-input-box">
+                                <!-- First row: Text input only -->
+                                <div class="input-row-top">
+                                    <textarea 
+                                        class="chat-input" 
+                                        id="messageInput" 
+                                        placeholder="Send a message..." 
+                                        rows="1" 
+                                        aria-label="Type your message here"
+                                        autocomplete="off"
+                                        autocorrect="off"
+                                        autocapitalize="sentences"
+                                        spellcheck="true"
+                                        maxlength="2000"
+                                    ></textarea>
+                                </div>
                                 
-                                <div class="profile-menu">
-                                    <button class="profile-menu-item" onclick="showAccountSettings()">
-                                        <i class="fas fa-user-cog"></i>
-                                        <span>Account Settings</span>
+                                <!-- Second row: Waves button on left, Mic and Send buttons on right -->
+                                <div class="input-row-bottom">
+                                    <button 
+                                        class="waves-btn" 
+                                        id="wavesBtn" 
+                                        aria-label="Toggle voice output" 
+                                        type="button"
+                                        title="Toggle voice output"
+                                    >
+                                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                                            <!-- 1st line (smallest height) - centered -->
+                                            <rect x="2" y="7" width="2.5" height="2" rx="1.25"/>
+                                            <!-- 2nd line (biggest height) - centered -->
+                                            <rect x="5.5" y="3" width="2.5" height="10" rx="1.25"/>
+                                            <!-- 3rd line (medium height) - centered -->
+                                            <rect x="9" y="5" width="2.5" height="6" rx="1.25"/>
+                                            <!-- 4th line (same as 1st height) - centered -->
+                                            <rect x="12.5" y="7" width="2.5" height="2" rx="1.25"/>
+                                        </svg>
                                     </button>
                                     
-                                    <button class="profile-menu-item" onclick="showPreferences()">
-                                        <i class="fas fa-cog"></i>
-                                        <span>Preferences</span>
-                                    </button>
-                                    <button class="profile-menu-item" onclick="toggleTheme()">
-                                        <i class="fas fa-moon"></i>
-                                        <span>Toggle System Theme</span>
-                                    </button>
-                                    <hr class="profile-divider">
-                                    
-                                    <button class="profile-menu-item logout-item" onclick="logout()">
-                                        <i class="fas fa-sign-out-alt"></i>
-                                        <span>Log out</span>
-                                    </button>
+                                    <div class="input-actions">
+                                        <button 
+                                            class="voice-btn" 
+                                            id="voiceBtn" 
+                                            aria-label="Voice input" 
+                                            type="button"
+                                            title="Voice input"
+                                        >
+                                            <i class="fas fa-microphone" aria-hidden="true"></i>
+                                        </button>
+                                        
+                                        <button 
+                                            class="send-btn" 
+                                            id="sendBtn" 
+                                            aria-label="Send message" 
+                                            type="button"
+                                            disabled
+                                        >
+                                            <i class="fas fa-paper-plane" aria-hidden="true"></i>
+                                            <span class="sr-only">Send</span>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
-                </div>
-                <div class="chat-messages" id="chatMessages">
-                    <div class="welcome-card">
-                        <h2>Welcome to FinanceAI! 👋</h2>
-                        <p>I'm your personal financial assistant. Ask me anything about your investments, SIPs, portfolio, or financial planning.</p>
-                    </div>
-                    <div class="quick-actions">
-                        <div class="quick-action" role="button" tabindex="0" onclick="sendQuickMessage('What is the status of my SIP?')" onkeydown="if(event.key === 'Enter') sendQuickMessage('What is the status of my SIP?')">
-                            <div class="quick-action-icon">
-                                <i class="fas fa-calendar-check" aria-hidden="true"></i>
-                            </div>
-                            <h4>SIP Status</h4>
-                            <p>Check your current SIP investments</p>
-                        </div>
-                        <div class="quick-action" role="button" tabindex="0" onclick="sendQuickMessage('Show me my portfolio')" onkeydown="if(event.key === 'Enter') sendQuickMessage('Show me my portfolio')">
-                            <div class="quick-action-icon">
-                                <i class="fas fa-chart-pie" aria-hidden="true"></i>
-                            </div>
-                            <h4>Portfolio Overview</h4>
-                            <p>View your investment portfolio</p>
-                        </div>
-                        <div class="quick-action" role="button" tabindex="0" onclick="sendQuickMessage('What are my recent transactions?')" onkeydown="if(event.key === 'Enter') sendQuickMessage('What are my recent transactions?')">
-                            <div class="quick-action-icon">
-                                <i class="fas fa-receipt" aria-hidden="true"></i>
-                            </div>
-                            <h4>Transactions</h4>
-                            <p>Review recent financial activities</p>
-                        </div>
-                        <div class="quick-action" role="button" tabindex="0" onclick="sendQuickMessage('What is my account balance?')" onkeydown="if(event.key === 'Enter') sendQuickMessage('What is my account balance?')">
-                            <div class="quick-action-icon">
-                                <i class="fas fa-wallet" aria-hidden="true"></i>
-                            </div>
-                            <h4>Balance Inquiry</h4>
-                            <p>Check your available balance</p>
-                        </div>
-                    </div>
-                    <div class="typing-indicator" id="typingIndicator">
-                        <div class="message-avatar">
-                            <i class="fas fa-robot" aria-label="FinanceAI assistant"></i>
-                        </div>
-                        <div class="typing-dots">
-                            <div class="typing-dot"></div>
-                            <div class="typing-dot"></div>
-                            <div class="typing-dot"></div>
-                        </div>
-                    </div>
-                </div>
-                <div class="chat-input-container">
-                    <div class="chat-input-wrapper">
-                        <div class="chat-input-box">
-                            <!-- First row: Text input only -->
-                            <div class="input-row-top">
-                                <textarea 
-                                    class="chat-input" 
-                                    id="messageInput" 
-                                    placeholder="Send a message..." 
-                                    rows="1" 
-                                    aria-label="Type your message here"
-                                    autocomplete="off"
-                                    autocorrect="off"
-                                    autocapitalize="sentences"
-                                    spellcheck="true"
-                                    maxlength="2000"
-                                ></textarea>
-                            </div>
-                            <!-- Second row: Waves button on left, Mic and Send buttons on right -->
-                            <div class="input-row-bottom">
-                                <button 
-                                    class="waves-btn" 
-                                    id="wavesBtn" 
-                                    aria-label="Toggle voice output" 
-                                    type="button"
-                                    title="Toggle voice output"
-                                >
-                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-                                        <!-- 1st line (smallest height) - centered -->
-                                        <rect x="2" y="7" width="2.5" height="2" rx="1.25"/>
-                                        <!-- 2nd line (biggest height) - centered -->
-                                        <rect x="5.5" y="3" width="2.5" height="10" rx="1.25"/>
-                                        <!-- 3rd line (medium height) - centered -->
-                                        <rect x="9" y="5" width="2.5" height="6" rx="1.25"/>
-                                        <!-- 4th line (same as 1st height) - centered -->
-                                        <rect x="12.5" y="7" width="2.5" height="2" rx="1.25"/>
-                                    </svg>
-                                </button>
-                                <div class="input-actions">
-                                    <button 
-                                        class="voice-btn" 
-                                        id="voiceBtn" 
-                                        aria-label="Voice input" 
-                                        type="button"
-                                        title="Voice input"
-                                    >
-                                        <i class="fas fa-microphone" aria-hidden="true"></i>
-                                    </button>
-                                    <button 
-                                        class="send-btn" 
-                                        id="sendBtn" 
-                                        aria-label="Send message" 
-                                        type="button"
-                                        disabled
-                                    >
-                                        <i class="fas fa-paper-plane" aria-hidden="true"></i>
-                                        <span class="sr-only">Send</span>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </main>
+                </main>
+            </div>
         </div>
+        <!-- Floating Button: Only on landing -->
+        <div id="chatLauncher" class="chat-launcher" onclick="openChatFromLanding()" style="display: none;">
+            <i class="fas fa-comment-dots"></i>
+        </div>
+
     </div>
     <script src="index.js"></script>
 </body>
