@@ -1397,26 +1397,6 @@ async function handleTicketCreationFlow(message, chat, customerId) {
 Is there anything else I can help you with regarding your investments or account?`;
   }
 
-  // Check if user confirmed they want to create a ticket
-  if (
-    lastBotMessage &&
-    lastBotMessage.content.includes(
-      "Would you like to proceed with creating a support ticket?"
-    )
-  ) {
-    if (
-      message.toLowerCase().includes("yes") ||
-      message.toLowerCase().includes("ok") ||
-      message.toLowerCase().includes("sure")
-    ) {
-      return `Great! Let's create your support ticket. I'll guide you through the process step by step.
-
-**Step 1 of 4: Issue Title**
-Please provide a brief title for your issue (e.g., "Unable to complete payment", "Account verification problem", etc.)`;
-    } else {
-      return `No problem! If you need any other assistance with your investments or have questions about our services, I'm here to help. What else can I assist you with today?`;
-    }
-  }
 
   // Check which step we're in based on previous messages
   const ticketCreationMessages = chat.messages.filter(
@@ -1505,22 +1485,7 @@ Now please provide a detailed description of your issue. Include any relevant in
     return `**Step 4 of 4: Supporting Documents (Optional)**
 Thank you for the description.
 
-**Would you like to attach any supporting documents?**
-
-You can upload:
-• Images (JPEG, PNG, GIF, WebP)
-• PDF documents
-• Maximum 3 files, 10MB each
-
-If you want to upload files, please respond with "yes" and I'll guide you through the upload process.
-If you don't need to upload anything, respond with "no" or "skip" to create the ticket.`;
-  }
-
-  if (latestStep.content.includes("Step 4 of 4")) {
-    const userResponse = message.trim().toLowerCase();
-
-    if (userResponse.includes("yes") || userResponse.includes("upload")) {
-      return `**File Upload Instructions**
+**File Upload Instructions**
 
 To upload your supporting documents:
 
@@ -1530,9 +1495,15 @@ To upload your supporting documents:
 4. **Size limit**: Maximum 10MB per file
 
 Once you've selected your files, click "Create Ticket with Attachments" to complete the process.
+If you don't want to upload files, click "Skip Upload" to create the ticket without attachments.
 
 *Note: The file upload form will be displayed in the chat interface.*`;
-    } else if (
+  }
+
+  if (latestStep.content.includes("Step 4 of 4")) {
+    const userResponse = message.trim().toLowerCase();
+
+    if (
       userResponse.includes("no") ||
       userResponse.includes("skip") ||
       userResponse.includes("none")
@@ -1669,11 +1640,7 @@ Your support ticket has been created and assigned to our team. You'll receive up
 In the meantime, is there anything else I can help you with regarding your investments?`;
       }
     } else {
-      return `Please respond with:
-- **"yes"** if you want to upload supporting documents
-- **"no"** or **"skip"** if you want to create the ticket without attachments
-
-What would you like to do?`;
+      return `Please use the file upload interface above to select files, or click "Skip Upload" if you don't want to attach any documents.`;
     }
   }
 
@@ -2399,10 +2366,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
         (lastBotMessage.content.includes("Step 1 of 4") ||
           lastBotMessage.content.includes("Step 2 of 4") ||
           lastBotMessage.content.includes("Step 3 of 4") ||
-          lastBotMessage.content.includes("Step 4 of 4") ||
-          lastBotMessage.content.includes(
-            "Would you like to proceed with creating a support ticket?"
-          ))
+          lastBotMessage.content.includes("Step 4 of 4"))
       ) {
         // User is providing ticket details
         const ticketResponse = await handleTicketCreationFlow(
@@ -2438,15 +2402,18 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
         return res.json(chat);
       } else {
-        // Initial ticket request
-        const aiResponse = `I understand you need assistance! I can help you raise a support ticket. 
+        // Initial ticket request - start directly with Step 1
+        const aiResponse = `I understand you need assistance! I can help you raise a support ticket.
 
 To create your ticket, I'll need:
 1. **Issue Title** - Brief description of your problem
 2. **Category** - Choose from: General Enquiry, KYC Related, Products Related, Orders Related, Payments/Bank Accounts, Account Related, Others
 3. **Description** - Detailed explanation of your issue
 
-Would you like to proceed with creating a support ticket?`;
+Let's get started!
+
+**Step 1 of 4: Issue Title**
+Please provide a brief title for your issue (e.g., "Unable to complete payment", "Account verification problem", etc.)`;
 
         const assistantMessage = {
           sender: "bot",
