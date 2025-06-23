@@ -17,6 +17,76 @@ const Ticket = require("./models/Ticket");
 const multer = require("multer");
 const { GridFSBucket } = require("mongodb");
 
+// FAQ Search Function
+function searchFAQs(userQuery) {
+  if (!FAQ_KB || FAQ_KB.length === 0) {
+    return null;
+  }
+
+  const normalizedQuery = userQuery.toLowerCase().trim();
+  
+  // Direct question match (high similarity threshold)
+  for (const faq of FAQ_KB) {
+    const normalizedQuestion = faq.Question?.toLowerCase() || '';
+    const similarity = stringSimilarity.compareTwoStrings(normalizedQuery, normalizedQuestion);
+    
+    if (similarity > 0.7) { // High confidence match
+      return {
+        faq: faq,
+        confidence: similarity,
+        matchType: 'direct_question'
+      };
+    }
+  }
+
+  // Keyword-based search for bank account related queries
+  const bankKeywords = ['bank account', 'bank accounts', 'add bank', 'another bank', 'how many bank', 'primary bank', 'redemption bank'];
+  const isBankQuery = bankKeywords.some(keyword => normalizedQuery.includes(keyword));
+  
+  if (isBankQuery) {
+    const bankFAQ = FAQ_KB.find(faq => 
+      faq.Question?.toLowerCase().includes('bank account') && 
+      faq.Question?.toLowerCase().includes('how many')
+    );
+    
+    if (bankFAQ) {
+      return {
+        faq: bankFAQ,
+        confidence: 0.9,
+        matchType: 'keyword_bank'
+      };
+    }
+  }
+
+  // General keyword matching
+  const keywordMatches = FAQ_KB.map(faq => {
+    const questionWords = (faq.Question?.toLowerCase() || '').split(/\s+/);
+    const queryWords = normalizedQuery.split(/\s+/);
+    
+    let matchCount = 0;
+    queryWords.forEach(word => {
+      if (word.length > 2 && questionWords.some(qWord => qWord.includes(word) || word.includes(qWord))) {
+        matchCount++;
+      }
+    });
+    
+    const matchRatio = matchCount / Math.max(queryWords.length, 1);
+    
+    return {
+      faq: faq,
+      confidence: matchRatio,
+      matchType: 'keyword'
+    };
+  }).filter(match => match.confidence > 0.3);
+
+  // Return best keyword match if found
+  if (keywordMatches.length > 0) {
+    return keywordMatches.sort((a, b) => b.confidence - a.confidence)[0];
+  }
+
+  return null;
+}
+
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
 const app = express();
@@ -2395,6 +2465,67 @@ Please provide a brief title for your issue (e.g., "Unable to complete payment",
 
       return res.json(chat);
     } else {
+      // First, search FAQs for relevant answers
+      const faqMatch = searchFAQs(processedMessage);
+      
+      if (faqMatch && faqMatch.confidence > 0.6) {
+        console.log('FAQ match found:', faqMatch);
+        
+        // Create personalized FAQ response
+        let faqResponse = `**${faqMatch.faq.Question}**\n\n${faqMatch.faq.Answer}`;
+        
+        // Add personalization based on user data
+        if (userData.customer?.name) {
+          if (faqMatch.matchType === 'keyword_bank' || faqMatch.faq.Question?.includes('bank account')) {
+            faqResponse += `\n\nBased on your profile, you have already made several completed investment orders, so updating or adding a bank account may be important for your future transactions.`;
+          } else if (userData.orders && userData.orders.length > 0) {
+            faqResponse += `\n\nBased on your profile, you have ${userData.orders.length} investment order(s) with us.`;
+          }
+        }
+        
+        // Add strategic follow-up question
+        let followUpQuestion = '';
+        if (userData.orders && userData.orders.length > 0) {
+          if (faqMatch.faq.Question?.includes('bank account')) {
+            followUpQuestion = 'Would you like to review your current orders or portfolio to ensure your bank details match your investment needs?';
+          } else {
+            followUpQuestion = 'Would you like to see how your current investments are performing?';
+          }
+        } else {
+          followUpQuestion = 'Would you like to start investing with a small SIP to get started?';
+        }
+        
+        faqResponse += `\n\n${followUpQuestion}`;
+        faqResponse += '\n\nMutual fund investments are subject to market risks. Read all scheme-related documents carefully.';
+        
+        const assistantMessage = {
+          sender: "bot",
+          content: faqResponse,
+          timestamp: new Date(),
+        };
+
+        chat.messages.push(assistantMessage);
+        chat.updatedAt = new Date();
+
+        if (chat._id) {
+          await chatsCollection.updateOne(
+            { _id: chat._id },
+            {
+              $set: {
+                messages: chat.messages,
+                updatedAt: chat.updatedAt,
+              },
+              $inc: { __v: 1 },
+            }
+          );
+        } else {
+          const result = await chatsCollection.insertOne(chat);
+          chat._id = result.insertedId;
+        }
+
+        return res.json(chat);
+      } 
+      // If no FAQ match found, proceed with regular OpenAI processing
       let userDataString = `
 Customer Info: ${JSON.stringify(userData.customer, null, 2)}
 Orders: ${JSON.stringify(userData.orders, null, 2)}
