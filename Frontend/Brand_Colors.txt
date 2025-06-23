@@ -1,0 +1,36 @@
+Primary Colors:
+
+  Warm Orange:
+
+    Hex: #eb8021
+    RGB: 235/128/33
+    CMYK: 4/60/100/0
+  Deep Purple:
+
+    Hex: #6929d9
+    RGB: 105/41/217
+    CMYK: 73/81/0/0
+
+Secondary Colors:
+
+  Light Peach:
+
+    Hex: #ffede0
+    RGB: 255/237/224
+    CMYK: 0/7/9/0
+  Dark Grey:
+
+    Hex: #111111
+    RGB: 17/17/17
+    CMYK: 73/67/66/83
+  Dark Purple:
+
+    Hex: #1f134f
+    RGB: 31/18/79
+    CMYK: 100/100/32/39
+
+Tints & Shades:
+
+  Purple Tints: ['#E1D4F7', '#CDB8F2', '#BDA0EC', '#9B70E6', '#8D42DF', '#6929D9', '#582285', '#461691', '#351560', '#230E48', '#15082B']
+  Orange Tints: ['#FEB6D3', '#FBD5B5', '#F5C090', '#F2AA68', '#EE9546', '#EB8021', '#C4681C', '#9D5516', '#764011', '#4E2808', '#2F1A07']
+  Peach Tints: ['#FFF8F9', '#FFF9F5', '#FFFFF0', '#FFF3EA', '#FFF0E5', '#FFEDE0', '#D5C8BB', '#AAAE95', '#807770', '#554F4B', '#332F2D']
