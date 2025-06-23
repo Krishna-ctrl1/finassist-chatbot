@@ -1,3 +1,7 @@
+// Immediate test to verify JS is loading
+console.log('🚀 JavaScript file is loading...');
+window.WARP_JS_LOADED = true;
+
 const API_BASE = window.location.origin + "/api";
 const THEME_KEY = 'theme-preference';
 let authToken = null; // Don't use localStorage initially
@@ -38,11 +42,19 @@ function debounce(fn, ms) {
 
 // Initialize app
 document.addEventListener("DOMContentLoaded", function () {
-  console.log("DOM loaded, initializing app...");
+  console.log("🎯 DOM loaded, initializing app...");
+  console.log('Available functions:', {
+    toggleProfileDropdown: typeof toggleProfileDropdown,
+    showAccountSettings: typeof showAccountSettings
+  });
+  
   showAuthScreen();
   initializeTheme();
   checkAuthStatus();
   setupEventListeners();
+  
+  // Force attach global functions immediately
+  attachGlobalFunctions();
 });
 
 function setupEventListeners() {
@@ -672,8 +684,45 @@ function toggleSidebar(event) {
     }, 100);
   }
 
-  // In launcher mode or mobile, always use mobile-style behavior
-  if (isLauncherMode || window.innerWidth <= 768) {
+  // In launcher mode, behave differently based on screen size
+  if (isLauncherMode) {
+    if (window.innerWidth <= 768) {
+      // Mobile launcher mode - use overlay behavior
+      if (isCurrentlyOpen) {
+        // Close sidebar
+        elements.sidebar.classList.remove("active");
+        document.body.style.overflow = '';
+        if (overlay) {
+          overlay.style.opacity = '0';
+          overlay.style.visibility = 'hidden';
+        }
+        console.log('Sidebar closed in launcher mobile mode');
+      } else {
+        // Open sidebar
+        elements.sidebar.classList.add("active");
+        document.body.style.overflow = 'hidden';
+        if (overlay) {
+          overlay.style.opacity = '1';
+          overlay.style.visibility = 'visible';
+        }
+        console.log('Sidebar opened in launcher mobile mode');
+      }
+    } else {
+      // Desktop launcher mode - use collapse behavior like normal chat
+      const isCollapsed = chatScreen.classList.contains("sidebar-collapsed");
+
+      if (isCollapsed) {
+        // Expand sidebar
+        chatScreen.classList.remove('sidebar-collapsed');
+        console.log('Sidebar expanded in launcher desktop mode');
+      } else {
+        // Collapse sidebar
+        chatScreen.classList.add('sidebar-collapsed');
+        console.log('Sidebar collapsed in launcher desktop mode');
+      }
+    }
+  } else if (window.innerWidth <= 768) {
+    // Mobile behavior for regular chat
     if (isCurrentlyOpen) {
       // Close sidebar
       elements.sidebar.classList.remove("active");
@@ -682,7 +731,7 @@ function toggleSidebar(event) {
         overlay.style.opacity = '0';
         overlay.style.visibility = 'hidden';
       }
-      console.log('Sidebar closed in launcher/mobile mode');
+      console.log('Sidebar closed in mobile mode');
     } else {
       // Open sidebar
       elements.sidebar.classList.add("active");
@@ -691,10 +740,10 @@ function toggleSidebar(event) {
         overlay.style.opacity = '1';
         overlay.style.visibility = 'visible';
       }
-      console.log('Sidebar opened in launcher/mobile mode');
+      console.log('Sidebar opened in mobile mode');
     }
   } else {
-    // Desktop behavior - toggle collapsed state (only when not in launcher mode)
+    // Desktop behavior - toggle collapsed state
     const isCollapsed = elements.sidebar.classList.contains("collapsed");
 
     if (isCollapsed) {
@@ -1358,7 +1407,7 @@ function initializeTheme() {
 
 function toggleTheme() {
   const isDarkMode = document.body.classList.contains('dark-mode');
-  const toggleBtn = document.querySelector('.profile-menu-item[onclick="toggleTheme()"] i');
+  const toggleBtn = document.querySelector('.profile-menu-item[data-action="toggle-theme"] i');
   if (isDarkMode) {
     document.body.classList.remove('dark-mode');
     document.body.classList.add('light-mode');
@@ -1372,7 +1421,8 @@ function toggleTheme() {
     if (toggleBtn) toggleBtn.className = 'fas fa-sun';
     showNotification('Dark mode enabled', 'success');
   }
-  toggleProfileDropdown();
+  // Close the dropdown after theme change
+  ProfileDropdown.close();
 }
 // Initialize enhanced features
 document.addEventListener('DOMContentLoaded', function () {
@@ -1630,7 +1680,23 @@ function initializeProgressiveEnhancements() {
   // Improved error handling with user feedback
   window.addEventListener('error', (event) => {
     console.error('Application error:', event.error);
-    showNotification('Something went wrong. Please refresh the page.', 'error');
+    // Only show error notification for critical errors, not minor UI errors
+    const errorMessage = event.error?.message || event.message || '';
+    const isUIError = errorMessage.includes('ProfileDropdown') || 
+                     errorMessage.includes('dropdown') ||
+                     errorMessage.includes('Cannot read property') ||
+                     errorMessage.includes('null is not an object') ||
+                     errorMessage.includes('classList') ||
+                     errorMessage.includes('toggle') ||
+                     errorMessage.includes('closest') ||
+                     errorMessage.includes('undefined');
+    
+    if (!isUIError) {
+      showNotification('Something went wrong. Please refresh the page.', 'error');
+    } else {
+      // For UI errors, just log them but don't show notification
+      console.warn('UI Error (non-critical):', errorMessage);
+    }
   });
 
   window.addEventListener('unhandledrejection', (event) => {
@@ -1649,49 +1715,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// Profile dropdown functionality
-function toggleProfileDropdown() {
-  const dropdown = document.getElementById('profileDropdown');
-  const userMenu = document.querySelector('.user-menu');
-  const chevron = document.getElementById('profileChevron');
 
-  if (!dropdown) return;
-
-  const isActive = dropdown.classList.contains('active');
-
-  if (isActive) {
-    dropdown.classList.remove('active');
-    userMenu?.classList.remove('active');
-  } else {
-    dropdown.classList.add('active');
-    userMenu?.classList.add('active');
-  }
-}
-
-// Close profile dropdown when clicking outside
-document.addEventListener('click', function (e) {
-  const dropdown = document.getElementById('profileDropdown');
-  const userMenu = document.querySelector('.user-menu');
-
-  if (dropdown && !userMenu?.contains(e.target)) {
-    dropdown.classList.remove('active');
-    userMenu?.classList.remove('active');
-  }
-});
-
-// Account settings and preferences (placeholder functions)
-function showAccountSettings() {
-  toggleProfileDropdown();
-  showNotification('Account settings coming soon!', 'info');
-}
-
-function showPreferences() {
-  toggleProfileDropdown();
-  showNotification('Preferences coming soon!', 'info');
-}
 
 // Update profile information in dropdown
 function updateProfileDropdown(user) {
+  // Update chat screen profile dropdown
   const profileName = document.getElementById('profileName');
   const profileEmail = document.getElementById('profileEmail');
   const profileAvatar = document.getElementById('profileAvatar');
@@ -1699,24 +1727,239 @@ function updateProfileDropdown(user) {
   if (profileName) profileName.textContent = sanitizeInput(user.name);
   if (profileEmail) profileEmail.textContent = sanitizeInput(user.email || 'user@example.com');
   if (profileAvatar) profileAvatar.textContent = sanitizeInput(user.name.charAt(0).toUpperCase());
+  
+  // Update landing area profile dropdown
+  const landingProfileName = document.getElementById('landingProfileName');
+  const landingProfileEmail = document.getElementById('landingProfileEmail');
+  const landingProfileAvatar = document.getElementById('landingProfileAvatar');
+
+  if (landingProfileName) landingProfileName.textContent = sanitizeInput(user.name);
+  if (landingProfileEmail) landingProfileEmail.textContent = sanitizeInput(user.email || 'user@example.com');
+  if (landingProfileAvatar) landingProfileAvatar.textContent = sanitizeInput(user.name.charAt(0).toUpperCase());
 }
 
-// Make functions globally available for onclick handlers
-window.switchToSignup = switchToSignup;
-window.switchToLogin = switchToLogin;
-window.logout = logout;
-window.toggleSidebar = toggleSidebar;
-window.toggleTheme = toggleTheme;
-window.sendQuickMessage = sendQuickMessage;
-window.startNewChat = startNewChat;
-window.closeSidebar = closeSidebar;
-window.toggleProfileDropdown = toggleProfileDropdown;
-window.showAccountSettings = showAccountSettings;
-window.showPreferences = showPreferences;
-window.clearSearch = clearSearch;
-window.searchChats = searchChats;
-window.openChatFromLanding = openChatFromLanding;
-window.closeChatToLanding = closeChatToLanding;
+// ============================================
+// PROFILE DROPDOWN IMPLEMENTATION
+// ============================================
+
+const ProfileDropdown = {
+  // Initialize the profile dropdown functionality
+  init() {
+    console.log('🔧 Initializing Profile Dropdown...');
+    this.setupEventListeners();
+  },
+
+  // Set up all event listeners
+  setupEventListeners() {
+    console.log('🔧 Setting up ProfileDropdown event listeners');
+    
+    // Close dropdown when clicking outside
+    document.addEventListener('click', (e) => this.handleOutsideClick(e));
+
+    // Set up menu item listeners
+    this.setupMenuItemListeners();
+    
+    console.log('✅ ProfileDropdown event listeners set up successfully');
+  },
+
+  // Toggle the dropdown
+  toggle(event, context = 'chat') {
+    try {
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      
+      const dropdownId = context === 'chat' ? 'profileDropdown' : 'landingProfileDropdown';
+      const userMenuId = context === 'chat' ? 'chatUserMenu' : 'landingUserMenu';
+      
+      const dropdown = document.getElementById(dropdownId);
+      const userMenu = document.getElementById(userMenuId);
+      
+      if (!dropdown) {
+        console.warn(`ProfileDropdown: ${dropdownId} not found`);
+        return;
+      }
+
+      const isActive = dropdown.classList.contains('active');
+      
+      // Close all dropdowns first
+      this.closeAll();
+      
+      // If it wasn't active, open it
+      if (!isActive) {
+        dropdown.classList.add('active');
+        if (userMenu) {
+          userMenu.classList.add('active');
+        }
+      }
+    } catch (error) {
+      console.error('ProfileDropdown toggle error:', error);
+      // Don't re-throw the error to prevent global error handler
+    }
+  },
+
+  // Close all dropdowns
+  closeAll() {
+    const chatDropdown = document.getElementById('profileDropdown');
+    const landingDropdown = document.getElementById('landingProfileDropdown');
+    const chatUserMenu = document.getElementById('chatUserMenu');
+    const landingUserMenu = document.getElementById('landingUserMenu');
+    
+    if (chatDropdown) {
+      chatDropdown.classList.remove('active');
+    }
+    if (landingDropdown) {
+      landingDropdown.classList.remove('active');
+    }
+    if (chatUserMenu) {
+      chatUserMenu.classList.remove('active');
+    }
+    if (landingUserMenu) {
+      landingUserMenu.classList.remove('active');
+    }
+  },
+
+  // Close dropdown (public method)
+  close() {
+    this.closeAll();
+  },
+
+  // Handle clicks outside the dropdown
+  handleOutsideClick(event) {
+    // Check if click is inside user menu or profile dropdown
+    const isClickInsideUserMenu = event.target.closest('.user-menu');
+    const isClickInsideDropdown = event.target.closest('.profile-dropdown');
+    const isClickInsideMenuItem = event.target.closest('.profile-menu-item');
+    
+    // Only close if clicked completely outside the dropdown area
+    if (!isClickInsideUserMenu && !isClickInsideDropdown) {
+      this.closeAll();
+    }
+    
+    // Don't close when clicking menu items (let the item handlers decide)
+    if (isClickInsideMenuItem) {
+      event.stopPropagation();
+    }
+  },
+
+  // Set up menu item click listeners
+  setupMenuItemListeners() {
+    document.addEventListener('click', (e) => {
+      const menuItem = e.target.closest('.profile-menu-item');
+      if (!menuItem) return;
+      
+      // Prevent event propagation to avoid closing dropdown immediately
+      e.preventDefault();
+      e.stopPropagation();
+      
+      const action = menuItem.getAttribute('data-action');
+      console.log(`🔧 Menu item clicked: ${action}`);
+      
+      switch (action) {
+        case 'account-settings':
+          this.handleAccountSettings();
+          break;
+        case 'preferences':
+          this.handlePreferences();
+          break;
+        case 'toggle-theme':
+          this.handleToggleTheme();
+          break;
+        case 'logout':
+          this.handleLogout();
+          break;
+      }
+    });
+  },
+
+  // Menu item handlers
+  handleAccountSettings() {
+    // Don't close dropdown automatically - let user decide
+    showNotification('Account settings coming soon!', 'info');
+  },
+
+  handlePreferences() {
+    // Don't close dropdown automatically - let user decide
+    showNotification('Preferences coming soon!', 'info');
+  },
+
+  handleToggleTheme() {
+    // Call the existing theme toggle function
+    toggleTheme();
+    // Don't close dropdown - let user continue using it
+  },
+
+  handleLogout() {
+    this.close();
+    // Call the existing logout function
+    logout();
+  }
+};
+
+// Function to attach global functions
+function attachGlobalFunctions() {
+  console.log('📌 Attaching global functions...');
+  
+  // Make functions globally available for onclick handlers
+  window.switchToSignup = switchToSignup;
+  window.switchToLogin = switchToLogin;
+  window.logout = logout;
+  window.toggleSidebar = toggleSidebar;
+  window.toggleTheme = toggleTheme;
+  window.sendQuickMessage = sendQuickMessage;
+  window.startNewChat = startNewChat;
+  window.closeSidebar = closeSidebar;
+  window.clearSearch = clearSearch;
+  window.searchChats = searchChats;
+  window.openChatFromLanding = openChatFromLanding;
+  window.closeChatToLanding = closeChatToLanding;
+  
+  // Profile dropdown functions (properly bound)
+  window.toggleProfileDropdown = function(event, context) {
+    try {
+      return ProfileDropdown.toggle(event, context);
+    } catch (error) {
+      console.warn('Profile dropdown toggle failed:', error);
+      return false;
+    }
+  };
+  window.showAccountSettings = function() {
+    try {
+      return ProfileDropdown.handleAccountSettings();
+    } catch (error) {
+      console.warn('Profile account settings failed:', error);
+      return false;
+    }
+  };
+  
+  // Make ProfileDropdown globally accessible
+  window.ProfileDropdown = ProfileDropdown;
+  
+  console.log('✅ Global functions attached:', {
+    toggleProfileDropdown: typeof window.toggleProfileDropdown,
+    showAccountSettings: typeof window.showAccountSettings,
+    logout: typeof window.logout
+  });
+}
+
+// Call immediately after ProfileDropdown is defined
+attachGlobalFunctions();
+
+// Initialize ProfileDropdown when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+  try {
+    ProfileDropdown.init();
+    console.log('✅ ProfileDropdown initialized successfully');
+  } catch (error) {
+    console.warn('ProfileDropdown initialization failed:', error);
+  }
+});
+
+// Make ProfileDropdown globally available
+window.ProfileDropdown = ProfileDropdown;
+
+
 
 // Search functionality
 let searchTimeout;
@@ -1982,6 +2225,7 @@ document.addEventListener('DOMContentLoaded', function () {
     initializeSearch();
   }, 100);
 });
+
 
 // File upload functionality for ticket creation
 let selectedFiles = [];
@@ -2504,6 +2748,29 @@ function showLandingArea(user) {
     if (landingUserInitials) {
       landingUserInitials.textContent = sanitizeInput(user.name.charAt(0).toUpperCase());
     }
+    
+    // Also update profile dropdown in landing area
+    updateProfileDropdown(user);
+    
+    // Ensure ProfileDropdown is initialized and available for landing area
+    setTimeout(() => {
+      try {
+        if (window.ProfileDropdown) {
+          console.log('✅ ProfileDropdown is available for landing area');
+          // Test the dashboard dropdown
+          const landingUserMenu = document.getElementById('landingUserMenu');
+          if (landingUserMenu) {
+            console.log('✅ Landing user menu found:', landingUserMenu);
+          }
+        } else {
+          console.error('❌ ProfileDropdown not available for landing area');
+          // Re-attach global functions
+          attachGlobalFunctions();
+        }
+      } catch (error) {
+        console.error('Error checking ProfileDropdown availability:', error);
+      }
+    }, 100);
     
     // Load real dashboard data
     loadDashboardData();

@@ -91,11 +91,48 @@
                         <h1 class="landing-title">FinanceAI Dashboard</h1>
                     </div>
                     <div class="user-info">
-                        <div class="user-avatar" id="landingUserInitials">U</div>
-                        <span class="user-name" id="landingUserName">User</span>
-                        <button class="logout-btn-landing" onclick="logout()" aria-label="Logout">
-                            <i class="fas fa-sign-out-alt"></i>
-                        </button>
+                        <div class="user-menu" id="landingUserMenu" role="button" tabindex="0" onclick="toggleProfileDropdown(event, 'landing')">
+                            <div class="user-avatar" id="landingUserInitials">U</div>
+                            <span class="user-name" id="landingUserName">User</span>
+                            <i class="fas fa-chevron-down profile-chevron" id="landingProfileChevron"></i>
+                        </div>
+                        
+                        <!-- Profile Dropdown -->
+                        <div class="profile-dropdown" id="landingProfileDropdown">
+                            <div class="profile-dropdown-content">
+                                <div class="profile-header">
+                                    <div class="profile-avatar" id="landingProfileAvatar">U</div>
+                                    <div class="profile-info">
+                                        <h3 id="landingProfileName">User</h3>
+                                        <p id="landingProfileEmail">user@example.com</p>
+                                    </div>
+                                </div>
+                                
+                                <div class="profile-menu">
+                                    <button class="profile-menu-item" data-action="account-settings">
+                                        <i class="fas fa-user-cog"></i>
+                                        <span>Account Settings</span>
+                                    </button>
+                                    
+                                    <button class="profile-menu-item" data-action="preferences">
+                                        <i class="fas fa-cog"></i>
+                                        <span>Preferences</span>
+                                    </button>
+                                    
+                                    <button class="profile-menu-item" data-action="toggle-theme">
+                                        <i class="fas fa-moon"></i>
+                                        <span>Toggle System Theme</span>
+                                    </button>
+                                    
+                                    <hr class="profile-divider">
+                                    
+                                    <button class="profile-menu-item logout-item" data-action="logout">
+                                        <i class="fas fa-sign-out-alt"></i>
+                                        <span>Log out</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 
@@ -339,7 +376,7 @@
                             <button class="close-chat-btn" onclick="closeChatToLanding()" aria-label="Close chat" style="display: none;">
                                 <i class="fas fa-times"></i>
                             </button>
-                            <div class="user-menu" onclick="toggleProfileDropdown()" role="button" tabindex="0" onkeydown="if(event.key === 'Enter') toggleProfileDropdown()">
+                            <div class="user-menu" id="chatUserMenu" role="button" tabindex="0" onclick="toggleProfileDropdown(event, 'chat')">
                                 <div class="user-avatar" id="userInitials">U</div>
                                 <span class="user-name" id="userName">User</span>
                                 <i class="fas fa-chevron-down profile-chevron" id="profileChevron"></i>
@@ -357,24 +394,24 @@
                                     </div>
                                     
                                     <div class="profile-menu">
-                                        <button class="profile-menu-item" onclick="showAccountSettings()">
+                                        <button class="profile-menu-item" data-action="account-settings">
                                             <i class="fas fa-user-cog"></i>
                                             <span>Account Settings</span>
                                         </button>
                                         
-                                        <button class="profile-menu-item" onclick="showPreferences()">
+                                        <button class="profile-menu-item" data-action="preferences">
                                             <i class="fas fa-cog"></i>
                                             <span>Preferences</span>
                                         </button>
                                         
-                                        <button class="profile-menu-item" onclick="toggleTheme()">
+                                        <button class="profile-menu-item" data-action="toggle-theme">
                                             <i class="fas fa-moon"></i>
                                             <span>Toggle System Theme</span>
                                         </button>
                                         
                                         <hr class="profile-divider">
                                         
-                                        <button class="profile-menu-item logout-item" onclick="logout()">
+                                        <button class="profile-menu-item logout-item" data-action="logout">
                                             <i class="fas fa-sign-out-alt"></i>
                                             <span>Log out</span>
                                         </button>

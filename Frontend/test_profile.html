@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Profile Dropdown Test</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="index.css">
+    <style>
+        body {
+            padding: 50px;
+            background: var(--bg-primary);
+        }
+        .test-container {
+            max-width: 400px;
+            margin: 0 auto;
+            padding: 50px;
+            border: 1px solid var(--border);
+            border-radius: var(--rounded-lg);
+            background: var(--bg-secondary);
+        }
+        .test-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .user-menu {
+            position: relative;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <div class="test-header">
+            <h2>Profile Dropdown Test</h2>
+            <p>Click on the user menu below to test the dropdown functionality</p>
+        </div>
+        
+        <!-- Test User Menu -->
+        <div class="user-menu" id="testUserMenu" role="button" tabindex="0" onclick="ProfileDropdown.toggle(event, 'test')">
+            <div class="user-avatar" id="testUserInitials">T</div>
+            <span class="user-name" id="testUserName">Test User</span>
+            <i class="fas fa-chevron-down profile-chevron" id="testProfileChevron"></i>
+        </div>
+        
+        <!-- Profile Dropdown -->
+        <div class="profile-dropdown" id="testProfileDropdown">
+            <div class="profile-dropdown-content">
+                <div class="profile-header">
+                    <div class="profile-avatar" id="testProfileAvatar">T</div>
+                    <div class="profile-info">
+                        <h3 id="testProfileName">Test User</h3>
+                        <p id="testProfileEmail">test@example.com</p>
+                    </div>
+                </div>
+                
+                <div class="profile-menu">
+                    <button class="profile-menu-item" data-action="account-settings">
+                        <i class="fas fa-user-cog"></i>
+                        <span>Account Settings</span>
+                    </button>
+                    
+                    <button class="profile-menu-item" data-action="preferences">
+                        <i class="fas fa-cog"></i>
+                        <span>Preferences</span>
+                    </button>
+                    
+                    <button class="profile-menu-item" data-action="toggle-theme">
+                        <i class="fas fa-moon"></i>
+                        <span>Toggle Theme</span>
+                    </button>
+                    
+                    <hr class="profile-divider">
+                    
+                    <button class="profile-menu-item logout-item" data-action="logout">
+                        <i class="fas fa-sign-out-alt"></i>
+                        <span>Log out</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Mock functions for testing
+        function showNotification(message, type) {
+            alert(`${type.toUpperCase()}: ${message}`);
+        }
+
+        function toggleTheme() {
+            const body = document.body;
+            if (body.classList.contains('dark-mode')) {
+                body.classList.remove('dark-mode');
+                body.classList.add('light-mode');
+                showNotification('Light mode enabled', 'success');
+            } else {
+                body.classList.remove('light-mode');
+                body.classList.add('dark-mode');
+                showNotification('Dark mode enabled', 'success');
+            }
+        }
+
+        function logout() {
+            showNotification('Logout clicked!', 'info');
+        }
+
+        // Simple ProfileDropdown implementation for testing
+        const ProfileDropdown = {
+            toggle(event, type) {
+                event.preventDefault();
+                event.stopPropagation();
+                
+                const dropdownId = type === 'test' ? 'testProfileDropdown' : null;
+                const userMenuId = type === 'test' ? 'testUserMenu' : null;
+                
+                if (!dropdownId) return;
+                
+                const dropdown = document.getElementById(dropdownId);
+                const userMenu = document.getElementById(userMenuId);
+                
+                if (!dropdown) return;
+
+                const isActive = dropdown.classList.contains('active');
+                
+                // Close all dropdowns first
+                this.closeAll();
+                
+                // If it wasn't active, open it
+                if (!isActive) {
+                    dropdown.classList.add('active');
+                    if (userMenu) {
+                        userMenu.classList.add('active');
+                    }
+                }
+            },
+
+            closeAll() {
+                const dropdown = document.getElementById('testProfileDropdown');
+                const userMenu = document.getElementById('testUserMenu');
+                
+                if (dropdown) dropdown.classList.remove('active');
+                if (userMenu) userMenu.classList.remove('active');
+            },
+
+            close() {
+                this.closeAll();
+            },
+
+            handleAccountSettings() {
+                this.close();
+                showNotification('Account settings coming soon!', 'info');
+            },
+
+            handlePreferences() {
+                this.close();
+                showNotification('Preferences coming soon!', 'info');
+            },
+
+            handleToggleTheme() {
+                toggleTheme();
+                this.close();
+            },
+
+            handleLogout() {
+                this.close();
+                logout();
+            }
+        };
+
+        // Setup event listeners
+        document.addEventListener('click', (e) => {
+            const isClickInsideUserMenu = e.target.closest('.user-menu') ||
+                                         e.target.closest('.profile-dropdown');
+            
+            if (!isClickInsideUserMenu) {
+                ProfileDropdown.closeAll();
+            }
+        });
+
+        // Menu item listeners
+        document.addEventListener('click', (e) => {
+            const menuItem = e.target.closest('.profile-menu-item');
+            if (!menuItem) return;
+            
+            const action = menuItem.getAttribute('data-action');
+            
+            switch (action) {
+                case 'account-settings':
+                    ProfileDropdown.handleAccountSettings();
+                    break;
+                case 'preferences':
+                    ProfileDropdown.handlePreferences();
+                    break;
+                case 'toggle-theme':
+                    ProfileDropdown.handleToggleTheme();
+                    break;
+                case 'logout':
+                    ProfileDropdown.handleLogout();
+                    break;
+            }
+        });
+
+        // Initialize theme
+        document.body.classList.add('light-mode');
+    </script>
+</body>
+</html>

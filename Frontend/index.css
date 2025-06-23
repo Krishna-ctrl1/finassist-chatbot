@@ -390,26 +390,61 @@ body {
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border);
   overflow: hidden;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
   flex-shrink: 0;
   position: relative;
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .sidebar.collapsed {
   width: 0;
   transform: translateX(-100%);
+  box-shadow: none;
 }
 
-/* Adjust input position when sidebar is collapsed */
+/* Enhanced sidebar content animations */
+.sidebar-content {
+  opacity: 1;
+  transform: translateX(0);
+  transition: all 0.3s ease 0.1s;
+}
+
+.sidebar.collapsed .sidebar-content {
+  opacity: 0;
+  transform: translateX(-20px);
+  transition: all 0.2s ease;
+}
+
+/* Sidebar header animations */
+.sidebar-header {
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.sidebar.collapsed .sidebar-header {
+  transform: translateX(-20px);
+  opacity: 0;
+}
+
+/* Adjust input when sidebar is toggled */
 .sidebar-collapsed .chat-input-container {
   left: 0;
 }
 
 .sidebar-collapsed .chat-input-wrapper {
   max-width: min(768px, calc(100vw - var(--space-12)));
+}
+
+.chat-input-container {
+  transition: left 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  left: 260px;
+}
+
+.chat-screen.sidebar-collapsed .chat-input-container {
+  left: 0;
 }
 
 .sidebar-toggle {
@@ -423,15 +458,49 @@ body {
   width: 36px;
   height: 36px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
   color: var(--text-secondary);
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+.sidebar-toggle::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  background: var(--green);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  opacity: 0.1;
+  z-index: 0;
 }
 
 .sidebar-toggle:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
-  border-color: var(--border-hover);
+  border-color: var(--green);
+  transform: scale(1.05) rotate(180deg);
+  box-shadow: 0 2px 8px rgba(16, 163, 127, 0.2);
+}
+
+.sidebar-toggle:hover::before {
+  width: 100%;
+  height: 100%;
+  opacity: 0.1;
+}
+
+.sidebar-toggle:active {
+  transform: scale(0.95) rotate(180deg);
+}
+
+.sidebar-toggle i {
+  position: relative;
+  z-index: 1;
+  transition: transform 0.2s ease;
 }
 
 .sidebar-toggle i {
@@ -531,7 +600,7 @@ body {
   font-size: 0.75rem;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -539,12 +608,34 @@ body {
   white-space: nowrap;
   width: 100%;
   flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.new-chat-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(16, 163, 127, 0.1), transparent);
+  transition: left 0.6s;
 }
 
 .new-chat-btn:hover {
   background: var(--bg-hover);
-  border-color: var(--border);
-  transform: translateY(-1px);
+  border-color: var(--green);
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 4px 12px rgba(16, 163, 127, 0.2);
+}
+
+.new-chat-btn:hover::before {
+  left: 100%;
+}
+
+.new-chat-btn:active {
+  transform: translateY(0) scale(0.98);
 }
 
 .new-chat-btn i {
@@ -915,6 +1006,17 @@ body {
   display: flex;
 }
 
+/* When sidebar is open (not collapsed), hide these buttons completely */
+.chat-screen:not(.sidebar-collapsed) .sidebar-toggle,
+.chat-screen:not(.sidebar-collapsed) .new-chat-header-btn {
+  display: none !important;
+}
+
+/* Hide close button when sidebar is open (not collapsed) */
+.chat-screen:not(.sidebar-collapsed) .close-chat-btn {
+  display: none !important;
+}
+
 /* When chat is opened from floating launcher, open in full screen */
 .chat-screen.launcher-mode {
   position: fixed;
@@ -927,57 +1029,155 @@ body {
   background: var(--bg-primary);
 }
 
-.chat-screen.launcher-mode .sidebar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  height: 100vh;
-  height: 100dvh;
-  width: 280px;
-  transform: translateX(-100%);
-  z-index: 10001;
-  box-shadow: var(--shadow-lg);
+/* Desktop launcher mode - sidebar behaves like normal desktop */
+@media (min-width: 769px) {
+  .chat-screen.launcher-mode .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    height: 100dvh;
+    width: 260px;
+    transform: translateX(0);
+    z-index: 10001;
+    box-shadow: var(--shadow-lg);
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .chat-screen.launcher-mode.sidebar-collapsed .sidebar {
+    transform: translateX(-100%);
+  }
+  
+  .chat-screen.launcher-mode .chat-widget {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    margin-left: 260px;
+    transition: margin-left 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .chat-screen.launcher-mode.sidebar-collapsed .chat-widget {
+    margin-left: 0;
+  }
+  
+  .chat-screen.launcher-mode .chat-main {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .chat-screen.launcher-mode .chat-input-container {
+    left: 260px;
+    right: 0;
+    bottom: 0;
+    transition: left 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .chat-screen.launcher-mode.sidebar-collapsed .chat-input-container {
+    left: 0;
+  }
+  
+  .chat-screen.launcher-mode .chat-input-wrapper {
+    max-width: min(768px, calc(100vw - 260px - var(--space-12)));
+  }
+  
+  .chat-screen.launcher-mode.sidebar-collapsed .chat-input-wrapper {
+    max-width: min(768px, calc(100vw - var(--space-12)));
+  }
 }
 
-.chat-screen.launcher-mode .sidebar.active {
-  transform: translateX(0);
+/* Mobile launcher mode - sidebar behaves like mobile overlay */
+@media (max-width: 768px) {
+  .chat-screen.launcher-mode .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    height: 100dvh;
+    width: 280px;
+    transform: translateX(-100%);
+    z-index: 10001;
+    box-shadow: var(--shadow-lg);
+  }
+  
+  .chat-screen.launcher-mode .sidebar.active {
+    transform: translateX(0);
+  }
+  
+  .chat-screen.launcher-mode .chat-widget {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .chat-screen.launcher-mode .chat-main {
+    width: 100%;
+    height: 100%;
+    margin-left: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .chat-screen.launcher-mode .chat-input-container {
+    left: 0;
+    right: 0;
+    bottom: 0;
+  }
+  
+  .chat-screen.launcher-mode .chat-input-wrapper {
+    max-width: min(768px, calc(100vw - var(--space-12)));
+  }
 }
 
-.chat-screen.launcher-mode .chat-widget {
-  width: 100%;
-  height: 100%;
+/* Show header buttons only when sidebar is collapsed in launcher mode */
+.chat-screen.launcher-mode.sidebar-collapsed .sidebar-toggle,
+.chat-screen.launcher-mode.sidebar-collapsed .new-chat-header-btn,
+.chat-screen.launcher-mode.sidebar-collapsed .chat-title {
   display: flex;
-  flex-direction: column;
 }
 
-.chat-screen.launcher-mode .chat-main {
-  width: 100%;
-  height: 100%;
-  margin-left: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.chat-screen.launcher-mode .chat-input-container {
-  left: 0;
-  right: 0;
-  bottom: 0;
-}
-
-.chat-screen.launcher-mode .chat-input-wrapper {
-  max-width: min(768px, calc(100vw - var(--space-12)));
-}
-
-/* Show header buttons when in launcher mode */
-.chat-screen.launcher-mode .sidebar-toggle,
-.chat-screen.launcher-mode .new-chat-header-btn,
-.chat-screen.launcher-mode .chat-title {
-  display: flex;
-}
-
-/* Show close button in launcher mode */
-.chat-screen.launcher-mode .close-chat-btn {
+/* Show close button only when sidebar is collapsed in launcher mode */
+.chat-screen.launcher-mode.sidebar-collapsed .close-chat-btn {
   display: flex !important;
+}
+
+/* Hide close button, new-chat button and toggle button when sidebar is open */
+.chat-screen:not(.sidebar-collapsed) .close-chat-btn,
+.chat-screen:not(.sidebar-collapsed) .new-chat-header-btn,
+.chat-screen:not(.sidebar-collapsed) .sidebar-toggle {
+  display: none !important;
+}
+
+/* Keep chat title visible when sidebar is open */
+.chat-screen:not(.sidebar-collapsed) .chat-title {
+  display: flex !important;
+}
+
+/* More specific rules for launcher mode */
+.chat-screen.launcher-mode:not(.sidebar-collapsed) .close-chat-btn,
+.chat-screen.launcher-mode:not(.sidebar-collapsed) .new-chat-header-btn,
+.chat-screen.launcher-mode:not(.sidebar-collapsed) .sidebar-toggle {
+  display: none !important;
+}
+
+/* Keep chat title visible in launcher mode when sidebar is open */
+.chat-screen.launcher-mode:not(.sidebar-collapsed) .chat-title {
+  display: flex !important;
+}
+
+/* Ensure we only show these buttons when sidebar is explicitly collapsed */
+.chat-screen .close-chat-btn,
+.chat-screen .new-chat-header-btn,
+.chat-screen .sidebar-toggle {
+  display: none;
+}
+
+/* Chat title should be visible by default but controlled by other rules */
+.chat-screen .chat-title {
+  display: flex;
 }
 
 /* Fix message alignment in launcher mode */
@@ -1130,6 +1330,12 @@ body {
   transform: rotate(180deg);
 }
 
+/* Update chevron when dropdown is active */
+.profile-dropdown.active ~ .user-menu .profile-chevron,
+.user-menu:has(+ .profile-dropdown.active) .profile-chevron {
+  transform: rotate(180deg);
+}
+
 /* Profile Dropdown */
 .profile-dropdown {
   position: absolute;
@@ -1143,15 +1349,67 @@ body {
   min-width: 240px;
   opacity: 0;
   visibility: hidden;
-  transform: translateY(-8px) scale(0.98);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transform: translateY(-12px) scale(0.95) rotateX(-10deg);
+  transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
   transform-origin: top right;
+  pointer-events: none;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .profile-dropdown.active {
   opacity: 1;
   visibility: visible;
-  transform: translateY(0) scale(1);
+  transform: translateY(0) scale(1) rotateX(0deg);
+  pointer-events: auto;
+}
+
+/* Enhanced dropdown animation states */
+.profile-dropdown::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  right: 20px;
+  width: 12px;
+  height: 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-right: none;
+  transform: rotate(45deg);
+  z-index: -1;
+}
+
+/* Staggered animation for dropdown items */
+.profile-dropdown.active .profile-header {
+  animation: dropdownItemSlide 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s both;
+}
+
+.profile-dropdown.active .profile-menu-item:nth-child(1) {
+  animation: dropdownItemSlide 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) 0.15s both;
+}
+
+.profile-dropdown.active .profile-menu-item:nth-child(2) {
+  animation: dropdownItemSlide 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s both;
+}
+
+.profile-dropdown.active .profile-menu-item:nth-child(3) {
+  animation: dropdownItemSlide 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) 0.25s both;
+}
+
+.profile-dropdown.active .profile-menu-item:nth-child(5) {
+  animation: dropdownItemSlide 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) 0.3s both;
+}
+
+@keyframes dropdownItemSlide {
+  from {
+    opacity: 0;
+    transform: translateX(20px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
 }
 
 .profile-dropdown-content {
@@ -1220,15 +1478,38 @@ body {
   background: transparent;
   border-radius: var(--rounded);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
   font-size: 0.875rem;
   color: var(--text-primary);
   text-align: left;
   width: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
+.profile-menu-item::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+  transition: left 0.6s;
 }
 
 .profile-menu-item:hover {
   background: var(--bg-hover);
+  transform: translateX(4px) scale(1.02);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.profile-menu-item:hover::before {
+  left: 100%;
+}
+
+.profile-menu-item:active {
+  transform: translateX(2px) scale(0.98);
 }
 
 .profile-menu-item i {
@@ -1906,8 +2187,8 @@ body {
     display: none;
   }
 
-  .profile-chevron {
-    display: none;
+.profile-chevron {
+    display: none !important;
   }
 
   .profile-dropdown {
@@ -2461,6 +2742,7 @@ body {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  position: relative;
 }
 
 .logout-btn-landing {
