@@ -200,53 +200,123 @@
   }
 }
 
-@keyframes launcherPulse {
+@keyframes launcherFloat {
   0%, 100% {
-    transform: scale(1);
-    box-shadow: 0 4px 15px rgba(235, 128, 33, 0.3);
+    transform: translateY(0px) rotate(0deg);
   }
   50% {
-    transform: scale(1.05);
-    box-shadow: 0 8px 25px rgba(235, 128, 33, 0.4);
+    transform: translateY(-8px) rotate(1deg);
   }
 }
 
 @keyframes launcherGlow {
   0%, 100% {
-    box-shadow: 0 4px 15px rgba(235, 128, 33, 0.3);
+    box-shadow: 
+      0 8px 32px rgba(235, 128, 33, 0.4),
+      0 4px 16px rgba(105, 41, 217, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.3);
   }
   50% {
-    box-shadow: 0 8px 30px rgba(235, 128, 33, 0.6), 0 0 20px rgba(235, 128, 33, 0.3);
+    box-shadow: 
+      0 12px 48px rgba(235, 128, 33, 0.6),
+      0 6px 24px rgba(105, 41, 217, 0.5),
+      inset 0 1px 0 rgba(255, 255, 255, 0.4);
   }
 }
 
-@keyframes expandBounce {
+@keyframes expandMagic {
   0% {
-    width: 60px;
-    border-radius: 50%;
+    width: 64px;
+    border-radius: 32px;
+    padding: 0;
+  }
+  50% {
+    width: 200px;
+    border-radius: 24px;
+    padding: 0 20px;
+  }
+  100% {
+    width: 190px;
+    border-radius: 24px;
+    padding: 0 20px;
+  }
+}
+
+@keyframes contractMagic {
+  0% {
+    width: 190px;
+    border-radius: 24px;
+    padding: 0 20px;
+  }
+  50% {
+    width: 54px;
+    border-radius: 32px;
+    padding: 0;
+  }
+  100% {
+    width: 64px;
+    border-radius: 32px;
+    padding: 0;
+  }
+}
+
+@keyframes textMagicIn {
+  0% {
+    opacity: 0;
+    transform: translateX(-20px) scale(0.8);
+    filter: blur(4px);
   }
   60% {
-    width: 190px;
-    border-radius: 25px;
+    opacity: 0.7;
+    transform: translateX(3px) scale(1.05);
+    filter: blur(1px);
   }
   100% {
-    width: 180px;
-    border-radius: 30px;
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0);
   }
 }
 
-@keyframes contractBounce {
+@keyframes textMagicOut {
   0% {
-    width: 180px;
-    border-radius: 30px;
-  }
-  40% {
-    width: 50px;
-    border-radius: 60%;
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0);
   }
   100% {
-    width: 60px;
-    border-radius: 50%;
+    opacity: 0;
+    transform: translateX(-15px) scale(0.9);
+    filter: blur(2px);
+  }
+}
+
+@keyframes iconSpin {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  100% {
+    transform: rotate(360deg) scale(1.1);
+  }
+}
+
+@keyframes iconPulse {
+  0%, 100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.4));
+  }
+  50% {
+    transform: scale(1.1);
+    filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.6));
+  }
+}
+
+@keyframes hoverShimmer {
+  0% {
+    transform: translateX(-100%) rotate(45deg);
+  }
+  100% {
+    transform: translateX(300%) rotate(45deg);
   }
 }
 
@@ -1252,10 +1322,7 @@ body {
   display: flex;
 }
 
-/* Show close button only when sidebar is collapsed in launcher mode */
-.chat-screen.launcher-mode.sidebar-collapsed .close-chat-btn {
-  display: flex !important;
-}
+/* Hide close button completely - removed show rule */
 
 /* Hide close button, new-chat button and toggle button when sidebar is open */
 .chat-screen:not(.sidebar-collapsed) .close-chat-btn,
@@ -1333,9 +1400,9 @@ body {
   }
 }
 
-/* Close button styles */
+/* Close button styles - always hidden */
 .close-chat-btn {
-  display: flex;
+  display: none !important;
   align-items: center;
   justify-content: center;
   background: transparent;
@@ -2752,28 +2819,6 @@ body {
     box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.1), 0 2px 6px rgba(0, 0, 0, 0.1);
   }
 }
-.chat-launcher {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  width: 60px;
-  height: 60px;
-  background: var(--green);
-  color: white;
-  border-radius: 50%;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  font-size: 24px;
-  box-shadow: var(--shadow-lg);
-  cursor: pointer;
-  z-index: 9999;
-  transition: all 0.3s ease;
-}
-
-.chat-launcher:hover {
-  transform: scale(1.05);
-}
 
 .chat-tooltip {
   position: absolute;
@@ -3191,39 +3236,59 @@ body {
   line-height: 1.2;
 }
 
-/* Enhanced floating launcher button with brand colors */
+/* Modern magical floating launcher button */
 .chat-launcher {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  width: 60px;
-  height: 60px;
-  background: linear-gradient(135deg, var(--primary), var(--secondary));
+  position: fixed !important;
+  bottom: 24px !important;
+  right: 24px !important;
+  top: auto !important;
+  left: auto !important;
+  width: 64px;
+  height: 64px;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 50%, var(--primary) 100%);
+  background-size: 200% 200%;
   color: white;
-  border-radius: 50%;
+  border-radius: 32px;
   display: flex;
   justify-content: center;
   align-items: center;
-  font-size: 24px;
-  box-shadow: 0 4px 20px rgba(235, 128, 33, 0.4), 0 0 30px rgba(105, 41, 217, 0.2);
+  font-size: 22px;
+  box-shadow: 
+    0 8px 32px rgba(235, 128, 33, 0.4),
+    0 4px 16px rgba(105, 41, 217, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.1);
   cursor: pointer;
   z-index: 9999;
-  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-  border: 2px solid rgba(255, 255, 255, 0.2);
+  transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  border: 2px solid rgba(255, 255, 255, 0.25);
   outline: none;
-  animation: launcherPulse 3s ease-in-out infinite;
+  animation: launcherFloat 6s ease-in-out infinite;
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  position: relative;
 }
 
 .chat-launcher:hover {
-  transform: scale(1.15) rotate(10deg);
-  box-shadow: 0 8px 30px rgba(235, 128, 33, 0.6), 0 0 40px rgba(105, 41, 217, 0.4);
+  transform: scale(1.1) translateY(-4px);
+  background-position: 100% 0;
   animation: launcherGlow 2s ease-in-out infinite;
   border-color: rgba(255, 255, 255, 0.4);
+  box-shadow: 
+    0 16px 48px rgba(235, 128, 33, 0.6),
+    0 8px 24px rgba(105, 41, 217, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.1);
 }
 
 .chat-launcher:active {
-  transform: scale(0.9) rotate(0deg);
-  box-shadow: 0 2px 10px rgba(235, 128, 33, 0.3);
+  transform: scale(0.95) translateY(0px);
+  box-shadow: 
+    0 4px 16px rgba(235, 128, 33, 0.5),
+    0 2px 8px rgba(105, 41, 217, 0.4),
+    inset 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: all 0.1s ease;
 }
 
 /* Enhanced automatic expansion animation */
@@ -3249,31 +3314,116 @@ body {
   }
 }
 
+/* Enhanced icon with magical effects */
+.chat-launcher i {
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  position: relative;
+  z-index: 3;
+  animation: iconPulse 3s ease-in-out infinite;
+  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.4));
+}
+
+.chat-launcher:hover i {
+  animation: iconSpin 0.6s ease-in-out;
+  filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.6));
+}
+
+.chat-launcher.expanded i {
+  transform: scale(0.85);
+  margin-right: 4px;
+}
+
+/* Magical shimmer effect on hover */
+.chat-launcher::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.4),
+    transparent
+  );
+  transition: all 0.5s ease;
+  z-index: 1;
+  border-radius: inherit;
+}
+
+.chat-launcher:hover::before {
+  animation: hoverShimmer 1.5s ease-in-out;
+}
+
+/* Magical ripple effect on click */
+.chat-launcher::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.4) 0%,
+    rgba(255, 255, 255, 0.1) 50%,
+    transparent 100%
+  );
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  transition: all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.chat-launcher:active::after {
+  width: 200px;
+  height: 200px;
+  opacity: 0;
+}
+
 .chat-launcher.expanded {
-  width: 180px;
-  border-radius: 30px;
-  animation: expandBounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-  box-shadow: 0 6px 25px rgba(235, 128, 33, 0.5), 0 0 35px rgba(105, 41, 217, 0.3);
+  width: 190px;
+  height: 64px;
+  border-radius: 24px;
+  animation: expandMagic 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+  box-shadow: 
+    0 12px 40px rgba(235, 128, 33, 0.5),
+    0 6px 20px rgba(105, 41, 217, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  background-size: 100% 100%;
 }
 
 .chat-launcher.contracting {
-  animation: contractBounce 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  animation: contractMagic 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
 .launcher-text {
   opacity: 0;
-  margin-left: var(--space-2);
-  font-size: 14px;
+  margin-left: var(--space-3);
+  font-size: 15px;
   font-weight: 600;
   white-space: nowrap;
-  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-  transform: translateX(-10px);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  transform: translateX(-20px) scale(0.8);
+  text-shadow: 
+    0 1px 3px rgba(0, 0, 0, 0.3),
+    0 0 10px rgba(255, 255, 255, 0.2);
+  position: relative;
+  letter-spacing: 0.5px;
+  filter: blur(4px);
 }
 
 .chat-launcher.expanded .launcher-text {
   opacity: 1;
-  transform: translateX(0);
+  transform: translateX(0) scale(1);
+  filter: blur(0);
+  animation: textMagicIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.15s both;
+}
+
+.chat-launcher.contracting .launcher-text {
+  animation: textMagicOut 0.25s ease-out forwards;
 }
 
 /* Mobile responsive adjustments for landing */
@@ -3320,15 +3470,19 @@ body {
   }
   
   .chat-launcher {
-    width: 56px;
-    height: 56px;
+    width: 60px;
+    height: 60px;
     font-size: 20px;
-    bottom: 16px;
-    right: 16px;
+    bottom: 20px !important;
+    right: 20px !important;
+    top: auto !important;
+    border-radius: 30px;
   }
   
   .chat-launcher.expanded {
-    width: 160px;
+    width: 170px;
+    height: 60px;
+    border-radius: 22px;
   }
 }
 
@@ -3346,13 +3500,23 @@ body {
   }
   
   .chat-launcher {
-    width: 52px;
-    height: 52px;
+    width: 56px;
+    height: 56px;
     font-size: 18px;
+    border-radius: 28px;
+    bottom: 20px !important;
+    right: 20px !important;
+    top: auto !important;
   }
   
   .chat-launcher.expanded {
-    width: 140px;
+    width: 150px;
+    height: 56px;
+    border-radius: 20px;
+  }
+  
+  .launcher-text {
+    font-size: 14px;
   }
 }
 
