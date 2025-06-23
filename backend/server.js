@@ -1383,33 +1383,6 @@ function calculateCompletedInstallments(sip) {
 
 // Function to handle ticket creation flow
 async function handleTicketCreationFlow(message, chat, customerId) {
-  const lastBotMessage = chat.messages
-    .slice(0, -1)
-    .reverse()
-    .find((msg) => msg.sender === "bot");
-
-  // Check if user confirmed they want to create a ticket
-  if (
-    lastBotMessage &&
-    lastBotMessage.content.includes(
-      "Would you like to proceed with creating a support ticket?"
-    )
-  ) {
-    if (
-      message.toLowerCase().includes("yes") ||
-      message.toLowerCase().includes("ok") ||
-      message.toLowerCase().includes("sure")
-    ) {
-      // Start ticket creation process
-      return `Great! Let's create your support ticket. I'll guide you through the process step by step.
-
-**Step 1 of 4: Issue Title**
-Please provide a brief title for your issue (e.g., "Unable to complete payment", "Account verification problem", etc.)`;
-    } else {
-      return `No problem! If you need any other assistance with your investments or have questions about our services, I'm here to help. What else can I assist you with today?`;
-    }
-  }
-
   // Check which step we're in based on previous messages
   const ticketCreationMessages = chat.messages.filter(
     (msg) =>
@@ -1420,11 +1393,16 @@ Please provide a brief title for your issue (e.g., "Unable to complete payment",
   );
 
   if (ticketCreationMessages.length === 0) {
-    // This shouldn't happen, but handle gracefully
-    return `I understand you want to create a ticket. Let me start the process:
+    // First time creating ticket - start directly
+    return `I understand you need assistance! I can help you raise a support ticket.
 
-**Step 1 of 4: Issue Title**
-Please provide a brief title for your issue.`;
+To create your ticket, I'll need:
+1. Issue Title - Brief description of your problem
+2. Category - Choose from: General Enquiry, KYC Related, Products Related, Orders Related, Payments/Bank Accounts, Account Related, Others
+3. Description - Detailed explanation of your issue
+
+Step 1 of 4: Issue Title
+Please provide a brief title for your issue (e.g., "Unable to complete payment", "Account verification problem", etc.)`;
   }
 
   const latestStep = ticketCreationMessages[ticketCreationMessages.length - 1];
@@ -1499,21 +1477,20 @@ Now please provide a detailed description of your issue. Include any relevant in
   }
 
   if (latestStep.content.includes("Step 3 of 4")) {
-    // User provided description, now ask for file upload (optional)
+    // User provided description, now show file upload field directly
     const description = message.trim();
 
     return `**Step 4 of 4: Supporting Documents (Optional)**
 Thank you for the description.
 
-**Would you like to attach any supporting documents?**
-
-You can upload:
+You can upload supporting documents if needed:
 • Images (JPEG, PNG, GIF, WebP)
 • PDF documents
 • Maximum 3 files, 10MB each
 
-If you want to upload files, please respond with "yes" and I'll guide you through the upload process.
-If you don't need to upload anything, respond with "no" or "skip" to create the ticket.`;
+[File Upload Field]
+
+Click "Create Ticket" to submit, or upload documents first if needed.`;
   }
 
   if (latestStep.content.includes("Step 4 of 4")) {
@@ -2346,15 +2323,16 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
         return res.json(chat);
       } else {
-        // Initial ticket request
-        const aiResponse = `I understand you need assistance! I can help you raise a support ticket. 
+        // Initial ticket request - start directly
+        const aiResponse = `I understand you need assistance! I can help you raise a support ticket.
 
 To create your ticket, I'll need:
-1. **Issue Title** - Brief description of your problem
-2. **Category** - Choose from: General Enquiry, KYC Related, Products Related, Orders Related, Payments/Bank Accounts, Account Related, Others
-3. **Description** - Detailed explanation of your issue
+1. Issue Title - Brief description of your problem
+2. Category - Choose from: General Enquiry, KYC Related, Products Related, Orders Related, Payments/Bank Accounts, Account Related, Others
+3. Description - Detailed explanation of your issue
 
-Would you like to proceed with creating a support ticket?`;
+Step 1 of 4: Issue Title
+Please provide a brief title for your issue (e.g., "Unable to complete payment", "Account verification problem", etc.)`;
 
         const assistantMessage = {
           sender: "bot",

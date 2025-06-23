@@ -2436,7 +2436,7 @@ async function handleTicketCreation(button) {
     const result = await response.json();
     console.log('Ticket created successfully:', result);
 
-    // Show success message in chat
+    // Show success message in chat immediately
     const successMessage = `✅ **Ticket Created Successfully!**
 
 **Ticket ID:** ${result.ticket.ticket_id}
@@ -2460,37 +2460,19 @@ Is there anything else I can help you with regarding your investments or account
       fileUploadContainer.remove();
     }
 
+    // Display success message in chat immediately
+    appendMessage('bot', successMessage);
+
     // Reset state
     selectedFiles = [];
     ticketData = {};
 
     showNotification(`Ticket ${result.ticket.ticket_id} created successfully!`, 'success');
     
-    // Reload chat to get the success message from backend with retry mechanism
-    if (currentChatId) {
-      let retryCount = 0;
-      const maxRetries = 3;
-      
-      const reloadChat = async () => {
-        try {
-          await loadChat(currentChatId);
-          console.log('Chat reloaded successfully after ticket creation');
-        } catch (error) {
-          console.error('Error reloading chat:', error);
-          if (retryCount < maxRetries) {
-            retryCount++;
-            console.log(`Retrying chat reload (${retryCount}/${maxRetries})...`);
-            setTimeout(reloadChat, 1000);
-          } else {
-            console.error('Failed to reload chat after maximum retries');
-            showNotification('Chat update may be delayed. Please refresh if needed.', 'warning');
-          }
-        }
-      };
-      
-      // Initial delay to allow backend processing
-      setTimeout(reloadChat, 1500);
-    }
+    // Optional: Reload chat history to show the updated ticket in sidebar (but don't reload the current chat)
+    setTimeout(() => {
+      loadChatHistory();
+    }, 1000);
 
   } catch (error) {
     console.error('Error creating ticket:', error);
@@ -2562,6 +2544,11 @@ function showFileUploadInterface() {
       handleFileSelection(e.target);
       updateCreateButton();
     });
+    
+    // Auto-trigger file upload dialog immediately
+    setTimeout(() => {
+      fileInput.click();
+    }, 500);
   }
 
   // Set up drag and drop
@@ -2601,6 +2588,13 @@ function checkForFileUploadTrigger(botMessage) {
   if (content.includes('ticket created successfully')) {
     return; // Skip file upload trigger if ticket is already created
   }
+  // New flow: Show file upload when Step 4 of 4 with [File Upload Field] is mentioned
+  if (content.includes('step 4 of 4') && content.includes('[file upload field]')) {
+    setTimeout(() => {
+      showFileUploadInterface();
+    }, 500);
+  }
+  // Keep old flow for backward compatibility
   if (content.includes('use the file upload form') && content.includes('will appear after this message')) {
     setTimeout(() => {
       showFileUploadInterface();
