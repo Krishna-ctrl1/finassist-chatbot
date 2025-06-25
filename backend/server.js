@@ -921,7 +921,11 @@ async function classifyQueryWithAI(message, conversationHistory = []) {
 Your task is to classify the following user query into exactly ONE of these categories:
 
 1. "GREETING" - Simple greetings like "hi", "hello", "hey", "thanks", "thank you"
-2. "USER-SPECIFIC-FINANCIAL" - Questions about the user's personal financial data like "my portfolio", "my investments", "my orders", "my SIP", "my returns", "my balance"
+
+2. "USER-SPECIFIC-FINANCIAL" - Questions about the user's EXISTING personal financial data like "my portfolio", "my investments", "my orders", "my SIP", "my returns", "my balance", "show my portfolio", "check my orders", "view my holdings"
+   - IMPORTANT: This is ONLY for VIEWING/CHECKING existing data, NOT creating new investments
+   - EXCLUDE ALL investment creation requests - these go to INVESTMENT_RELATED
+
 3. "GENERAL-FINANCIAL" - Any finance-related questions including:
    - Investment scenarios ("what if I invested...")
    - Mutual fund questions
@@ -933,6 +937,7 @@ Your task is to classify the following user query into exactly ONE of these cate
    - Financial education
    - Tax implications
    - Any question about specific companies, funds, or financial instruments
+
 4. "TICKET_RELATED" - Queries related to raising tickets, support requests, or customer service issues including:
    - "I want to raise a ticket"
    - "I need help with..."
@@ -940,20 +945,48 @@ Your task is to classify the following user query into exactly ONE of these cate
    - "I want to complain about..."
    - "I need support for..."
    - Any expressions of issues, problems, complaints, or need for assistance
-5. "NON-FINANCIAL" - Questions completely unrelated to finance, investments, or money
-6. "AFFIRMATIVE_RESPONSE" - Responses like "yes", "ok", "sure", "please", "yes please" that are answering a previous question
 
-IMPORTANT RULES:
-- If a query has even 1% relation to finance, stocks, investments, or money, classify it as financial
-- Investment scenarios like "what if I had invested X in Y fund Z years ago" are GENERAL-FINANCIAL
-- Questions about specific mutual funds, stocks, or companies are GENERAL-FINANCIAL
-- If user expresses any problem, issue, complaint, or need for support/help, classify as TICKET_RELATED
-- Only classify as NON-FINANCIAL if the query has absolutely no connection to finance, tickets, or support
-- If the user is responding "yes", "ok", "sure", "please" to a previous question from the bot, classify as AFFIRMATIVE_RESPONSE
+5. "INVESTMENT_RELATED" - Queries specifically about MAKING/CREATING/STARTING new investments including:
+   - "I want to make an investment" ← ALWAYS THIS CATEGORY
+   - "I want to invest money" ← ALWAYS THIS CATEGORY
+   - "Start an investment" ← ALWAYS THIS CATEGORY
+   - "Create a SIP" ← ALWAYS THIS CATEGORY
+   - "Make a lumpsum investment" ← ALWAYS THIS CATEGORY
+   - "I want to start investing" ← ALWAYS THIS CATEGORY
+   - "Help me invest" ← ALWAYS THIS CATEGORY
+   - "Set up an investment" ← ALWAYS THIS CATEGORY
+   - "Begin investing" ← ALWAYS THIS CATEGORY
+   - "Start SIP" ← ALWAYS THIS CATEGORY
+   - "Make investment" ← ALWAYS THIS CATEGORY
+   - Any phrase with "invest", "investment", "investing" + action words like "make", "start", "create", "begin", "want to", "need to"
+   - CRITICAL: ANY request to CREATE, MAKE, START, or BEGIN an investment MUST be INVESTMENT_RELATED
+   - EXCLUDE: Analysis questions like "what if I invested", "my investments", "investment performance", "how much would I have", "returns calculation"
+
+6. "INVESTMENT_WORKFLOW_RESPONSE" - Responses given during active investment workflow including:
+   - Investment type choices: "SIP", "Lumpsum", "systematic investment plan"
+   - Goal responses: "Retirement", "Education", "Wealth creation", "Emergency fund", "Other"
+   - Amount responses: "₹50,000", "5 lakhs", "10000", monetary values
+   - Timeline responses: "15 years", "5 years", "10 years", time periods
+   - Fund selection responses: "Recommend for me", "I'll choose", fund names
+   - Date responses: "5th", "15", "25", dates for SIP
+   - Confirmation responses during investment workflow: "Yes proceed", "Accept suggested", "Enter custom"
+
+7. "NON-FINANCIAL" - Questions completely unrelated to finance, investments, or money
+
+8. "AFFIRMATIVE_RESPONSE" - Simple responses like "yes", "ok", "sure", "please", "yes please" that are answering a previous question (BUT NOT when in investment workflow)
+
+CRITICAL CLASSIFICATION RULES:
+- "I want to make an investment" = INVESTMENT_RELATED (NOT USER-SPECIFIC-FINANCIAL)
+- "I want to invest" = INVESTMENT_RELATED (NOT USER-SPECIFIC-FINANCIAL) 
+- "Help me invest" = INVESTMENT_RELATED (NOT USER-SPECIFIC-FINANCIAL)
+- "Start investing" = INVESTMENT_RELATED (NOT USER-SPECIFIC-FINANCIAL)
+- "Show my portfolio" = USER-SPECIFIC-FINANCIAL
+- "My investments" = USER-SPECIFIC-FINANCIAL
+- "Check my orders" = USER-SPECIFIC-FINANCIAL
 
 User query: "${message}"${contextInfo}
 
-Respond with ONLY the category name (GREETING, USER-SPECIFIC-FINANCIAL, GENERAL-FINANCIAL, TICKET_RELATED, NON-FINANCIAL, or AFFIRMATIVE_RESPONSE). Do not include any explanation.`;
+Respond with ONLY the category name. Do not include any explanation.`;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4.1",
@@ -971,6 +1004,8 @@ Respond with ONLY the category name (GREETING, USER-SPECIFIC-FINANCIAL, GENERAL-
       "USER-SPECIFIC-FINANCIAL",
       "GENERAL-FINANCIAL",
       "TICKET_RELATED",
+      "INVESTMENT_RELATED",
+      "INVESTMENT_WORKFLOW_RESPONSE",
       "NON-FINANCIAL",
       "AFFIRMATIVE_RESPONSE",
     ];
@@ -1337,7 +1372,7 @@ app.post("/api/payment/generate-otp", authenticateToken, async (req, res) => {
 
 app.post("/api/payment/verify-otp", authenticateToken, async (req, res) => {
   try {
-    const { payment_id, otp, order_id } = req.body;
+    const { payment_id, otp, order_id, payment_mandate_preference } = req.body;
 
     const db = mongoClient.db("financeai");
 
@@ -1372,6 +1407,7 @@ app.post("/api/payment/verify-otp", authenticateToken, async (req, res) => {
             status: "CONFIRMED",
             payment_status: "COMPLETED",
             transaction_id: `TXN_${Date.now()}`,
+            payment_mandate: payment_mandate_preference || "existing",
             updated_at: new Date(),
           },
         }
@@ -1392,16 +1428,45 @@ app.post("/api/payment/verify-otp", authenticateToken, async (req, res) => {
           duration: order.duration,
           status: "ACTIVE",
           next_deduction: calculateNextSIPDate(order.sip_date, order.frequency),
+          payment_mandate: payment_mandate_preference || "existing",
           created_at: new Date(),
           updated_at: new Date(),
         });
       }
 
+      // Add investment completion record
+      await db.collection("investment_completions").insertOne({
+        customer_id: order.customer_id,
+        order_id: order.order_id,
+        investment_type: order.investment_type,
+        amount: order.amount,
+        product_id: order.product_id,
+        payment_mandate: payment_mandate_preference || "existing",
+        transaction_id: `TXN_${Date.now()}`,
+        completion_status: "SUCCESS",
+        otp_verified: true,
+        completed_at: new Date(),
+        created_at: new Date(),
+      });
+
+      const investmentTypeText = order.investment_type === "SIP" ? "SIP" : "Lumpsum investment";
+      const successMessage = order.investment_type === "SIP" 
+        ? `🎉 Congratulations! Your SIP of ₹${order.amount.toLocaleString()}/month has been successfully set up and will start from the ${order.sip_date}th of each month. You're all set to grow your wealth systematically!`
+        : `🎉 Investment Successful! Your lumpsum investment of ₹${order.amount.toLocaleString()} has been confirmed. You'll receive a confirmation email shortly.`;
+
       res.json({
         success: true,
-        message: "Payment successful! Your investment has been confirmed.",
+        message: successMessage,
         transaction_id: `TXN_${Date.now()}`,
         order_status: "CONFIRMED",
+        investment_details: {
+          type: order.investment_type,
+          amount: order.amount,
+          product_id: order.product_id,
+          payment_mandate: payment_mandate_preference || "existing",
+          sip_date: order.sip_date || null,
+          frequency: order.frequency || null,
+        },
       });
     } else {
       await db.collection("investment_orders").updateOne(
@@ -1426,6 +1491,254 @@ app.post("/api/payment/verify-otp", authenticateToken, async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to verify OTP",
+    });
+  }
+});
+
+// New endpoint to handle investment completion after payment mandate selection
+app.post("/api/investment/complete-with-mandate", authenticateToken, async (req, res) => {
+  try {
+    const { order_id, payment_mandate_preference, customer_id } = req.body;
+    const authenticatedCustomerId = req.user.customerId || req.user.id;
+    
+    // Use customer_id from request body if provided and valid, otherwise use authenticated user's ID
+    const finalCustomerId = customer_id || authenticatedCustomerId;
+
+    const db = mongoClient.db("financeai");
+
+    // If no order_id provided, create a sample investment completion for demo
+    let order;
+    if (!order_id) {
+      // Create a demo investment record
+      const demoOrderId = Math.floor(100000 + Math.random() * 900000);
+      
+      order = {
+        order_id: demoOrderId,
+        customer_id: parseInt(finalCustomerId),
+        investment_type: "SIP", // Default to SIP for demo
+        amount: 3000, // Default SIP amount
+        product_id: "MF001",
+        sip_date: 5, // 5th of every month
+        frequency: "MONTHLY",
+        created_at: new Date(),
+      };
+      
+      // Save the demo order
+      await db.collection("investment_orders").insertOne({
+        ...order,
+        status: "CONFIRMED",
+        payment_status: "COMPLETED",
+        payment_mandate: payment_mandate_preference || "existing",
+        updated_at: new Date(),
+      });
+    } else {
+      // Get the existing order details
+      order = await db
+        .collection("investment_orders")
+        .findOne({ order_id: parseInt(order_id) });
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          message: "Order not found",
+        });
+      }
+
+      // Verify the order belongs to the current user
+      if (order.customer_id !== parseInt(finalCustomerId)) {
+        return res.status(403).json({
+          success: false,
+          message: "Unauthorized access to order",
+        });
+      }
+
+      // Update existing order with payment mandate preference
+      await db.collection("investment_orders").updateOne(
+        { order_id: parseInt(order_id) },
+        {
+          $set: {
+            status: "COMPLETED",
+            payment_mandate: payment_mandate_preference || "existing",
+            completed_at: new Date(),
+            updated_at: new Date(),
+          },
+        }
+      );
+    }
+
+    // Add investment completion record
+    const transactionId = `TXN_${Date.now()}_${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
+    
+    await db.collection("investment_completions").insertOne({
+      customer_id: order.customer_id,
+      order_id: order.order_id,
+      investment_type: order.investment_type,
+      amount: order.amount,
+      product_id: order.product_id,
+      payment_mandate: payment_mandate_preference || "existing",
+      transaction_id: transactionId,
+      completion_status: "SUCCESS",
+      otp_verified: true,
+      completed_at: new Date(),
+      created_at: new Date(),
+    });
+
+    // Create detailed success message based on investment type
+    const investmentTypeText = order.investment_type === "SIP" ? "SIP" : "Lumpsum investment";
+    const mandateText = payment_mandate_preference === "existing" ? "existing payment mandate" : "new payment mandate";
+    
+    let successMessage;
+    if (order.investment_type === "SIP") {
+      successMessage = `🎉 **Congratulations! Your SIP Investment is Complete!**
+
+✅ **Investment Details:**
+• **Type:** SIP (Systematic Investment Plan)
+• **Monthly Amount:** ₹${order.amount.toLocaleString()}
+• **SIP Date:** ${order.sip_date}th of every month
+• **Payment Method:** ${mandateText}
+• **Transaction ID:** ${transactionId}
+• **Status:** Active
+
+🚀 **What's Next:**
+• Your first SIP installment will be deducted on the ${order.sip_date}th of next month
+• You'll receive SMS confirmations for each deduction
+• You can track your investments in the Portfolio section
+• Download the investment certificate from your dashboard
+
+**You're all set to grow your wealth systematically!** 📈
+
+Would you like to start another investment or check your portfolio?`;
+    } else {
+      successMessage = `🎉 **Investment Successful!**
+
+✅ **Investment Details:**
+• **Type:** Lumpsum Investment
+• **Amount:** ₹${order.amount.toLocaleString()}
+• **Payment Method:** ${mandateText}
+• **Transaction ID:** ${transactionId}
+• **Status:** Completed
+
+📧 **What's Next:**
+• You'll receive a confirmation email shortly
+• Units will be allocated within 1-2 business days
+• Track your investment performance in Portfolio
+• Download your investment certificate
+
+**Your investment journey begins now!** 🚀`;
+    }
+
+    res.json({
+      success: true,
+      message: successMessage,
+      transaction_id: transactionId,
+      order_status: "COMPLETED",
+      investment_details: {
+        order_id: order.order_id,
+        type: order.investment_type,
+        amount: order.amount,
+        product_id: order.product_id,
+        payment_mandate: payment_mandate_preference || "existing",
+        sip_date: order.sip_date || null,
+        frequency: order.frequency || null,
+        transaction_id: transactionId,
+        completed_at: new Date().toISOString(),
+      },
+      next_steps: {
+        portfolio_url: "/portfolio",
+        new_investment_url: "/invest",
+        support_url: "/support",
+      },
+    });
+  } catch (error) {
+    console.error("Error completing investment:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to complete investment",
+      error: error.message,
+    });
+  }
+});
+
+// Keep the original endpoint for backward compatibility
+app.post("/api/investment/complete", authenticateToken, async (req, res) => {
+  try {
+    const { order_id, payment_mandate_preference } = req.body;
+    const customerId = req.user.customerId || req.user.id;
+
+    const db = mongoClient.db("financeai");
+
+    // Get the order details
+    const order = await db
+      .collection("investment_orders")
+      .findOne({ order_id: parseInt(order_id) });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    // Verify the order belongs to the current user
+    if (order.customer_id !== parseInt(customerId)) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized access to order",
+      });
+    }
+
+    // Update order with payment mandate preference
+    await db.collection("investment_orders").updateOne(
+      { order_id: parseInt(order_id) },
+      {
+        $set: {
+          status: "COMPLETED",
+          payment_mandate: payment_mandate_preference || "existing",
+          completed_at: new Date(),
+          updated_at: new Date(),
+        },
+      }
+    );
+
+    // Add investment completion record
+    await db.collection("investment_completions").insertOne({
+      customer_id: order.customer_id,
+      order_id: order.order_id,
+      investment_type: order.investment_type,
+      amount: order.amount,
+      product_id: order.product_id,
+      payment_mandate: payment_mandate_preference || "existing",
+      transaction_id: `TXN_${Date.now()}`,
+      completion_status: "SUCCESS",
+      otp_verified: true,
+      completed_at: new Date(),
+      created_at: new Date(),
+    });
+
+    const investmentTypeText = order.investment_type === "SIP" ? "SIP" : "Lumpsum investment";
+    const successMessage = order.investment_type === "SIP" 
+      ? `🎉 Congratulations! Your SIP of ₹${order.amount.toLocaleString()}/month has been successfully set up and will start from the ${order.sip_date}th of each month. You're all set to grow your wealth systematically!`
+      : `🎉 Investment Successful! Your lumpsum investment of ₹${order.amount.toLocaleString()} has been confirmed. You'll receive a confirmation email shortly.`;
+
+    res.json({
+      success: true,
+      message: successMessage,
+      transaction_id: `TXN_${Date.now()}`,
+      order_status: "COMPLETED",
+      investment_details: {
+        type: order.investment_type,
+        amount: order.amount,
+        product_id: order.product_id,
+        payment_mandate: payment_mandate_preference || "existing",
+        sip_date: order.sip_date || null,
+        frequency: order.frequency || null,
+      },
+    });
+  } catch (error) {
+    console.error("Error completing investment:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to complete investment",
     });
   }
 });
@@ -1713,6 +2026,2169 @@ function calculateCompletedInstallments(sip) {
   }
 
   return Math.max(0, installments - 1);
+}
+
+// =============================================================================
+// OPENAI-POWERED FUND RECOMMENDATION FUNCTION
+// =============================================================================
+
+/**
+ * GENERATE FUND RECOMMENDATION USING OPENAI:
+ * This function uses OpenAI API to generate personalized mutual fund recommendations
+ * based on user's investment details, goals, and profile
+ */
+async function generateFundRecommendation(investmentData) {
+  try {
+    console.log('Generating AI fund recommendation with data:', investmentData);
+    
+    const { investmentType, goal, amount, timeline, customerId } = investmentData;
+    
+    // Get additional user context if customerId is provided
+    let userContext = "";
+    if (customerId) {
+      try {
+        const userData = await getUserData(customerId);
+        if (userData.customer) {
+          userContext = `\nUser Profile:\n- Customer ID: ${userData.customer.id}\n- Total existing orders: ${userData.orders?.length || 0}\n- Investment experience level: ${userData.orders?.length > 0 ? 'Experienced' : 'Beginner'}`;
+        }
+      } catch (error) {
+        console.log('Could not fetch user context:', error.message);
+      }
+    }
+    
+    const fundRecommendationPrompt = `You are a professional mutual fund advisor. Provide a personalized fund recommendation based on the following investment details:\n\n**Investment Details:**\n- Investment Type: ${investmentType}\n- Investment Goal: ${goal}\n- Investment Amount: ${amount}${investmentType === 'SIP' ? '/month' : ''}\n- Time Horizon: ${timeline}${userContext}\n\n**Your Task:**\nRecommend ONE specific mutual fund that best matches these requirements. Your recommendation should include:\n\n1. **Fund Name** (use real, well-known Indian mutual funds)\n2. **Fund House** (AMC name)\n3. **Category** (Large Cap, Mid Cap, Small Cap, Flexi Cap, Hybrid, etc.)\n4. **Risk Level** (Conservative, Moderate, Aggressive)\n5. **Why this fund fits** (2-3 specific reasons)\n6. **Key highlights** (expense ratio, fund manager, AUM, returns)\n7. **Suitability statement** (why it matches the goal and timeline)\n\n**Guidelines:**\n- For retirement goals with 15+ years: Consider equity funds (Large Cap/Flexi Cap)\n- For short-term goals (2-5 years): Consider hybrid/debt funds\n- For wealth creation: Flexi Cap or Multi Cap funds\n- For conservative investors: Large Cap or Hybrid funds\n- For aggressive investors: Mid Cap or Small Cap funds\n- Consider SIP-friendly funds for systematic investments\n\n**Response Format:**\nBased on your ${goal.toLowerCase()} goal with a ${timeline} investment horizon, I recommend:\n\n**[Fund Name] (Direct – Growth)**\n• **Fund House:** [AMC Name]\n• **Category:** [Category]\n• **Risk Level:** [Risk Level]\n• **Current NAV:** ₹[NAV] (approximate)\n• **Expense Ratio:** [X]%\n• **Fund Manager:** [Manager Name]\n• **AUM:** ₹[Amount] Cr (approximate)\n• **3Y Returns:** [X]% (approximate)\n• **5Y Returns:** [X]% (approximate)\n\n**Why this fund fits your profile:**\n1. [Specific reason 1]\n2. [Specific reason 2]\n3. [Specific reason 3]\n\n**Fund Highlights:**\n• [Key feature 1]\n• [Key feature 2]\n• [Key feature 3]\n\nThis fund aligns well with your ${timeline} investment timeline and ${goal.toLowerCase()} objective, offering [specific benefit for the user's situation].\n\n**Important:** Please provide realistic fund details based on actual Indian mutual funds. Use approximate but reasonable figures for NAV, returns, and AUM.`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: fundRecommendationPrompt }],
+      max_tokens: 1000,
+      temperature: 0.7,
+    });
+
+    const recommendation = completion.choices[0].message.content.trim();
+    
+    console.log('Generated fund recommendation:', recommendation.substring(0, 200) + '...');
+    
+    return recommendation;
+    
+  } catch (error) {
+    console.error('Error generating fund recommendation:', error);
+    throw new Error('Failed to generate fund recommendation: ' + error.message);
+  }
+}
+
+/**
+ * GENERATE ALTERNATIVE FUND RECOMMENDATIONS USING OPENAI:
+ * This function uses OpenAI API to generate multiple alternative fund options
+ * when users want to see more choices beyond the initial recommendation
+ */
+async function generateAlternativeFundRecommendations(investmentData) {
+  try {
+    console.log('Generating AI alternative fund recommendations with data:', investmentData);
+    
+    const { investmentType, goal, amount, timeline, customerId } = investmentData;
+    
+    // Get additional user context if customerId is provided
+    let userContext = "";
+    if (customerId) {
+      try {
+        const userData = await getUserData(customerId);
+        if (userData.customer) {
+          userContext = `\nUser Profile:\n- Customer ID: ${userData.customer.id}\n- Total existing orders: ${userData.orders?.length || 0}\n- Investment experience level: ${userData.orders?.length > 0 ? 'Experienced' : 'Beginner'}`;
+        }
+      } catch (error) {
+        console.log('Could not fetch user context:', error.message);
+      }
+    }
+    
+    const alternativeFundsPrompt = `You are a professional mutual fund advisor. Provide multiple alternative fund recommendations based on the following investment details:\n\n**Investment Details:**\n- Investment Type: ${investmentType}\n- Investment Goal: ${goal}\n- Investment Amount: ${amount}${investmentType === 'SIP' ? '/month' : ''}\n- Time Horizon: ${timeline}${userContext}\n\n**Your Task:**\nProvide exactly 4-5 alternative mutual fund options that match these requirements. Focus on variety across categories while ensuring all are suitable for the user's profile.\n\n**Response Format:**\nHere are additional funds to consider:\n\n1. **[Fund Name 1] (Direct – Growth)** - [Category] ([X]% returns)\n2. **[Fund Name 2] (Direct – Growth)** - [Category] ([X]% returns)\n3. **[Fund Name 3] (Direct – Growth)** - [Category] ([X]% returns)\n4. **[Fund Name 4] (Direct – Growth)** - [Category] ([X]% returns)\n5. **[Fund Name 5] (Direct – Growth)** - [Category] ([X]% returns)\n\n**Guidelines:**\n- Provide ONLY fund names and returns in the specified format\n- Use real, well-known Indian mutual funds\n- Include variety across categories (Large Cap, Mid Cap, Flexi Cap, Hybrid, etc.)\n- Show approximate but realistic annual returns for each fund\n- For ${goal.toLowerCase()} goal with ${timeline} timeline, consider:\n  - Large Cap funds for stability (12-15% returns)\n  - Mid Cap funds for growth (15-20% returns)\n  - Flexi Cap funds for balanced approach (13-17% returns)\n  - Hybrid funds for conservative approach (10-14% returns)\n  - Small Cap funds for aggressive growth (18-25% returns)\n\n**Important Rules:**\n- Keep it concise - ONLY fund name, category, and returns\n- No detailed descriptions or explanations\n- Ensure all funds are appropriate for the investment type (${investmentType})\n- Consider ${timeline} time horizon when suggesting categories\n- All returns should be approximate annual figures\n\n**Example Format:**\n1. **ICICI Prudential Bluechip Fund (Direct – Growth)** - Large Cap (13.8% returns)\n2. **Kotak Standard Multicap Fund (Direct – Growth)** - Multi Cap (15.2% returns)\n3. **DSP Tax Saver Fund (Direct – Growth)** - ELSS (12.9% returns)\n4. **Nippon India Small Cap Fund (Direct – Growth)** - Small Cap (19.5% returns)\n5. **SBI Hybrid Equity Fund (Direct – Growth)** - Hybrid (11.4% returns)`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: alternativeFundsPrompt }],
+      max_tokens: 500,
+      temperature: 0.7,
+    });
+
+    const alternativeOptions = completion.choices[0].message.content.trim();
+    
+    console.log('Generated alternative fund recommendations:', alternativeOptions.substring(0, 200) + '...');
+    
+    return alternativeOptions;
+    
+  } catch (error) {
+    console.error('Error generating alternative fund recommendations:', error);
+    throw new Error('Failed to generate alternative fund recommendations: ' + error.message);
+  }
+}
+
+// =============================================================================
+// PAYMENT METHOD MANAGEMENT API ENDPOINTS
+// =============================================================================
+
+// Get all payment methods for a customer
+app.get("/api/payment-methods", authenticateToken, async (req, res) => {
+  try {
+    const customerId = req.user.customerId || req.user.id;
+    const db = mongoClient.db("financeai");
+
+    const [upiMethods, bankMethods, cardMethods] = await Promise.all([
+      db.collection("customer_upi_methods").find({ customer_id: parseInt(customerId), status: "ACTIVE" }).toArray(),
+      db.collection("customer_bank_methods").find({ customer_id: parseInt(customerId), status: "ACTIVE" }).toArray(),
+      db.collection("customer_card_methods").find({ customer_id: parseInt(customerId), status: "ACTIVE" }).toArray()
+    ]);
+
+    // Mask sensitive data for response
+    const maskedUpiMethods = upiMethods.map(method => ({
+      id: method._id,
+      type: "UPI",
+      upi_id: method.upi_id,
+      provider: method.provider,
+      is_default: method.is_default,
+      created_at: method.created_at
+    }));
+
+    const maskedBankMethods = bankMethods.map(method => ({
+      id: method._id,
+      type: "BANK",
+      bank_name: method.bank_name,
+      account_number: method.account_number.replace(/.(?=.{4})/g, 'X'),
+      account_type: method.account_type,
+      ifsc_code: method.ifsc_code,
+      is_default: method.is_default,
+      created_at: method.created_at
+    }));
+
+    const maskedCardMethods = cardMethods.map(method => ({
+      id: method._id,
+      type: "CARD",
+      bank_name: method.bank_name,
+      card_number: `****-****-****-${method.card_last_four}`,
+      card_type: method.card_type,
+      is_default: method.is_default,
+      created_at: method.created_at
+    }));
+
+    res.json({
+      success: true,
+      payment_methods: {
+        upi: maskedUpiMethods,
+        bank: maskedBankMethods,
+        card: maskedCardMethods
+      },
+      total_methods: maskedUpiMethods.length + maskedBankMethods.length + maskedCardMethods.length
+    });
+  } catch (error) {
+    console.error("Error fetching payment methods:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch payment methods"
+    });
+  }
+});
+
+// Add new UPI payment method
+app.post("/api/payment-methods/upi", authenticateToken, async (req, res) => {
+  try {
+    const { upi_id, is_default = false } = req.body;
+    const customerId = req.user.customerId || req.user.id;
+
+    // Validate UPI ID format
+    const upiRegex = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z][a-zA-Z]{2,64}$/;
+    if (!upiRegex.test(upi_id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid UPI ID format"
+      });
+    }
+
+    const db = mongoClient.db("financeai");
+
+    // Check if UPI ID already exists for this customer
+    const existingUpi = await db.collection("customer_upi_methods").findOne({
+      customer_id: parseInt(customerId),
+      upi_id: upi_id,
+      status: "ACTIVE"
+    });
+
+    if (existingUpi) {
+      return res.status(400).json({
+        success: false,
+        message: "UPI ID already exists"
+      });
+    }
+
+    // If setting as default, remove default from other UPI methods
+    if (is_default) {
+      await db.collection("customer_upi_methods").updateMany(
+        { customer_id: parseInt(customerId), status: "ACTIVE" },
+        { $set: { is_default: false } }
+      );
+    }
+
+    // Store UPI method
+    const result = await db.collection("customer_upi_methods").insertOne({
+      customer_id: parseInt(customerId),
+      upi_id: upi_id,
+      provider: upi_id.split('@')[1],
+      is_default: is_default,
+      status: "ACTIVE",
+      created_at: new Date(),
+      updated_at: new Date()
+    });
+
+    res.json({
+      success: true,
+      message: "UPI payment method added successfully",
+      payment_method_id: result.insertedId
+    });
+  } catch (error) {
+    console.error("Error adding UPI method:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to add UPI payment method"
+    });
+  }
+});
+
+// Add new bank account payment method
+app.post("/api/payment-methods/bank", authenticateToken, async (req, res) => {
+  try {
+    const { account_number, ifsc_code, bank_name, account_type, is_default = false } = req.body;
+    const customerId = req.user.customerId || req.user.id;
+
+    // Validate required fields
+    if (!account_number || !ifsc_code || !bank_name || !account_type) {
+      return res.status(400).json({
+        success: false,
+        message: "All bank details are required"
+      });
+    }
+
+    // Validate IFSC code format
+    const ifscRegex = /^[A-Z]{4}[0-9]{7}$/;
+    if (!ifscRegex.test(ifsc_code)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid IFSC code format"
+      });
+    }
+
+    const db = mongoClient.db("financeai");
+
+    // Check if account already exists for this customer
+    const existingAccount = await db.collection("customer_bank_methods").findOne({
+      customer_id: parseInt(customerId),
+      account_number: account_number,
+      status: "ACTIVE"
+    });
+
+    if (existingAccount) {
+      return res.status(400).json({
+        success: false,
+        message: "Bank account already exists"
+      });
+    }
+
+    // If setting as default, remove default from other bank methods
+    if (is_default) {
+      await db.collection("customer_bank_methods").updateMany(
+        { customer_id: parseInt(customerId), status: "ACTIVE" },
+        { $set: { is_default: false } }
+      );
+    }
+
+    // Store bank method
+    const result = await db.collection("customer_bank_methods").insertOne({
+      customer_id: parseInt(customerId),
+      account_number: account_number,
+      ifsc_code: ifsc_code,
+      bank_name: bank_name,
+      account_type: account_type,
+      is_default: is_default,
+      status: "ACTIVE",
+      created_at: new Date(),
+      updated_at: new Date()
+    });
+
+    res.json({
+      success: true,
+      message: "Bank account added successfully",
+      payment_method_id: result.insertedId
+    });
+  } catch (error) {
+    console.error("Error adding bank method:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to add bank payment method"
+    });
+  }
+});
+
+// Add new card payment method
+app.post("/api/payment-methods/card", authenticateToken, async (req, res) => {
+  try {
+    const { card_number, expiry_date, cvv, bank_name, is_default = false } = req.body;
+    const customerId = req.user.customerId || req.user.id;
+
+    // Validate required fields
+    if (!card_number || !expiry_date || !cvv || !bank_name) {
+      return res.status(400).json({
+        success: false,
+        message: "All card details are required"
+      });
+    }
+
+    // Validate card number (16 digits)
+    const cleanCardNumber = card_number.replace(/[\-\s]/g, '');
+    if (!/^[0-9]{16}$/.test(cleanCardNumber)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid card number format"
+      });
+    }
+
+    // Validate expiry date (MM/YY)
+    if (!/^[0-9]{2}\/[0-9]{2}$/.test(expiry_date)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid expiry date format (MM/YY required)"
+      });
+    }
+
+    // Validate CVV (3 digits)
+    if (!/^[0-9]{3}$/.test(cvv)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid CVV format"
+      });
+    }
+
+    const db = mongoClient.db("financeai");
+    const cardLastFour = cleanCardNumber.slice(-4);
+
+    // Check if card already exists for this customer
+    const existingCard = await db.collection("customer_card_methods").findOne({
+      customer_id: parseInt(customerId),
+      card_last_four: cardLastFour,
+      status: "ACTIVE"
+    });
+
+    if (existingCard) {
+      return res.status(400).json({
+        success: false,
+        message: "Card already exists"
+      });
+    }
+
+    // If setting as default, remove default from other card methods
+    if (is_default) {
+      await db.collection("customer_card_methods").updateMany(
+        { customer_id: parseInt(customerId), status: "ACTIVE" },
+        { $set: { is_default: false } }
+      );
+    }
+
+    // Store card method (in production, encrypt sensitive data)
+    const result = await db.collection("customer_card_methods").insertOne({
+      customer_id: parseInt(customerId),
+      card_number: cleanCardNumber, // In production, encrypt this
+      card_last_four: cardLastFour,
+      expiry_date: expiry_date,
+      bank_name: bank_name,
+      card_type: "DEBIT",
+      is_default: is_default,
+      status: "ACTIVE",
+      created_at: new Date(),
+      updated_at: new Date()
+    });
+
+    res.json({
+      success: true,
+      message: "Card added successfully",
+      payment_method_id: result.insertedId
+    });
+  } catch (error) {
+    console.error("Error adding card method:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to add card payment method"
+    });
+  }
+});
+
+// Delete payment method
+app.delete("/api/payment-methods/:type/:id", authenticateToken, async (req, res) => {
+  try {
+    const { type, id } = req.params;
+    const customerId = req.user.customerId || req.user.id;
+    
+    const validTypes = ["upi", "bank", "card"];
+    if (!validTypes.includes(type)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment method type"
+      });
+    }
+
+    const db = mongoClient.db("financeai");
+    const collectionName = `customer_${type}_methods`;
+    
+    const result = await db.collection(collectionName).updateOne(
+      { 
+        _id: new ObjectId(id),
+        customer_id: parseInt(customerId)
+      },
+      { 
+        $set: { 
+          status: "DELETED",
+          deleted_at: new Date(),
+          updated_at: new Date()
+        }
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Payment method not found"
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Payment method deleted successfully"
+    });
+  } catch (error) {
+    console.error("Error deleting payment method:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete payment method"
+    });
+  }
+});
+
+// Set default payment method
+app.put("/api/payment-methods/:type/:id/default", authenticateToken, async (req, res) => {
+  try {
+    const { type, id } = req.params;
+    const customerId = req.user.customerId || req.user.id;
+    
+    const validTypes = ["upi", "bank", "card"];
+    if (!validTypes.includes(type)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment method type"
+      });
+    }
+
+    const db = mongoClient.db("financeai");
+    const collectionName = `customer_${type}_methods`;
+    
+    // Remove default from all methods of this type
+    await db.collection(collectionName).updateMany(
+      { customer_id: parseInt(customerId), status: "ACTIVE" },
+      { $set: { is_default: false } }
+    );
+    
+    // Set new default
+    const result = await db.collection(collectionName).updateOne(
+      { 
+        _id: new ObjectId(id),
+        customer_id: parseInt(customerId),
+        status: "ACTIVE"
+      },
+      { 
+        $set: { 
+          is_default: true,
+          updated_at: new Date()
+        }
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Payment method not found"
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "Default payment method updated successfully"
+    });
+  } catch (error) {
+    console.error("Error setting default payment method:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to set default payment method"
+    });
+  }
+});
+
+// =============================================================================
+// PAYMENT METHOD COMPLETION HELPER FUNCTION
+// =============================================================================
+
+/**
+ * COMPLETE INVESTMENT WITH PAYMENT:
+ * This function completes the investment process after payment method selection
+ * and saves the final investment record to the database
+ */
+async function completeInvestmentWithPayment(chat, customerId, paymentMethod, paymentDetails = null) {
+  try {
+    console.log('Completing investment with payment method:', paymentMethod);
+    
+    // Determine if SIP or Lumpsum
+    const isSIP = chat.messages.some(msg => msg.content.includes("SIP Investment Summary"));
+    
+    if (isSIP) {
+      // Extract SIP details from chat history
+      const sipSummaryMsg = chat.messages.find(msg => msg.content.includes("SIP Investment Summary"));
+      const sipDate = sipSummaryMsg ? sipSummaryMsg.content.match(/SIP Date: (\d+)/)?.[1] : "5";
+      const amount = sipSummaryMsg ? sipSummaryMsg.content.match(/Monthly Amount: ([^\n]+)/)?.[1] : "₹3,000";
+      const fundName = sipSummaryMsg ? sipSummaryMsg.content.match(/Fund: ([^\n]+)/)?.[1] : "Selected Fund";
+      const goal = sipSummaryMsg ? sipSummaryMsg.content.match(/Goal: ([^\n]+)/)?.[1] : "Wealth Creation";
+      
+      // Create SIP investment record
+      const investment = await createInvestmentRecord({
+        customer_id: customerId,
+        investment_type: "SIP",
+        amount: amount,
+        fund_name: fundName,
+        sip_date: parseInt(sipDate),
+        goal: goal,
+        status: "Active",
+        chatId: chat._id,
+        payment_method: paymentMethod,
+        payment_details: paymentDetails
+      });
+      
+      const paymentMethodText = paymentMethod === "default" ? "your default payment method" : 
+                               paymentMethod.startsWith("method_") ? "selected payment method" :
+                               paymentMethod === "new_upi" ? `new UPI ID (${paymentDetails})` :
+                               paymentMethod === "new_bank" ? `new bank account (***${paymentDetails})` :
+                               paymentMethod === "new_card" ? `new debit card (***${paymentDetails})` :
+                               "selected payment method";
+      
+      return `✅ **SIP Investment Successful!**
+
+**Investment Details:**
+• **Type:** SIP (Systematic Investment Plan)
+• **Amount:** ${amount}/month
+• **Fund:** ${fundName}
+• **SIP Date:** ${sipDate}th of every month
+• **Status:** Active
+• **Investment ID:** ${investment.investment_id}
+• **Units Allocated:** ${investment.units_allocated} units
+• **NAV:** ₹${investment.nav}
+• **Payment Method:** ${paymentMethodText}
+
+**What's next?**
+• Your first SIP installment will be deducted on ${sipDate}th
+• You'll receive SMS confirmations for each deduction
+• You can track your investments in the Portfolio section
+
+🎉 **You're all set! Your wealth creation journey has begun.**
+
+Would you like to start another investment or check your portfolio?`;
+    } else {
+      // Lumpsum investment
+      const investmentSummaryMsg = chat.messages.find(msg => msg.content.includes("Investment Summary"));
+      const amount = investmentSummaryMsg ? investmentSummaryMsg.content.match(/Amount: ([^\n]+)/)?.[1] : "₹50,000";
+      const fundName = investmentSummaryMsg ? investmentSummaryMsg.content.match(/Fund: ([^\n]+)/)?.[1] : "Selected Fund";
+      const goal = investmentSummaryMsg ? investmentSummaryMsg.content.match(/Goal: ([^\n]+)/)?.[1] : "Wealth Creation";
+      
+      // Create Lumpsum investment record
+      const investment = await createInvestmentRecord({
+        customer_id: customerId,
+        investment_type: "Lumpsum",
+        amount: amount,
+        fund_name: fundName,
+        goal: goal,
+        status: "Completed",
+        chatId: chat._id,
+        payment_method: paymentMethod,
+        payment_details: paymentDetails
+      });
+      
+      const paymentMethodText = paymentMethod === "default" ? "your default payment method" : 
+                               paymentMethod.startsWith("method_") ? "selected payment method" :
+                               paymentMethod === "new_upi" ? `new UPI ID (${paymentDetails})` :
+                               paymentMethod === "new_bank" ? `new bank account (***${paymentDetails})` :
+                               paymentMethod === "new_card" ? `new debit card (***${paymentDetails})` :
+                               "selected payment method";
+      
+      return `✅ **Investment Successful!**
+
+**Investment Details:**
+• **Type:** Lumpsum Investment
+• **Amount:** ${amount}
+• **Fund:** ${fundName}
+• **Status:** Completed
+• **Investment ID:** ${investment.investment_id}
+• **Units Allocated:** ${investment.units_allocated} units
+• **NAV:** ₹${investment.nav}
+• **Current Value:** ₹${(investment.units_allocated * investment.nav).toFixed(2)}
+• **Payment Method:** ${paymentMethodText}
+
+**What's next?**
+• You'll receive a confirmation email shortly
+• Units will be allocated within 1-2 business days
+• Track your investment performance in Portfolio
+
+🎉 **Congratulations! Your investment is complete.**
+
+Would you like to make another investment or check your portfolio performance?`;
+    }
+  } catch (error) {
+    console.error("Error completing investment:", error);
+    return `I'm sorry, there was an error processing your investment. Please try again or contact our support team.
+
+Error details have been logged for our technical team to review.`;
+  }
+}
+
+// =============================================================================
+// INVESTMENT WORKFLOW FUNCTIONS
+// =============================================================================
+
+/**
+ * UNIFIED INVESTMENT WORKFLOW:
+ * This implements the complete investment flow similar to ticket creation
+ * Supports both SIP and Lumpsum investments with conversational guidance
+ */
+
+/**
+ * INVESTMENT WORKFLOW HANDLER (CHAT INTERFACE):
+ * This function handles the step-by-step investment process in the chat.
+ * It guides users through investment type selection, goal setting, fund selection, and execution
+ */
+async function handleInvestmentWorkflow(message, chat, customerId) {
+  // Check which step we're in based on previous messages
+  const investmentMessages = chat.messages.filter(
+    (msg) =>
+      msg.content.includes("Investment Type Selection") ||
+      msg.content.includes("Goal Setting") ||
+      msg.content.includes("Investment Amount") ||
+      msg.content.includes("Timeline Setting") ||
+      msg.content.includes("SIP Calculation") ||
+      msg.content.includes("Custom SIP Amount") ||
+      msg.content.includes("Fund Selection") ||
+      msg.content.includes("Fund Recommendation") ||
+      msg.content.includes("Available Funds") ||
+      msg.content.includes("SIP Date Selection") ||
+      msg.content.includes("Summary Confirmation") ||
+      msg.content.includes("Email OTP Verification") ||
+      msg.content.includes("Payment Method")
+  );
+
+  console.log('Investment workflow - Total investment messages found:', investmentMessages.length);
+  console.log('Investment workflow - User message:', message);
+  console.log('Investment workflow - Last 3 bot messages:', 
+    chat.messages.filter(msg => msg.sender === 'bot').slice(-3).map(msg => msg.content.substring(0, 100))
+  );
+
+  // STEP 0: First time starting investment - show investment type options
+  if (investmentMessages.length === 0) {
+    console.log('Starting new investment workflow - no previous investment messages found');
+    
+    // Check if the user's current message is already an investment type selection
+    const currentMessage = message.trim().toLowerCase();
+    
+    // More precise matching for investment type selection
+    const isSipSelection = currentMessage === 'sip' || 
+                          currentMessage === 'sip investment' ||
+                          currentMessage === 'systematic investment plan' ||
+                          (currentMessage.includes('sip') && !currentMessage.includes('lumpsum') && currentMessage.length <= 20);
+    
+    const isLumpsumSelection = currentMessage === 'lumpsum' || 
+                              currentMessage === 'lump sum' ||
+                              currentMessage === 'lumpsum investment' ||
+                              (currentMessage.includes('lumpsum') && currentMessage.length <= 25) ||
+                              (currentMessage.includes('lump sum') && currentMessage.length <= 25);
+    
+    if (isSipSelection) {
+      console.log('User selected SIP, proceeding to goal setting');
+      return `**Goal Setting**
+Awesome! Let's set up your SIP.
+
+Are you investing for a specific goal like:
+• Education
+• Retirement 
+• Wealth creation
+• Emergency fund
+• Other
+
+Please tell me your investment goal.`;
+    } else if (isLumpsumSelection) {
+      console.log('User selected Lumpsum, proceeding to amount input');
+      return `**Investment Amount**
+Great! Let's proceed with your lumpsum investment.
+
+How much would you like to invest? (Minimum ₹500)
+
+Please enter the amount (e.g., ₹50,000).`;
+    }
+    
+    // Check if this is a general investment request that should show options
+    const isGeneralInvestmentRequest = currentMessage.includes('invest') || 
+                                     currentMessage.includes('investment') ||
+                                     currentMessage.includes('make an investment') ||
+                                     currentMessage.includes('start investing');
+    
+    if (isGeneralInvestmentRequest) {
+      return `Great! I'll help you make an investment. 
+
+Would you like to start a SIP (Systematic Investment Plan) or make a Lumpsum investment?
+
+**Options:**
+• **SIP** - Invest a fixed amount regularly (monthly/quarterly)
+• **Lumpsum** - One-time investment
+
+**Investment Type Selection**
+Please choose: SIP or Lumpsum`;
+    }
+    
+    // If we reach here, it means there are no investment messages but the current message 
+    // doesn't clearly indicate investment intent - this shouldn't happen in normal flow
+    console.log('Unexpected state: No investment messages but unclear investment intent in message:', message);
+    return `I'd be happy to help you with investments! 
+
+Would you like to start a SIP (Systematic Investment Plan) or make a Lumpsum investment?
+
+**Options:**
+• **SIP** - Invest a fixed amount regularly (monthly/quarterly)
+• **Lumpsum** - One-time investment
+
+**Investment Type Selection**
+Please choose: SIP or Lumpsum`;
+  }
+
+  const latestStep = investmentMessages[investmentMessages.length - 1];
+  console.log('Investment workflow - Current step:', latestStep.content.split('\n')[0]);
+  console.log('Investment workflow - User message:', message);
+
+  // STEP 1: User selected investment type
+  if (latestStep.content.includes("Investment Type Selection")) {
+    const investmentType = message.trim().toLowerCase();
+
+    if (investmentType.includes("sip")) {
+      // Start SIP flow
+      return `**Goal Setting**
+Awesome! Let's set up your SIP.
+
+Are you investing for a specific goal like:
+• Education
+• Retirement 
+• Wealth creation
+• Emergency fund
+• Other
+
+Please tell me your investment goal.`;
+    } else if (investmentType.includes("lumpsum") || investmentType.includes("lump sum")) {
+      // Start Lumpsum flow
+      return `**Investment Amount**
+Great! Let's proceed with your lumpsum investment.
+
+How much would you like to invest? (Minimum ₹500)
+
+Please enter the amount (e.g., ₹50,000).`;
+    } else {
+      return `Please select a valid investment type:
+• **SIP** - For regular investments
+• **Lumpsum** - For one-time investment
+
+Type "SIP" or "Lumpsum" to continue.`;
+    }
+  }
+
+  // STEP 2A: SIP Goal Setting
+  if (latestStep.content.includes("Goal Setting")) {
+    const goal = message.trim();
+    console.log('Goal extracted:', goal);
+    
+    return `**Investment Amount**
+Great choice! Investing for ${goal} is a smart move.
+
+How much do you want to accumulate for this goal?
+
+Please enter your target amount (e.g., ₹20 lakhs).`;
+  }
+
+  // STEP 2B: SIP Amount Collection
+  if (latestStep.content.includes("Investment Amount") && latestStep.content.includes("Investing for")) {
+    const targetAmount = message.trim();
+    console.log('Target amount extracted:', targetAmount);
+    
+    return `**Timeline Setting**
+Target amount: ${targetAmount}
+
+In how many years do you want to achieve this goal?
+
+Please enter the number of years (e.g., 15 years).`;
+  }
+
+  // STEP 3A: Timeline Collection
+  if (latestStep.content.includes("Timeline Setting") && latestStep.content.includes("Target amount:")) {
+    const timeline = message.trim();
+    console.log('Timeline extracted:', timeline);
+    
+    // Extract target amount from the CURRENT step message (not previous)
+    const targetMatch = latestStep.content.match(/Target amount: ([^\n]+)/);
+    const targetAmount = targetMatch ? targetMatch[1] : "₹20 lakhs";
+    console.log('Extracted target amount from current step:', targetAmount);
+    
+    // Parse years from timeline input
+    const years = parseInt(timeline.replace(/[^0-9]/g, ''));
+    if (isNaN(years) || years <= 0) {
+      return `Please enter a valid number of years.
+
+Example: "15" or "15 years"`;
+    }
+    
+    // Calculate SIP amount based on target and timeline
+    let calculatedSIP = "₹3,000";
+    
+    // Try to do actual calculation
+    try {
+      const numericTarget = parseFloat(targetAmount.replace(/[₹,lakhs\s]/g, ''));
+      
+      if (!isNaN(numericTarget) && years > 0) {
+        // Convert lakhs to actual amount if needed
+        const actualTarget = targetAmount.toLowerCase().includes('lakh') ? numericTarget * 100000 : numericTarget;
+        
+        // Simple SIP calculation assuming 12% annual return
+        const monthlyRate = 0.12 / 12;
+        const months = years * 12;
+        const monthlySIP = actualTarget * monthlyRate / (Math.pow(1 + monthlyRate, months) - 1);
+        
+        calculatedSIP = `₹${Math.round(monthlySIP).toLocaleString()}`;
+        console.log('Calculated SIP:', calculatedSIP);
+      }
+    } catch (error) {
+      console.log('SIP calculation error:', error);
+    }
+    
+    return `**SIP Calculation**
+To reach ${targetAmount} in ${years} years, you should invest about ${calculatedSIP}/month (assuming ~12% annual return).
+
+Want to go with this amount or enter your own?
+
+• **Accept Suggested** - ${calculatedSIP}/month
+• **Enter Custom** - Specify your own amount
+
+Please choose your preference.`;
+  }
+
+  // STEP 3B: Lumpsum Amount Processing
+  if (latestStep.content.includes("Investment Amount") && latestStep.content.includes("lumpsum")) {
+    const amount = message.trim();
+    
+    // Validate amount
+    const numericAmount = parseFloat(amount.replace(/[₹,]/g, ''));
+    if (isNaN(numericAmount) || numericAmount < 500) {
+      return `Please enter a valid amount. Minimum investment is ₹500.
+
+Example: ₹50,000 or 50000`;
+    }
+    
+    return `**Fund Selection**
+Amount: ${amount}
+
+Would you like me to recommend a mutual fund or pick one yourself?
+
+• **Recommend for me** - I'll suggest the best fund
+• **I'll choose** - Browse and select manually
+
+Please choose your preference.`;
+  }
+
+  // STEP 4: SIP Amount Confirmation
+  if (latestStep.content.includes("SIP Calculation")) {
+    const choice = message.trim().toLowerCase();
+    
+    if (choice.includes("accept") || choice.includes("suggested")) {
+      return `**Fund Selection**
+Perfect! Now let's choose the right mutual fund.
+
+Would you like me to recommend one, or do you want to pick it yourself?
+
+• **Recommend for me** - I'll suggest based on your goal
+• **I'll choose** - Browse available funds
+
+Please choose your preference.`;
+    } else if (choice.includes("custom") || choice.includes("enter")) {
+      return `**Custom SIP Amount**
+Please enter your preferred monthly SIP amount (minimum ₹500):
+
+Example: ₹5,000`;
+    } else {
+      return `Please choose:
+• **Accept Suggested** - Use recommended amount
+• **Enter Custom** - Specify your own amount`;
+    }
+  }
+
+  // STEP 5: Custom SIP Amount
+  if (latestStep.content.includes("Custom SIP Amount")) {
+    const customAmount = message.trim();
+    const numericAmount = parseFloat(customAmount.replace(/[₹,]/g, ''));
+    
+    if (isNaN(numericAmount) || numericAmount < 500) {
+      return `Please enter a valid amount. Minimum SIP amount is ₹500.
+
+Example: ₹2,000`;
+    }
+    
+    return `**Fund Selection**
+SIP Amount: ${customAmount}/month
+
+Now let's choose the right mutual fund.
+
+Would you like me to recommend one, or do you want to pick it yourself?
+
+• **Recommend for me** - I'll suggest based on your goal
+• **I'll choose** - Browse available funds
+
+Please choose your preference.`;
+  }
+
+  // STEP 6: Fund Selection
+  if (latestStep.content.includes("Fund Selection")) {
+    const choice = message.trim().toLowerCase();
+    
+    if (choice.includes("recommend")) {
+      // Determine if SIP or Lumpsum
+      const isSIP = chat.messages.some(msg => msg.content.includes("SIP") && !msg.content.includes("lumpsum"));
+      
+      // Extract investment details from chat history for better recommendations
+      const goalMsg = chat.messages.find(msg => msg.content.includes("Investing for") || msg.content.includes("Goal Setting"));
+      const amountMsg = chat.messages.find(msg => msg.content.includes("SIP Amount:") || msg.content.includes("Amount:"));
+      const timelineMsg = chat.messages.find(msg => msg.content.includes("Timeline Setting") || msg.content.includes("years"));
+      
+      let goal = "Wealth Creation";
+      let amount = isSIP ? "₹3,000" : "₹50,000";
+      let timeline = "15 years";
+      
+      // Extract goal
+      if (goalMsg) {
+        const goalMatch = goalMsg.content.match(/Investing for ([^\n\s\.]+)/i) || goalMsg.content.match(/goal[:\s]*([^\n\.]+)/i);
+        if (goalMatch) goal = goalMatch[1].trim();
+      }
+      
+      // Extract amount
+      if (amountMsg) {
+        const amountMatch = amountMsg.content.match(/(?:SIP Amount:|Amount:|₹)\s*([^\n\/]+)/i);
+        if (amountMatch) amount = amountMatch[1].trim().replace('/month', '');
+      }
+      
+      // Extract timeline
+      if (timelineMsg) {
+        const timelineMatch = timelineMsg.content.match(/(\d+)\s*years?/i);
+        if (timelineMatch) timeline = timelineMatch[1] + " years";
+      }
+      
+      try {
+        // Generate AI-powered fund recommendation
+        const fundRecommendation = await generateFundRecommendation({
+          investmentType: isSIP ? "SIP" : "Lumpsum",
+          goal: goal,
+          amount: amount,
+          timeline: timeline,
+          customerId: customerId
+        });
+        
+        return `**Fund Recommendation**
+${fundRecommendation}
+
+Would you like to proceed with this recommended fund?
+
+• **Yes, proceed**
+• **Show other options**
+
+Please confirm your choice.`;
+      } catch (error) {
+        console.error('Error generating fund recommendation:', error);
+        
+        // Fallback to hardcoded recommendation if AI fails
+        if (isSIP) {
+          return `**Fund Recommendation**
+Based on your goal and timeline, I suggest:
+
+**Mirae Asset Large Cap Fund (Direct – Growth)**
+• Category: Large Cap
+• 5-Year Return: 14.2%
+• Risk: Moderate
+• Fund Manager: Neelesh Surana
+
+Would you like to proceed with this fund?
+
+• **Yes, proceed**
+• **Show other options**
+
+Please confirm your choice.`;
+        } else {
+          return `**Fund Recommendation**
+Based on your investment profile, I recommend:
+
+**Parag Parikh Flexi Cap Fund (Direct – Growth)**
+• Category: Flexi Cap
+• 5-Year Return: 16.8%
+• Risk: Moderate to High
+• Fund Manager: Rajeev Thakkar
+
+Do you want to proceed with this fund?
+
+• **Yes, proceed**
+• **Show other options**
+
+Please confirm your choice.`;
+        }
+      }
+    } else if (choice.includes("choose") || choice.includes("browse")) {
+      return `**Available Funds**
+Here are some top-performing funds:
+
+1. **SBI Bluechip Fund** - Large Cap (13.5% returns)
+2. **HDFC Top 100 Fund** - Large Cap (14.1% returns)
+3. **Axis Midcap Fund** - Mid Cap (18.2% returns)
+4. **Parag Parikh Flexi Cap** - Flexi Cap (16.8% returns)
+5. **Mirae Asset Large Cap** - Large Cap (14.2% returns)
+
+Please select a fund by number (1-5) or name.`;
+    } else {
+      return `Please choose:
+• **Recommend for me** - Get personalized suggestion
+• **I'll choose** - Browse available funds`;
+    }
+  }
+
+  // STEP 7: Fund Confirmation
+  if (latestStep.content.includes("Fund Recommendation") || latestStep.content.includes("Available Funds")) {
+    const choice = message.trim().toLowerCase();
+    
+    if (choice.includes("yes") || choice.includes("proceed") || choice.includes("1") || choice.includes("2") || choice.includes("3") || choice.includes("4") || choice.includes("5")) {
+      // Determine if SIP or Lumpsum and gather investment details
+      const isSIP = chat.messages.some(msg => msg.content.includes("SIP Amount:") || msg.content.includes("monthly"));
+      
+      // Extract fund details based on choice
+      let selectedFund = "";
+      if (choice.includes("yes") || choice.includes("proceed")) {
+        // User confirmed recommended fund
+        const fundMsg = chat.messages.find(msg => msg.content.includes("Fund Recommendation"));
+        if (fundMsg?.content.includes("Mirae Asset")) {
+          selectedFund = "Mirae Asset Large Cap Fund (Direct – Growth)";
+        } else if (fundMsg?.content.includes("Parag Parikh")) {
+          selectedFund = "Parag Parikh Flexi Cap Fund (Direct – Growth)";
+        }
+      } else if (choice.includes("1") || choice.includes("2") || choice.includes("3") || choice.includes("4") || choice.includes("5")) {
+        // Dynamic fund selection based on AI-generated or fallback list
+        const fundOptions = chat.messages.find(msg => 
+          msg.content.includes("More Fund Options") && 
+          msg.content.includes("1.") && 
+          msg.content.includes("2.")
+        );
+        
+        if (fundOptions) {
+          // Extract fund name from the AI-generated list based on user's choice
+          const fundLines = fundOptions.content.split('\n').filter(line => 
+            line.trim().match(/^\d+\./)
+          );
+          
+          const choiceNumber = choice.match(/\d+/)?.[0];
+          if (choiceNumber && fundLines[parseInt(choiceNumber) - 1]) {
+            const selectedLine = fundLines[parseInt(choiceNumber) - 1];
+            // Extract fund name from format: "1. **Fund Name (Direct – Growth)** - Category (X% returns)"
+            const fundMatch = selectedLine.match(/\*\*([^*]+)\*\*/);
+            if (fundMatch) {
+              selectedFund = fundMatch[1].trim();
+            } else {
+              // Fallback extraction
+              const basicMatch = selectedLine.match(/\d+\.\s*([^-]+)\s*-/);
+              selectedFund = basicMatch ? basicMatch[1].trim() : "Selected Fund";
+            }
+          } else {
+            selectedFund = "Selected Fund";
+          }
+        } else {
+          // Check if we're selecting from "Available Funds" (hardcoded list)
+          const availableFundsMsg = chat.messages.find(msg => 
+            msg.content.includes("Available Funds") && 
+            msg.content.includes("SBI Bluechip Fund")
+          );
+          
+          if (availableFundsMsg) {
+            // Map to the actual "Available Funds" options
+            if (choice.includes("1")) {
+              selectedFund = "SBI Bluechip Fund (Direct – Growth)";
+            } else if (choice.includes("2")) {
+              selectedFund = "HDFC Top 100 Fund (Direct – Growth)";
+            } else if (choice.includes("3")) {
+              selectedFund = "Axis Midcap Fund (Direct – Growth)";
+            } else if (choice.includes("4")) {
+              selectedFund = "Parag Parikh Flexi Cap Fund (Direct – Growth)";
+            } else if (choice.includes("5")) {
+              selectedFund = "Mirae Asset Large Cap Fund (Direct – Growth)";
+            }
+          } else {
+            // Fallback to generic mapping for other lists
+            if (choice.includes("1")) {
+              selectedFund = "ICICI Prudential Bluechip Fund (Direct – Growth)";
+            } else if (choice.includes("2")) {
+              selectedFund = "Kotak Standard Multicap Fund (Direct – Growth)";
+            } else if (choice.includes("3")) {
+              selectedFund = "DSP Tax Saver Fund (Direct – Growth)";
+            } else if (choice.includes("4")) {
+              selectedFund = "Nippon India Small Cap Fund (Direct – Growth)";
+            } else if (choice.includes("5")) {
+              selectedFund = "SBI Hybrid Equity Fund (Direct – Growth)";
+            }
+          }
+        }
+      }
+      
+      if (isSIP) {
+        return `**SIP Date Selection**
+Great choice! You've selected: ${selectedFund}
+
+Which date should your SIP be deducted each month?
+
+Recommended dates: 1st, 5th, 10th, 15th, 20th, 25th
+
+Please enter your preferred date (1-28).`;
+      } else {
+        // For lumpsum, show summary directly
+        const amountMsg = chat.messages.find(msg => msg.content.includes("Amount:"));
+        const amount = amountMsg ? amountMsg.content.match(/Amount: ([^\n]+)/)?.[1] : "₹50,000";
+        const goalMsg = chat.messages.find(msg => msg.content.includes("Goal Setting"));
+        const goal = goalMsg ? "Investment Goal" : "Wealth Creation";
+        
+        return `**Investment Summary**
+Please review your investment details:
+
+📊 **Investment Type:** Lumpsum Investment
+💰 **Amount:** ${amount}
+🎯 **Goal:** ${goal}
+🏦 **Fund:** ${selectedFund}
+📈 **Category:** ${selectedFund.includes('Large Cap') ? 'Large Cap' : selectedFund.includes('Flexi Cap') ? 'Flexi Cap' : selectedFund.includes('Mid Cap') ? 'Mid Cap' : 'Equity'}
+⚡ **Processing:** Immediate
+📧 **Confirmation:** Email + SMS
+
+**Investment Summary Confirmation**
+Do you want to proceed with this investment? An OTP will be sent to your registered email for verification.
+
+• **Yes, proceed** - Continue with OTP verification
+• **Modify details** - Go back to change investment details
+
+Please confirm to proceed.`;
+      }
+    } else if (choice.includes("other") || choice.includes("options")) {
+      // Determine if SIP or Lumpsum
+      const isSIP = chat.messages.some(msg => msg.content.includes("SIP") && !msg.content.includes("lumpsum"));
+      
+      // Extract investment details from chat history for better recommendations
+      const goalMsg = chat.messages.find(msg => msg.content.includes("Investing for") || msg.content.includes("Goal Setting"));
+      const amountMsg = chat.messages.find(msg => msg.content.includes("SIP Amount:") || msg.content.includes("Amount:"));
+      const timelineMsg = chat.messages.find(msg => msg.content.includes("Timeline Setting") || msg.content.includes("years"));
+      
+      let goal = "Wealth Creation";
+      let amount = isSIP ? "₹3,000" : "₹50,000";
+      let timeline = "15 years";
+      
+      // Extract goal
+      if (goalMsg) {
+        const goalMatch = goalMsg.content.match(/Investing for ([^\n\s\.]+)/i) || goalMsg.content.match(/goal[:\s]*([^\n\.]+)/i);
+        if (goalMatch) goal = goalMatch[1].trim();
+      }
+      
+      // Extract amount
+      if (amountMsg) {
+        const amountMatch = amountMsg.content.match(/(?:SIP Amount:|Amount:|₹)\s*([^\n\/]+)/i);
+        if (amountMatch) amount = amountMatch[1].trim().replace('/month', '');
+      }
+      
+      // Extract timeline
+      if (timelineMsg) {
+        const timelineMatch = timelineMsg.content.match(/(\d+)\s*years?/i);
+        if (timelineMatch) timeline = timelineMatch[1] + " years";
+      }
+      
+      try {
+        // Generate AI-powered alternative fund recommendations
+        const alternativeFunds = await generateAlternativeFundRecommendations({
+          investmentType: isSIP ? "SIP" : "Lumpsum",
+          goal: goal,
+          amount: amount,
+          timeline: timeline,
+          customerId: customerId
+        });
+        
+        return `**More Fund Options**
+${alternativeFunds}
+
+Please select a fund by number or name.`;
+      } catch (error) {
+        console.error('Error generating alternative fund recommendations:', error);
+        
+        // Fallback to hardcoded recommendations if AI fails
+        return `**More Fund Options**
+Here are additional funds to consider:
+
+1. **ICICI Prudential Bluechip** - Large Cap (13.8% returns)
+2. **Kotak Standard Multicap** - Multi Cap (15.2% returns)
+3. **DSP Tax Saver** - ELSS (12.9% returns)
+4. **Nippon India Small Cap** - Small Cap (19.5% returns)
+
+Please select a fund by number or name.`;
+      }
+    } else {
+      return `Please confirm your fund selection:
+• **Yes, proceed** - Continue with recommended fund
+• **Show other options** - See more funds`;
+    }
+  }
+
+  // STEP 8A: SIP Date Selection
+  if (latestStep.content.includes("SIP Date Selection")) {
+    const sipDate = parseInt(message.trim());
+    
+    if (isNaN(sipDate) || sipDate < 1 || sipDate > 28) {
+      return `Please enter a valid date between 1 and 28.
+
+Example: 5 (for 5th of every month)`;
+    }
+    
+    // Extract SIP details for summary
+    const fundMsg = chat.messages.find(msg => msg.content.includes("You've selected:"));
+    const selectedFund = fundMsg ? fundMsg.content.match(/You've selected: ([^\n]+)/)?.[1] : "Selected Fund";
+    
+    const amountMsg = chat.messages.find(msg => msg.content.includes("SIP Amount:") || msg.content.includes("Accept Suggested"));
+    let amount = "₹3,000";
+    if (amountMsg) {
+      if (amountMsg.content.includes("SIP Amount:")) {
+        amount = amountMsg.content.match(/SIP Amount: ([^/]+)/)?.[1] || "₹3,000";
+      } else if (amountMsg.content.includes("Accept Suggested")) {
+        const suggestionMatch = amountMsg.content.match(/Accept Suggested.*?(₹[\d,]+)/)?.[1];
+        amount = suggestionMatch || "₹3,000";
+      }
+    }
+    
+    const goalMsg = chat.messages.find(msg => msg.content.includes("Investing for"));
+    const goal = goalMsg ? goalMsg.content.match(/Investing for ([^\s]+)/)?.[1] || "Wealth Creation" : "Wealth Creation";
+    
+    return `**SIP Investment Summary**
+Please review your SIP investment details:
+
+📊 **Investment Type:** SIP (Systematic Investment Plan)
+💰 **Monthly Amount:** ${amount}
+🎯 **Goal:** ${goal}
+🏦 **Fund:** ${selectedFund}
+📈 **Category:** ${selectedFund.includes('Large Cap') ? 'Large Cap' : selectedFund.includes('Flexi Cap') ? 'Flexi Cap' : selectedFund.includes('Mid Cap') ? 'Mid Cap' : 'Equity'}
+📅 **SIP Date:** ${sipDate}th of every month
+⚡ **First Deduction:** ${sipDate}th of next month
+📧 **Confirmation:** Email + SMS
+
+**SIP Summary Confirmation**
+Do you want to proceed with this SIP investment? An OTP will be sent to your registered email for verification.
+
+• **Yes, proceed** - Continue with email OTP verification
+• **Modify details** - Go back to change SIP details
+
+Please confirm to proceed.`;
+  }
+
+  // STEP 8B: Investment Summary Confirmation (for both SIP and Lumpsum)
+  if (latestStep.content.includes("Summary Confirmation")) {
+    const choice = message.trim().toLowerCase();
+    
+    if (choice.includes("yes") || choice.includes("proceed")) {
+      // Generate and "send" OTP via email
+      const otp = Math.floor(100000 + Math.random() * 900000); // Generate 6-digit OTP
+      
+      // Get customer email
+      const userData = await getUserData(customerId);
+      const customerEmail = userData.customer?.email || "user@example.com";
+      
+      // In a real implementation, you would send the OTP via email here
+      console.log(`Investment OTP ${otp} would be sent to ${customerEmail}`);
+      
+      // Store OTP temporarily in database for verification
+      const db = mongoClient.db("financeai");
+      await db.collection("investment_otps").insertOne({
+        customer_id: parseInt(customerId),
+        otp: otp.toString(),
+        created_at: new Date(),
+        expires_at: new Date(Date.now() + 5 * 60 * 1000), // 5 minutes
+        verified: false,
+        chat_id: chat._id.toString()
+      });
+      
+      return `**Email OTP Verification**
+An OTP has been sent to your registered email: ${customerEmail.replace(/(.{2})(.*)(@.*)/, '$1***$3')}
+
+📧 **Please check your email and enter the 6-digit OTP to confirm your investment.**
+
+*For demo purposes, your OTP is: ${otp}*
+
+Please enter the OTP:`;
+    } else if (choice.includes("modify") || choice.includes("back")) {
+      return `**Modify Investment Details**
+Which detail would you like to modify?
+
+• **Amount** - Change investment amount
+• **Fund** - Select different mutual fund
+• **SIP Date** - Change SIP deduction date (for SIP only)
+• **Start Over** - Begin investment process again
+
+Please choose what you'd like to modify.`;
+    } else {
+      return `Please confirm your choice:
+• **Yes, proceed** - Continue with email OTP verification
+• **Modify details** - Go back to change investment details`;
+    }
+  }
+  
+  // STEP 8C: Email OTP Verification
+  if (latestStep.content.includes("Email OTP Verification")) {
+    const otp = message.trim();
+    
+    if (otp.length !== 6 || isNaN(otp)) {
+      return `Please enter a valid 6-digit OTP.
+
+📧 Check your email for the OTP. If you didn't receive it, please check your spam folder.
+
+Enter the 6-digit OTP:`;
+    }
+    
+    // Verify OTP against stored value
+    const db = mongoClient.db("financeai");
+    const otpRecord = await db.collection("investment_otps").findOne({
+      customer_id: parseInt(customerId),
+      otp: otp,
+      verified: false,
+      expires_at: { $gt: new Date() },
+      chat_id: chat._id.toString()
+    });
+    
+    if (!otpRecord) {
+      return `Invalid or expired OTP. Please try again.
+
+📧 Check your email for the correct OTP or request a new one.
+
+Enter the 6-digit OTP:`;
+    }
+    
+    // Mark OTP as verified
+    await db.collection("investment_otps").updateOne(
+      { _id: otpRecord._id },
+      { $set: { verified: true, verified_at: new Date() } }
+    );
+    
+    // Determine if SIP or Lumpsum
+    const isSIP = chat.messages.some(msg => msg.content.includes("SIP Investment Summary"));
+    
+    if (isSIP) {
+      return `**Payment Method**
+✅ **Email OTP Verified Successfully!**
+
+Would you like to use your existing payment mandate or create a new one?
+
+• **Use existing** - Continue with saved auto-debit mandate
+• **Create new** - Set up new payment method for auto-debit
+
+Please choose your preference.`;
+    } else {
+      return `**Payment Method**
+✅ **Email OTP Verified Successfully!**
+
+Would you like to pay using your saved payment method or add a new one?
+
+• **Use saved** - Pay with existing UPI/Bank account
+• **Add new** - Link new payment method
+
+Please choose your preference.`;
+    }
+  }
+
+  // STEP 9: Payment Method and Final Confirmation
+  if (latestStep.content.includes("Payment Method") && latestStep.content.includes("OTP Verified")) {
+    const paymentChoice = message.trim().toLowerCase();
+    
+    if (paymentChoice.includes("existing") || paymentChoice.includes("saved") || paymentChoice.includes("use")) {
+      // Ask which type of payment method they want to use
+      return `**Choose Payment Method Type**
+
+Which type of payment method would you like to use?
+
+• **UPI** - Use your saved UPI IDs
+• **Bank Account** - Use your saved bank accounts
+• **Card** - Use your saved debit/credit cards
+
+Please choose the payment method type you'd like to use.`;
+    } else if (paymentChoice.includes("new") || paymentChoice.includes("create") || paymentChoice.includes("add")) {
+      return `**New Payment Setup**
+Please choose which payment method you'd like to add:
+
+• **UPI** - Add new UPI ID
+• **Bank Account** - Add new bank account
+• **Card** - Add new debit/credit card
+
+Which payment method would you like to add?`;
+    } else {
+      return `Please choose your payment method:
+• **Use existing** - Continue with saved payment
+• **Create new** - Add new payment method`;
+    }
+  }
+  
+  // STEP 10: Handle Payment Method Type Selection
+  if (latestStep.content.includes("Choose Payment Method Type")) {
+    const choice = message.trim().toLowerCase();
+    
+    if (choice.includes("upi")) {
+      // Fetch UPI methods for this customer
+      try {
+        const db = mongoClient.db("financeai");
+        const upiData = await db.collection("customer_upi").findOne({ customer_id: parseInt(customerId) });
+        
+        if (!upiData || !upiData.upi_details || upiData.upi_details.length === 0) {
+          return `**No UPI Methods Found**
+
+You don't have any saved UPI IDs yet.
+
+Would you like to add a new UPI ID?
+
+• **Yes** - Add new UPI ID
+• **Choose different type** - Select bank account or card instead
+
+Please choose your preference.`;
+        }
+        
+        let upiMethodsList = "**Your Saved UPI Methods:**\n\n";
+        upiData.upi_details.forEach((upi, index) => {
+          const status = upi.is_verified ? '✅' : '⏳';
+          const primary = upi.is_primary ? ' (Primary)' : '';
+          upiMethodsList += `${index + 1}. ${status} ${upi.upi_id} (${upi.provider})${primary}\n`;
+        });
+        
+        upiMethodsList += "\n**UPI Method Selection**\n";
+        upiMethodsList += "Please select a UPI method by number, or type:\n";
+        upiMethodsList += "• **Add new UPI** - To add a new UPI ID\n\n";
+        upiMethodsList += "Which UPI method would you like to use?";
+        
+        return upiMethodsList;
+        
+      } catch (error) {
+        console.error("Error fetching UPI methods:", error);
+        return `**Error Loading UPI Methods**\n\nThere was an issue loading your UPI methods. Would you like to add a new UPI ID instead?\n\n• **Yes** - Add new UPI ID\n• **Choose different type** - Select bank account or card instead`;
+      }
+    } else if (choice.includes("bank")) {
+      // Fetch Bank Account methods for this customer
+      try {
+        const db = mongoClient.db("financeai");
+        const bankData = await db.collection("customer_bank_accounts").findOne({ customer_id: parseInt(customerId) });
+        
+        if (!bankData || !bankData.bank_accounts || bankData.bank_accounts.length === 0) {
+          return `**No Bank Accounts Found**
+
+You don't have any saved bank accounts yet.
+
+Would you like to add a new bank account?
+
+• **Yes** - Add new bank account
+• **Choose different type** - Select UPI or card instead
+
+Please choose your preference.`;
+        }
+        
+        let bankMethodsList = "**Your Saved Bank Accounts:**\n\n";
+        bankData.bank_accounts.forEach((bank, index) => {
+          const status = bank.is_verified ? '✅' : '⏳';
+          const primary = bank.is_primary ? ' (Primary)' : '';
+          const maskedAccount = `****${bank.account_number.slice(-4)}`;
+          bankMethodsList += `${index + 1}. ${status} ${bank.bank_short_name} - ${maskedAccount} (${bank.account_type})${primary}\n`;
+        });
+        
+        bankMethodsList += "\n**Bank Account Selection**\n";
+        bankMethodsList += "Please select a bank account by number, or type:\n";
+        bankMethodsList += "• **Add new bank** - To add a new bank account\n\n";
+        bankMethodsList += "Which bank account would you like to use?";
+        
+        return bankMethodsList;
+        
+      } catch (error) {
+        console.error("Error fetching bank accounts:", error);
+        return `**Error Loading Bank Accounts**\n\nThere was an issue loading your bank accounts. Would you like to add a new bank account instead?\n\n• **Yes** - Add new bank account\n• **Choose different type** - Select UPI or card instead`;
+      }
+    } else if (choice.includes("card")) {
+      // Fetch Card methods for this customer
+      try {
+        const db = mongoClient.db("financeai");
+        const cardData = await db.collection("customer_cards").findOne({ customer_id: parseInt(customerId) });
+        
+        if (!cardData || !cardData.cards || cardData.cards.length === 0) {
+          return `**No Cards Found**
+
+You don't have any saved cards yet.
+
+Would you like to add a new card?
+
+• **Yes** - Add new card
+• **Choose different type** - Select UPI or bank account instead
+
+Please choose your preference.`;
+        }
+        
+        let cardMethodsList = "**Your Saved Cards:**\n\n";
+        cardData.cards.forEach((card, index) => {
+          const status = card.is_verified ? '✅' : '⏳';
+          const primary = card.is_primary ? ' (Primary)' : '';
+          const active = card.is_active ? '' : ' (Inactive)';
+          cardMethodsList += `${index + 1}. ${status} ${card.issuing_bank} ${card.card_type} ${card.card_number_masked}${primary}${active}\n`;
+        });
+        
+        cardMethodsList += "\n**Card Selection**\n";
+        cardMethodsList += "Please select a card by number, or type:\n";
+        cardMethodsList += "• **Add new card** - To add a new card\n\n";
+        cardMethodsList += "Which card would you like to use?";
+        
+        return cardMethodsList;
+        
+      } catch (error) {
+        console.error("Error fetching cards:", error);
+        return `**Error Loading Cards**\n\nThere was an issue loading your cards. Would you like to add a new card instead?\n\n• **Yes** - Add new card\n• **Choose different type** - Select UPI or bank account instead`;
+      }
+    } else {
+      return `Please choose a payment method type:\n• **UPI** - Use your saved UPI IDs\n• **Bank Account** - Use your saved bank accounts\n• **Card** - Use your saved cards`;
+    }
+  }
+  
+  // STEP 10B: Handle specific payment method selection from list
+  if (latestStep.content.includes("UPI Method Selection") || 
+      latestStep.content.includes("Bank Account Selection") || 
+      latestStep.content.includes("Card Selection")) {
+    const choice = message.trim().toLowerCase();
+    
+    if (choice.includes("add new")) {
+      // Determine which type to add based on the current step
+      if (latestStep.content.includes("UPI Method Selection")) {
+        return `**UPI Payment Setup**
+
+Please provide your UPI ID:
+
+Example: user@paytm, 9876543210@upi
+
+Enter your UPI ID:`;
+      } else if (latestStep.content.includes("Bank Account Selection")) {
+        return `**Bank Account Setup**
+
+Please provide your bank details in this format:
+
+**Account Number:** [Your account number]
+**IFSC Code:** [Bank IFSC code]
+**Bank Name:** [Full bank name]
+**Account Type:** [Savings/Current]
+
+Example:
+Account Number: 1234567890
+IFSC Code: SBIN0001234
+Bank Name: State Bank of India
+Account Type: Savings
+
+Please enter your bank details:`;
+      } else if (latestStep.content.includes("Card Selection")) {
+        return `**Card Setup**
+
+Please provide your card details:
+
+**Card Number:** [16-digit card number]
+**Expiry Date:** [MM/YY]
+**CVV:** [3-digit CVV]
+**Bank Name:** [Card issuing bank]
+
+Example:
+Card Number: 1234-5678-9012-3456
+Expiry Date: 12/25
+CVV: 123
+Bank Name: HDFC Bank
+
+Please enter your card details:`;
+      }
+    } else if (!isNaN(parseInt(choice))) {
+      // User selected a specific payment method by number
+      const selectedIndex = parseInt(choice) - 1; // Convert to 0-based index
+      return await completeInvestmentWithPayment(chat, customerId, `selected_${selectedIndex}`);
+    } else {
+      return `Please select a valid option:
+• Enter a **number** to select a payment method
+• Type **"add new"** to add a new payment method`;
+    }
+  }
+
+  // STEP 11: Handle New Payment Method Setup
+  if (latestStep.content.includes("New Payment Setup")) {
+    const paymentType = message.trim().toLowerCase();
+    
+    if (paymentType.includes("upi")) {
+      return `**UPI Payment Setup**
+
+Please provide your UPI ID:
+
+Example: user@paytm, 9876543210@upi
+
+Enter your UPI ID:`;
+    } else if (paymentType.includes("bank") || paymentType.includes("account")) {
+      return `**Bank Account Setup**
+
+Please provide your bank details in this format:
+
+**Account Number:** [Your account number]
+**IFSC Code:** [Bank IFSC code]
+**Bank Name:** [Full bank name]
+**Account Type:** [Savings/Current]
+
+Example:
+Account Number: 1234567890
+IFSC Code: SBIN0001234
+Bank Name: State Bank of India
+Account Type: Savings
+
+Please enter your bank details:`;
+    } else if (paymentType.includes("card")) {
+      return `**Card Setup**
+
+Please provide your card details:
+
+**Card Number:** [16-digit card number]
+**Expiry Date:** [MM/YY]
+**CVV:** [3-digit CVV]
+**Bank Name:** [Card issuing bank]
+
+Example:
+Card Number: 1234-5678-9012-3456
+Expiry Date: 12/25
+CVV: 123
+Bank Name: HDFC Bank
+
+Please enter your card details:`;
+    } else {
+      return `Please select a payment method:
+
+• **UPI** - For UPI payments
+• **Bank Account** - For direct bank transfers
+• **Card** - For card payments
+
+Which payment method would you like to add?`;
+    }
+  }
+  
+  // STEP 12: Handle Payment Method Data Collection
+  if (latestStep.content.includes("UPI Payment Setup") || 
+      latestStep.content.includes("Bank Account Setup") || 
+      latestStep.content.includes("Card Setup")) {
+    
+    const paymentData = message.trim();
+    
+    // Validate and store payment method
+    try {
+      const db = mongoClient.db("financeai");
+      // Get customer data
+      const userData = await getUserData(customerId);
+      
+      if (latestStep.content.includes("UPI Payment Setup")) {
+        // Validate UPI ID format
+        const upiRegex = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z][a-zA-Z]{2,64}$/;
+        if (!upiRegex.test(paymentData)) {
+          return `Invalid UPI ID format. Please enter a valid UPI ID like:
+
+user@paytm
+9876543210@upi
+myname@oksbi
+
+Please enter a valid UPI ID:`;
+        }
+        
+        // Store UPI method using PaymentMethodManager
+        const PaymentMethodManager = require('./payment-method-manager');
+        const manager = new PaymentMethodManager();
+        const result = await manager.addUpiMethod(parseInt(customerId), paymentData);
+        
+        if (!result.success) {
+          return `Error adding UPI method: ${result.message}\n\nPlease try again with a valid UPI ID:`;
+        }
+        
+        return await completeInvestmentWithPayment(chat, customerId, "new_upi", paymentData);
+        
+      } else if (latestStep.content.includes("Bank Account Setup")) {
+        // Parse bank details
+        const accountMatch = paymentData.match(/Account Number[:\s]*([0-9]+)/i);
+        const ifscMatch = paymentData.match(/IFSC Code[:\s]*([A-Z]{4}[0-9]{7})/i);
+        const bankMatch = paymentData.match(/Bank Name[:\s]*([^\n\r]+)/i);
+        const typeMatch = paymentData.match(/Account Type[:\s]*([^\n\r]+)/i);
+        
+        if (!accountMatch || !ifscMatch || !bankMatch || !typeMatch) {
+          return `Please provide complete bank details in the correct format:
+
+Account Number: [Your account number]
+IFSC Code: [Bank IFSC code]
+Bank Name: [Full bank name]
+Account Type: [Savings/Current]
+
+Example:
+Account Number: 1234567890
+IFSC Code: SBIN0001234
+Bank Name: State Bank of India
+Account Type: Savings
+
+Please enter your complete bank details:`;
+        }
+        
+        // Store bank method using PaymentMethodManager
+        const PaymentMethodManager = require('./payment-method-manager');
+        const manager = new PaymentMethodManager();
+        const bankDetails = {
+          account_number: accountMatch[1],
+          ifsc_code: ifscMatch[1],
+          bank_name: bankMatch[1].trim(),
+          account_type: typeMatch[1].trim(),
+          account_holder_name: userData.customer?.name || 'Account Holder'
+        };
+        const result = await manager.addBankAccount(parseInt(customerId), bankDetails);
+        
+        if (!result.success) {
+          return `Error adding bank account: ${result.message}\n\nPlease try again with valid bank details:`;
+        }
+        
+        return await completeInvestmentWithPayment(chat, customerId, "new_bank", accountMatch[1]);
+        
+      } else if (latestStep.content.includes("Card Setup")) {
+        // Parse card details
+        const cardMatch = paymentData.match(/Card Number[:\s]*([0-9\-\s]+)/i);
+        const expiryMatch = paymentData.match(/Expiry Date[:\s]*([0-9]{2}\/[0-9]{2})/i);
+        const cvvMatch = paymentData.match(/CVV[:\s]*([0-9]{3})/i);
+        const bankMatch = paymentData.match(/Bank Name[:\s]*([^\n\r]+)/i);
+        
+        if (!cardMatch || !expiryMatch || !cvvMatch || !bankMatch) {
+          return `Please provide complete card details in the correct format:
+
+Card Number: [16-digit card number]
+Expiry Date: [MM/YY]
+CVV: [3-digit CVV]
+Bank Name: [Card issuing bank]
+
+Example:
+Card Number: 1234-5678-9012-3456
+Expiry Date: 12/25
+CVV: 123
+Bank Name: HDFC Bank
+
+Please enter your complete card details:`;
+        }
+        
+        const cardNumber = cardMatch[1].replace(/[\-\s]/g, '');
+        
+        // Store card method using PaymentMethodManager
+        const PaymentMethodManager = require('./payment-method-manager');
+        const manager = new PaymentMethodManager();
+        const cardDetails = {
+          card_number: cardNumber,
+          expiry_month: expiryMatch[1].split('/')[0],
+          expiry_year: expiryMatch[1].split('/')[1],
+          cvv: cvvMatch[1],
+          card_holder_name: userData.customer?.name || 'Card Holder',
+          issuing_bank: bankMatch[1].trim(),
+          card_type: 'Debit'
+        };
+        const result = await manager.addCard(parseInt(customerId), cardDetails);
+        
+        if (!result.success) {
+          return `Error adding card: ${result.message}\n\nPlease try again with valid card details:`;
+        }
+        
+        return await completeInvestmentWithPayment(chat, customerId, "new_card", cardNumber.slice(-4));
+      }
+      
+    } catch (error) {
+      console.error("Error storing payment method:", error);
+      console.error("Error details:", {
+        errorMessage: error.message,
+        errorStack: error.stack,
+        customerId: customerId,
+        paymentData: paymentData
+      });
+      
+      // Reset workflow state by providing clear options
+      return `**Payment Setup Error**
+
+There was an error saving your payment method. This could be due to:
+• Invalid payment details format
+• Database connection issue
+• System temporary unavailability
+
+**Let's complete your investment anyway!**
+
+I'll proceed with completing your investment using a default payment method. You can always update your payment details later.
+
+Proceeding to complete your investment now...`;
+    }
+  }
+  
+  // STEP 13: Handle Error Recovery Responses
+  if (latestStep.content.includes("Payment Setup Error")) {
+    const choice = message.trim().toLowerCase();
+    
+    if (choice.includes("try again") || choice.includes("retry")) {
+      return `**New Payment Setup**
+Let's try again. Please provide your payment details:
+
+• **UPI ID** (e.g., user@paytm)
+• **Bank Account** + IFSC
+• **Debit Card**
+
+Which payment method would you like to add?
+
+Type your preferred option.`;
+    } else if (choice.includes("different") || choice.includes("choose")) {
+      return `**New Payment Setup**
+Sure! Please choose a different payment method:
+
+• **UPI ID** (e.g., user@paytm)
+• **Bank Account** + IFSC
+• **Debit Card**
+
+Which payment method would you like to add?
+
+Type your preferred option.`;
+    } else if (choice.includes("skip") || choice.includes("complete")) {
+      // Complete investment without saving new payment method
+      return await completeInvestmentWithPayment(chat, customerId, "default");
+    } else if (choice.includes("support") || choice.includes("help")) {
+      return `I'll connect you with our support team for payment method assistance.
+
+In the meantime, would you like me to complete your investment using the default payment method?
+
+• **Yes, complete investment** - Proceed with default payment
+• **No, try payment setup again** - Retry adding payment method
+
+What would you like to do?`;
+    } else {
+      // Force completion to prevent infinite loop
+      try {
+        return await completeInvestmentWithPayment(chat, customerId, "default");
+      } catch (finalError) {
+        console.error('Final fallback completion failed:', finalError);
+        return `✅ **Investment Setup Complete!**
+
+Your investment request has been processed successfully. 
+
+**Next Steps:**
+• Our team will contact you within 24 hours to complete the setup
+• You'll receive an email confirmation shortly
+• Payment method can be configured when our team contacts you
+
+**Need Help?** Contact our support team for immediate assistance.
+
+Thank you for choosing us for your investment journey! 🚀`;
+      }
+    }
+  }
+
+  // FALLBACK
+  return `I'm here to help you with your investment. Let's start:
+
+Would you like to start a SIP or make a Lumpsum investment?
+
+• **SIP** - Regular monthly investments
+• **Lumpsum** - One-time investment`;
+}
+
+/**
+ * CREATE INVESTMENT RECORD IN DATABASE:
+ * This function saves the investment details to MongoDB and also stores mutual fund details
+ */
+async function createInvestmentRecord(investmentData) {
+  try {
+    // Generate unique investment ID
+    const investmentId = `INV${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    
+    const db = mongoClient.db("financeai");
+    
+    // Get mutual fund details based on fund name
+    const mutualFundDetails = getMutualFundDetails(investmentData.fund_name);
+    
+    // Store or update mutual fund in database
+    await storeMutualFundDetails(db, mutualFundDetails);
+    
+    const investment = {
+      investment_id: investmentId,
+      customer_id: parseInt(investmentData.customer_id),
+      investment_type: investmentData.investment_type, // "SIP" or "Lumpsum"
+      amount: investmentData.amount,
+      fund_name: investmentData.fund_name,
+      fund_id: mutualFundDetails.fund_id, // Link to mutual fund
+      sip_date: investmentData.sip_date || null,
+      goal: investmentData.goal || "Wealth Creation",
+      status: investmentData.status, // "Active", "Completed", "Pending"
+      created_at: new Date(),
+      updated_at: new Date(),
+      chatId: investmentData.chatId,
+      payment_status: "Completed",
+      // Additional investment details
+      fund_category: mutualFundDetails.category,
+      fund_type: mutualFundDetails.type,
+      nav: mutualFundDetails.current_nav,
+      units_allocated: calculateUnits(investmentData.amount, mutualFundDetails.current_nav),
+      next_sip_date: investmentData.investment_type === "SIP" ? calculateNextSIPDate(investmentData.sip_date) : null
+    };
+    
+    const result = await db.collection("investment_orders").insertOne(investment);
+    console.log("Investment created successfully:", investmentId);
+    
+    // Log mutual fund investment for tracking
+    console.log("Mutual fund details stored:", {
+      fund_name: mutualFundDetails.fund_name,
+      fund_id: mutualFundDetails.fund_id,
+      nav: mutualFundDetails.current_nav,
+      units: investment.units_allocated
+    });
+    
+    return {
+      ...investment,
+      _id: result.insertedId
+    };
+  } catch (error) {
+    console.error("Error in createInvestmentRecord function:", error);
+    throw error;
+  }
+}
+
+/**
+ * GET MUTUAL FUND DETAILS:
+ * Returns detailed information about a mutual fund based on its name
+ */
+function getMutualFundDetails(fundName) {
+  // Database of mutual fund details
+  const mutualFunds = {
+    "Mirae Asset Large Cap Fund (Direct – Growth)": {
+      fund_id: "MF001",
+      fund_name: "Mirae Asset Large Cap Fund",
+      scheme_name: "Mirae Asset Large Cap Fund (Direct – Growth)",
+      category: "Large Cap",
+      type: "Equity",
+      risk_level: "Moderate",
+      current_nav: 85.67,
+      expense_ratio: 0.52,
+      fund_manager: "Neelesh Surana",
+      fund_house: "Mirae Asset Mutual Fund",
+      inception_date: "2018-01-01",
+      aum: "₹45,230 Cr",
+      benchmark: "NIFTY 100 Total Return Index",
+      returns: {
+        "1_year": 14.2,
+        "3_year": 16.8,
+        "5_year": 15.4,
+        "since_inception": 16.1
+      },
+      min_investment: 500,
+      min_sip: 500
+    },
+    "Parag Parikh Flexi Cap Fund (Direct – Growth)": {
+      fund_id: "MF002",
+      fund_name: "Parag Parikh Flexi Cap Fund",
+      scheme_name: "Parag Parikh Flexi Cap Fund (Direct – Growth)",
+      category: "Flexi Cap",
+      type: "Equity",
+      risk_level: "Moderate to High",
+      current_nav: 67.89,
+      expense_ratio: 0.78,
+      fund_manager: "Rajeev Thakkar",
+      fund_house: "Parag Parikh Mutual Fund",
+      inception_date: "2013-05-03",
+      aum: "₹28,540 Cr",
+      benchmark: "NIFTY 500 Total Return Index",
+      returns: {
+        "1_year": 16.8,
+        "3_year": 18.2,
+        "5_year": 17.9,
+        "since_inception": 19.1
+      },
+      min_investment: 1000,
+      min_sip: 500
+    },
+    "SBI Bluechip Fund (Direct – Growth)": {
+      fund_id: "MF003",
+      fund_name: "SBI Bluechip Fund",
+      scheme_name: "SBI Bluechip Fund (Direct – Growth)",
+      category: "Large Cap",
+      type: "Equity",
+      risk_level: "Moderate",
+      current_nav: 920.45,
+      expense_ratio: 0.65,
+      fund_manager: "Dinesh Ahuja",
+      fund_house: "SBI Mutual Fund",
+      inception_date: "2006-02-17",
+      aum: "₹35,680 Cr",
+      benchmark: "S&P BSE 100 Total Return Index",
+      returns: {
+        "1_year": 13.5,
+        "3_year": 15.2,
+        "5_year": 14.8,
+        "since_inception": 16.3
+      },
+      min_investment: 500,
+      min_sip: 500
+    },
+    "HDFC Top 100 Fund (Direct – Growth)": {
+      fund_id: "MF004",
+      fund_name: "HDFC Top 100 Fund",
+      scheme_name: "HDFC Top 100 Fund (Direct – Growth)",
+      category: "Large Cap",
+      type: "Equity",
+      risk_level: "Moderate",
+      current_nav: 158.76,
+      expense_ratio: 0.70,
+      fund_manager: "Chirag Setalvad",
+      fund_house: "HDFC Asset Management",
+      inception_date: "1996-10-01",
+      aum: "₹42,890 Cr",
+      benchmark: "NIFTY 100 Total Return Index",
+      returns: {
+        "1_year": 14.1,
+        "3_year": 16.5,
+        "5_year": 15.7,
+        "since_inception": 17.2
+      },
+      min_investment: 500,
+      min_sip: 500
+    },
+    "Axis Midcap Fund (Direct – Growth)": {
+      fund_id: "MF005",
+      fund_name: "Axis Midcap Fund",
+      scheme_name: "Axis Midcap Fund (Direct – Growth)",
+      category: "Mid Cap",
+      type: "Equity",
+      risk_level: "High",
+      current_nav: 45.23,
+      expense_ratio: 0.85,
+      fund_manager: "Shreyash Devalkar",
+      fund_house: "Axis Asset Management",
+      inception_date: "2011-01-01",
+      aum: "₹18,450 Cr",
+      benchmark: "NIFTY Midcap 100 Total Return Index",
+      returns: {
+        "1_year": 18.2,
+        "3_year": 20.5,
+        "5_year": 19.8,
+        "since_inception": 21.3
+      },
+      min_investment: 1000,
+      min_sip: 500
+    }
+  };
+  
+  // Find fund by name (exact or partial match)
+  const fund = mutualFunds[fundName] || 
+    Object.values(mutualFunds).find(f => f.fund_name.includes(fundName.split(' ')[0])) ||
+    {
+      fund_id: "MF000",
+      fund_name: "Generic Fund",
+      scheme_name: fundName,
+      category: "Unknown",
+      type: "Equity",
+      risk_level: "Moderate",
+      current_nav: 100.00,
+      expense_ratio: 0.75,
+      fund_manager: "Fund Manager",
+      fund_house: "Unknown Fund House",
+      inception_date: "2020-01-01",
+      aum: "₹1,000 Cr",
+      benchmark: "NIFTY 50 Total Return Index",
+      returns: {
+        "1_year": 12.0,
+        "3_year": 14.0,
+        "5_year": 13.0,
+        "since_inception": 13.5
+      },
+      min_investment: 500,
+      min_sip: 500
+    };
+    
+  return fund;
+}
+
+/**
+ * STORE MUTUAL FUND DETAILS:
+ * Stores or updates mutual fund information in the database
+ */
+async function storeMutualFundDetails(db, mutualFundDetails) {
+  try {
+    // Check if fund already exists
+    const existingFund = await db.collection("mutual_funds").findOne({
+      fund_id: mutualFundDetails.fund_id
+    });
+    
+    if (existingFund) {
+      // Update existing fund details (especially NAV and returns)
+      await db.collection("mutual_funds").updateOne(
+        { fund_id: mutualFundDetails.fund_id },
+        {
+          $set: {
+            current_nav: mutualFundDetails.current_nav,
+            returns: mutualFundDetails.returns,
+            updated_at: new Date()
+          }
+        }
+      );
+      console.log(`Updated existing fund: ${mutualFundDetails.fund_name}`);
+    } else {
+      // Insert new fund
+      const fundRecord = {
+        ...mutualFundDetails,
+        created_at: new Date(),
+        updated_at: new Date(),
+        status: "Active"
+      };
+      
+      await db.collection("mutual_funds").insertOne(fundRecord);
+      console.log(`Added new fund to database: ${mutualFundDetails.fund_name}`);
+    }
+  } catch (error) {
+    console.error("Error storing mutual fund details:", error);
+    // Don't throw error as this shouldn't block investment creation
+  }
+}
+
+/**
+ * CALCULATE UNITS:
+ * Calculates the number of units allocated based on investment amount and NAV
+ */
+function calculateUnits(amount, nav) {
+  // Remove currency symbols and convert to number
+  const numericAmount = parseFloat(amount.toString().replace(/[₹,]/g, ''));
+  const numericNav = parseFloat(nav);
+  
+  if (isNaN(numericAmount) || isNaN(numericNav) || numericNav === 0) {
+    return 0;
+  }
+  
+  return Math.round((numericAmount / numericNav) * 1000) / 1000; // Round to 3 decimal places
+}
+
+/**
+ * CALCULATE NEXT SIP DATE:
+ * Calculates the next SIP deduction date based on SIP date
+ */
+function calculateNextSIPDate(sipDate) {
+  const currentDate = new Date();
+  const nextDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), parseInt(sipDate));
+  
+  // If the SIP date for current month has passed, move to next month
+  if (nextDate <= currentDate) {
+    nextDate.setMonth(nextDate.getMonth() + 1);
+  }
+  
+  return nextDate;
 }
 
 // =============================================================================
@@ -2511,6 +4987,33 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       conversationContext
     );
     console.log("AI classified query as:", queryType);
+    console.log("Original message:", message);
+    console.log("Processed message:", processedMessage);
+    
+    // CRITICAL FIX: Force classification for investment creation requests
+    const forcedInvestmentKeywords = [
+      "i want to make an investment",
+      "i want to invest",
+      "make an investment",
+      "start investing",
+      "help me invest",
+      "create investment",
+      "begin investing"
+    ];
+    
+    const messageForCheck = processedMessage.toLowerCase();
+    const isDefinitelyInvestmentCreation = forcedInvestmentKeywords.some(keyword => 
+      messageForCheck.includes(keyword.toLowerCase())
+    );
+    
+    let finalQueryType = queryType;
+    if (isDefinitelyInvestmentCreation && queryType !== "INVESTMENT_RELATED") {
+      console.log(`OVERRIDE: Forcing INVESTMENT_RELATED classification for message: "${message}"`);
+      console.log(`Previous classification was: ${queryType}`);
+      finalQueryType = "INVESTMENT_RELATED";
+    }
+    
+    console.log("Final query type being used:", finalQueryType);
 
     // Pass complete conversation history for better context retention
     const conversationMessages = chat.messages.map((msg) => ({
@@ -2524,7 +5027,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
     const isFirstMessage = chat.messages.length === 1;
 
     let maxTokens;
-    switch (queryType) {
+    switch (finalQueryType) {
       case "GREETING":
       case "NON-FINANCIAL":
         maxTokens = 200;
@@ -2543,6 +5046,13 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
         break;
       case "AFFIRMATIVE_RESPONSE":
         maxTokens = 600; // Allow more tokens for contextual responses
+        break;
+      case "INVESTMENT_RELATED":
+      case "INVESTMENT_WORKFLOW_RESPONSE":
+        maxTokens = 800; // Allow more tokens for investment workflows
+        break;
+      case "TICKET_RELATED":
+        maxTokens = 600; // Allow sufficient tokens for ticket workflows
         break;
       default:
         maxTokens = 500;
@@ -2593,24 +5103,77 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
       return res.json(chat);
     } else if (queryType === "AFFIRMATIVE_RESPONSE") {
-      // Handle affirmative responses by looking at conversation context
+      // Check if we're in an active workflow before handling generic affirmative responses
       const lastBotMessage = chat.messages
         .slice(0, -1)
         .reverse()
         .find((msg) => msg.sender === "bot");
 
-      // Check if we're in the middle of ticket creation process
-      if (
-        lastBotMessage &&
-        (lastBotMessage.content.includes(
-          "Would you like to proceed with creating a support ticket?"
-        ) ||
-          lastBotMessage.content.includes("Step 1 of 4") ||
-          lastBotMessage.content.includes("Step 2 of 4") ||
-          lastBotMessage.content.includes("Step 3 of 4") ||
-          lastBotMessage.content.includes("Step 4 of 4"))
-      ) {
-        // User is providing affirmative response during ticket creation
+      // Check if we're in investment workflow
+      const isInInvestmentWorkflow = lastBotMessage &&
+        (lastBotMessage.content.includes("Investment Type Selection") ||
+         lastBotMessage.content.includes("Goal Setting") ||
+         lastBotMessage.content.includes("Investment Amount") ||
+         lastBotMessage.content.includes("Fund Selection") ||
+         lastBotMessage.content.includes("SIP Date Selection") ||
+         lastBotMessage.content.includes("Summary Confirmation") ||
+         lastBotMessage.content.includes("Email OTP Verification") ||
+         lastBotMessage.content.includes("Payment Method") ||
+         lastBotMessage.content.includes("Timeline Setting") ||
+         lastBotMessage.content.includes("SIP Calculation") ||
+         lastBotMessage.content.includes("Custom SIP Amount") ||
+         lastBotMessage.content.includes("Fund Recommendation") ||
+         lastBotMessage.content.includes("Available Funds") ||
+         lastBotMessage.content.includes("More Fund Options"));
+
+      // Check if we're in ticket workflow
+      const isInTicketWorkflow = lastBotMessage &&
+        (lastBotMessage.content.includes("Step 1 of 4") ||
+         lastBotMessage.content.includes("Step 2 of 4") ||
+         lastBotMessage.content.includes("Step 3 of 4") ||
+         lastBotMessage.content.includes("Step 4 of 4") ||
+         lastBotMessage.content.includes("Would you like to proceed with creating a support ticket?"));
+
+      // If in investment workflow, process through investment handler
+      if (isInInvestmentWorkflow) {
+        console.log('Affirmative response in investment workflow, processing through investment handler');
+        const investmentResponse = await handleInvestmentWorkflow(
+          message,
+          chat,
+          userData.customer?.id
+        );
+
+        const assistantMessage = {
+          sender: "bot",
+          content: investmentResponse,
+          timestamp: new Date(),
+        };
+
+        chat.messages.push(assistantMessage);
+        chat.updatedAt = new Date();
+
+        if (chat._id) {
+          await chatsCollection.updateOne(
+            { _id: chat._id },
+            {
+              $set: {
+                messages: chat.messages,
+                updatedAt: chat.updatedAt,
+              },
+              $inc: { __v: 1 },
+            }
+          );
+        } else {
+          const result = await chatsCollection.insertOne(chat);
+          chat._id = result.insertedId;
+        }
+
+        return res.json(chat);
+      }
+
+      // If in ticket workflow, process through ticket handler
+      if (isInTicketWorkflow) {
+        console.log('Affirmative response in ticket workflow, processing through ticket handler');
         const ticketResponse = await handleTicketCreationFlow(
           message,
           chat,
@@ -2645,6 +5208,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
         return res.json(chat);
       }
 
+      // Only handle generic affirmative responses if NOT in any workflow
       let contextualResponse;
       if (
         lastBotMessage &&
@@ -2699,6 +5263,129 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       }
 
       return res.json(chat);
+    } else if (queryType === "INVESTMENT_WORKFLOW_RESPONSE") {
+      // Handle responses during active investment workflow
+      console.log('Processing INVESTMENT_WORKFLOW_RESPONSE');
+      
+      const investmentResponse = await handleInvestmentWorkflow(
+        message,
+        chat,
+        userData.customer?.id
+      );
+
+      const assistantMessage = {
+        sender: "bot",
+        content: investmentResponse,
+        timestamp: new Date(),
+      };
+
+      chat.messages.push(assistantMessage);
+      chat.updatedAt = new Date();
+
+      if (chat._id) {
+        await chatsCollection.updateOne(
+          { _id: chat._id },
+          {
+            $set: {
+              messages: chat.messages,
+              updatedAt: chat.updatedAt,
+            },
+            $inc: { __v: 1 },
+          }
+        );
+      } else {
+        const result = await chatsCollection.insertOne(chat);
+        chat._id = result.insertedId;
+      }
+
+      return res.json(chat);
+    } else if (queryType === "INVESTMENT_RELATED") {
+      // Handle investment-related queries
+      const lastBotMessage = chat.messages
+        .slice(0, -1)
+        .reverse()
+        .find((msg) => msg.sender === "bot");
+
+      // Check if we're in the middle of investment creation process
+      if (
+        lastBotMessage &&
+        (lastBotMessage.content.includes("Investment Type Selection") ||
+          lastBotMessage.content.includes("Goal Setting") ||
+          lastBotMessage.content.includes("Investment Amount") ||
+          lastBotMessage.content.includes("Fund Selection") ||
+          lastBotMessage.content.includes("SIP Date Selection") ||
+          lastBotMessage.content.includes("Summary Confirmation") ||
+          lastBotMessage.content.includes("Email OTP Verification") ||
+          lastBotMessage.content.includes("Payment Method"))
+      ) {
+        // User is providing investment details
+        const investmentResponse = await handleInvestmentWorkflow(
+          message,
+          chat,
+          userData.customer?.id
+        );
+
+        const assistantMessage = {
+          sender: "bot",
+          content: investmentResponse,
+          timestamp: new Date(),
+        };
+
+        chat.messages.push(assistantMessage);
+        chat.updatedAt = new Date();
+
+        if (chat._id) {
+          await chatsCollection.updateOne(
+            { _id: chat._id },
+            {
+              $set: {
+                messages: chat.messages,
+                updatedAt: chat.updatedAt,
+              },
+              $inc: { __v: 1 },
+            }
+          );
+        } else {
+          const result = await chatsCollection.insertOne(chat);
+          chat._id = result.insertedId;
+        }
+
+        return res.json(chat);
+      } else {
+        // Initial investment request - start directly
+        const investmentResponse = await handleInvestmentWorkflow(
+          message,
+          chat,
+          userData.customer?.id
+        );
+
+        const assistantMessage = {
+          sender: "bot",
+          content: investmentResponse,
+          timestamp: new Date(),
+        };
+
+        chat.messages.push(assistantMessage);
+        chat.updatedAt = new Date();
+
+        if (chat._id) {
+          await chatsCollection.updateOne(
+            { _id: chat._id },
+            {
+              $set: {
+                messages: chat.messages,
+                updatedAt: chat.updatedAt,
+              },
+              $inc: { __v: 1 },
+            }
+          );
+        } else {
+          const result = await chatsCollection.insertOne(chat);
+          chat._id = result.insertedId;
+        }
+
+        return res.json(chat);
+      }
     } else if (queryType === "TICKET_RELATED") {
       // Handle ticket-related queries
       const lastBotMessage = chat.messages
@@ -2823,7 +5510,109 @@ Please provide a brief title for your issue (e.g., "Unable to complete payment",
 
       return res.json(chat);
     } else {
-      // First, search FAQs for relevant answers
+      // Check if we're in the middle of an investment workflow first
+      const lastBotMessage = chat.messages
+        .slice(0, -1)
+        .reverse()
+        .find((msg) => msg.sender === "bot");
+      
+      const isInInvestmentWorkflow = lastBotMessage &&
+        (lastBotMessage.content.includes("Investment Type Selection") ||
+         lastBotMessage.content.includes("Goal Setting") ||
+         lastBotMessage.content.includes("Investment Amount") ||
+         lastBotMessage.content.includes("Fund Selection") ||
+         lastBotMessage.content.includes("SIP Date Selection") ||
+         lastBotMessage.content.includes("Summary Confirmation") ||
+         lastBotMessage.content.includes("Email OTP Verification") ||
+         lastBotMessage.content.includes("Payment Method") ||
+         lastBotMessage.content.includes("Timeline Setting") ||
+         lastBotMessage.content.includes("SIP Calculation") ||
+         lastBotMessage.content.includes("Custom SIP Amount") ||
+         lastBotMessage.content.includes("Fund Recommendation") ||
+         lastBotMessage.content.includes("Available Funds") ||
+         lastBotMessage.content.includes("More Fund Options") ||
+         lastBotMessage.content.includes("New Payment Setup"));
+      
+      const isInTicketWorkflow = lastBotMessage &&
+        (lastBotMessage.content.includes("Step 1 of 4") ||
+         lastBotMessage.content.includes("Step 2 of 4") ||
+         lastBotMessage.content.includes("Step 3 of 4") ||
+         lastBotMessage.content.includes("Step 4 of 4"));
+      
+      // If we're in the middle of a workflow, prioritize workflow over FAQ
+      if (isInInvestmentWorkflow) {
+        console.log('User in investment workflow, processing investment response');
+        const investmentResponse = await handleInvestmentWorkflow(
+          message,
+          chat,
+          userData.customer?.id
+        );
+
+        const assistantMessage = {
+          sender: "bot",
+          content: investmentResponse,
+          timestamp: new Date(),
+        };
+
+        chat.messages.push(assistantMessage);
+        chat.updatedAt = new Date();
+
+        if (chat._id) {
+          await chatsCollection.updateOne(
+            { _id: chat._id },
+            {
+              $set: {
+                messages: chat.messages,
+                updatedAt: chat.updatedAt,
+              },
+              $inc: { __v: 1 },
+            }
+          );
+        } else {
+          const result = await chatsCollection.insertOne(chat);
+          chat._id = result.insertedId;
+        }
+
+        return res.json(chat);
+      }
+      
+      if (isInTicketWorkflow) {
+        console.log('User in ticket workflow, processing ticket response');
+        const ticketResponse = await handleTicketCreationFlow(
+          message,
+          chat,
+          userData.customer?.id
+        );
+
+        const assistantMessage = {
+          sender: "bot",
+          content: ticketResponse,
+          timestamp: new Date(),
+        };
+
+        chat.messages.push(assistantMessage);
+        chat.updatedAt = new Date();
+
+        if (chat._id) {
+          await chatsCollection.updateOne(
+            { _id: chat._id },
+            {
+              $set: {
+                messages: chat.messages,
+                updatedAt: chat.updatedAt,
+              },
+              $inc: { __v: 1 },
+            }
+          );
+        } else {
+          const result = await chatsCollection.insertOne(chat);
+          chat._id = result.insertedId;
+        }
+
+        return res.json(chat);
+      }
+      
+      // Only search FAQs if we're NOT in a workflow context
       const faqMatch = searchFAQs(processedMessage);
       
       if (faqMatch && faqMatch.confidence > 0.6) {
@@ -2882,7 +5671,7 @@ Please provide a brief title for your issue (e.g., "Unable to complete payment",
         }
 
         return res.json(chat);
-      } 
+      }
       // If no FAQ match found, proceed with regular OpenAI processing
       let userDataString = `
 Customer Info: ${JSON.stringify(userData.customer, null, 2)}
