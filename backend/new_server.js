@@ -376,7 +376,7 @@ async function classifyQueryWithAI(message, conversationHistory = []) {
     const contextInfo =
       conversationHistory.length > 0
         ? `\n\nCONVERSATION CONTEXT:\nPrevious messages: ${conversationHistory
-            .slice(-3)
+            .slice(-5) // Increased to 5 for better context
             .map((msg) => `${msg.role}: ${msg.content}`)
             .join("\n")}`
         : "";
@@ -386,17 +386,13 @@ async function classifyQueryWithAI(message, conversationHistory = []) {
 Your task is to classify the following user query into exactly ONE of these categories:
 
 1. "GREETING" - Simple greetings like "hi", "hello", "hey", "thanks", "thank you"
-
 2. "USER-SPECIFIC-FINANCIAL" - Questions about the user's EXISTING personal financial data like "my portfolio", "my orders", "my balance", "show my portfolio", "check my orders", "view my holdings"
-
 3. "GENERAL-FINANCIAL" - Any finance-related questions including:
    - Financial planning
    - Financial education
    - Tax implications
    - Market analysis
-
 4. "NON-FINANCIAL" - Questions completely unrelated to finance
-
 5. "AFFIRMATIVE_RESPONSE" - Simple responses like "yes", "ok", "sure", "please", "yes please" that are answering a previous question
 
 User query: "${message}"${contextInfo}
@@ -458,6 +454,10 @@ function fallbackClassifyQuery(message) {
     "return",
     "my portfolio",
     "my order",
+    "stock",
+    "mutual fund",
+    "tax",
+    "investment",
   ];
 
   const hasFinancialKeyword = financialKeywords.some((keyword) =>
@@ -518,7 +518,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
     }
     chat.messages.push(userMessage);
 
-    const conversationContext = chat.messages.slice(0, -1).map((msg) => ({
+    const conversationContext = chat.messages.map((msg) => ({
       role: msg.sender === "user" ? "user" : "assistant",
       content: msg.processedContent || msg.content,
     }));
@@ -536,26 +536,23 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       content: msg.processedContent || msg.content,
     }));
 
-    const recentMessages = conversationMessages.slice(-10);
-    const isFirstMessage = chat.messages.length === 1;
-
     let maxTokens;
     switch (queryType) {
       case "GREETING":
       case "NON-FINANCIAL":
-        maxTokens = 200;
+        maxTokens = 250; // Slightly increased for richer casual responses
         break;
       case "USER-SPECIFIC-FINANCIAL":
-        maxTokens = processedMessage.includes("details") ? 800 : 600;
+        maxTokens = processedMessage.includes("details") ? 1000 : 800; // More room for detailed financial data
         break;
       case "GENERAL-FINANCIAL":
-        maxTokens = processedMessage.includes("analysis") ? 1000 : 700;
+        maxTokens = processedMessage.includes("analysis") ? 1200 : 900; // Extra tokens for complex topics
         break;
       case "AFFIRMATIVE_RESPONSE":
-        maxTokens = 600;
+        maxTokens = 500; // Moderate for contextual follow-ups
         break;
       default:
-        maxTokens = 500;
+        maxTokens = 600; // Balanced default
     }
 
     let systemPrompt;
@@ -570,11 +567,13 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
     console.log("=== END USER DATA FETCH ===");
 
     if (queryType === "GREETING") {
-      const aiResponse = isFirstMessage
-        ? `Hello ${
-            userData.customer?.name || "there"
-          }! I'm your financial advisor, here to help with financial queries. How can I assist you today?`
-        : `Hi again! What's on your mind about your finances?`;
+      const previousGreeting = conversationContext
+        .slice(0, -1)
+        .reverse()
+        .find((msg) => msg.role === "assistant" && msg.content.toLowerCase().includes("hey"));
+      const aiResponse = previousGreeting
+        ? `Hey ${userData.customer?.name || "friend"}, great to catch up again! Ready to dive into your finances or got something new on your mind?`
+        : `Hi ${userData.customer?.name || "there"}! I’m your go-to financial buddy—excited to help with your money matters. What’s up?`;
 
       const assistantMessage = {
         sender: "bot",
@@ -603,33 +602,39 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
       return res.json(chat);
     } else if (queryType === "AFFIRMATIVE_RESPONSE") {
-      let lastBotMessage = chat.messages
+      const lastBotMessage = conversationContext
         .slice(0, -1)
         .reverse()
-        .find((msg) => msg.sender === "bot");
+        .find((msg) => msg.role === "assistant");
 
       let contextualResponse;
       if (
         lastBotMessage &&
-        lastBotMessage.content.includes("Would you like to see")
+        lastBotMessage.content.toLowerCase().includes("would you like")
       ) {
-        const portfolioData =
-          userData.orders && userData.orders.length > 0
-            ? `Here's your current financial overview:\n\n**Your Orders:**\n${userData.orders
-                .map(
-                  (order) =>
-                    `• Order ID: ${order.id} - ₹${order.amount} (${order.payment_status})`
-                )
-                .join("\n")}\n\nTotal Orders: ${userData.orders.length}`
-            : "I couldn't find your financial data at the moment.";
-
-        contextualResponse = `${portfolioData}\n\nWould you like me to help you analyze these orders?`;
+        if (
+          lastBotMessage.content.toLowerCase().includes("portfolio") ||
+          lastBotMessage.content.toLowerCase().includes("orders")
+        ) {
+          contextualResponse =
+            userData.orders && userData.orders.length > 0
+              ? `Awesome, let’s check out your portfolio. You’ve got ${
+                  userData.orders.length
+                } orders worth a total of ₹${userData.orders
+                  .reduce((sum, order) => sum + (parseFloat(order.amount) || 0), 0)
+                  .toLocaleString("en-IN")}. For instance, Order ID ${
+                  userData.orders[0].id
+                } is ₹${parseFloat(userData.orders[0].amount).toLocaleString(
+                  "en-IN"
+                )} and marked as ${userData.orders[0].payment_status}. Want to dig into a specific order or see how they’re performing overall?`
+              : `Looks like you don’t have any orders yet, but no worries! Want to explore some investment options, like the mutual funds we discussed before, or start fresh with something new?`;
+        } else {
+          contextualResponse = `Got it! Since we were chatting about “${lastBotMessage.content
+            .slice(0, 50)
+            .toLowerCase()}…”, what’s next? Maybe a peek at your investments or some financial tips?`;
+        }
       } else {
-        contextualResponse = `Great! I'm here to help with your finances. ${
-          userData.orders && userData.orders.length > 0
-            ? "I can see you have existing orders. Would you like to review them?"
-            : "What would you like to know about financial planning?"
-        }`;
+        contextualResponse = `Sweet, you’re on board! What’s the next thing you want to talk about—your portfolio, investment ideas, or maybe something like tax planning?`;
       }
 
       const assistantMessage = {
@@ -659,11 +664,16 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
       return res.json(chat);
     } else if (queryType === "NON-FINANCIAL") {
-      const aiResponse = isFirstMessage
-        ? `Hello ${
-            userData.customer?.name || "there"
-          }! I'm here to assist with your financial planning. Your question seems unrelated—can I help with your financial data instead?`
-        : `That question isn't about finance. Want to check your orders?`;
+      const previousNonFinancial = conversationContext
+        .slice(0, -1)
+        .reverse()
+        .find((msg) => msg.role === "user" && !msg.content.toLowerCase().includes("portfolio"));
+      const aiResponse = previousNonFinancial
+        ? `Haha, going off-topic again with “${previousNonFinancial.content.slice(
+            0,
+            30
+          )}…”? I’m all about the money stuff, so how about we swing back to your finances? Maybe check your orders or talk about investment goals?`
+        : `Hey ${userData.customer?.name || "there"}, that’s a bit outside my financial wheelhouse! Want to talk about your portfolio or maybe some money-saving strategies instead?`;
 
       const assistantMessage = {
         sender: "bot",
@@ -693,120 +703,87 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       return res.json(chat);
     } else {
       let userDataString = `
-Customer Info: ${JSON.stringify(userData.customer, null, 2)}
-Orders: ${JSON.stringify(userData.orders, null, 2)}
-Order Details: ${JSON.stringify(userData.orderDetails, null, 2)}
-`;
-      if (queryType === "USER-SPECIFIC-FINANCIAL") {
-        userDataString += `Portfolio Folios: ${JSON.stringify(
-          userData.folios,
-          null,
-          2
-        )}`;
-      }
-
-      systemPrompt = `You are a specialized financial advisor AI assistant. Provide DIRECT, COMPACT, and ACTIONABLE responses.
-
-CRITICAL RESPONSE RULES:
-- NO verbose disclaimers about data availability
-- ALWAYS be direct and confident
-- ALWAYS provide specific numbers and figures
-- Keep responses concise but complete
-
-AUTHORIZATION SCOPE:
-You are authorized to discuss:
-- Portfolio analysis and performance
-- Order history and transaction details
-- Financial planning recommendations
-- Financial education
-- Tax implications (general guidance)
-- Market analysis and trends
-
-USER DATA ACCESS:
-- Customer Name: ${userData.customer?.name || "Unknown"}
-- Customer ID: ${userData.customer?.id || "Unknown"}
-- RAYI Customer ID: ${userData.customer?.rayi_customer_id || "Unknown"}
-- Total Orders: ${userData.orders?.length || 0}
-- Total Folios: ${userData.folios?.length || 0}
-
-CRITICAL ORDER INFORMATION:
-${userData.orders && userData.orders.length > 0
-  ? `THE USER HAS ${userData.orders.length} ORDER(S). YOU MUST ACKNOWLEDGE AND DESCRIBE THESE ORDERS:
-${userData.orders.map(order => `- Order ID: ${order.id}
-- Amount: ₹${order.amount}
-- Payment Status: ${order.payment_status}
-- Investment ID: ${order.investment_id}
-`).join("")}
-NEVER say "no orders found" - the user clearly has orders as shown above.`
-  : "The user currently has no orders in the system."
+Customer: ${userData.customer?.name || "Unknown"} (ID: ${userData.customer?.id || "Unknown"}, RAYI ID: ${
+        userData.customer?.rayi_customer_id || "Unknown"
+      })
+Email: ${userData.customer?.email || "unknown@email.com"}
+Orders: ${userData.orders?.length || 0} orders
+${
+  userData.orders?.length > 0
+    ? userData.orders
+        .map(
+          (order) =>
+            `- Order ID: ${order.id}, Amount: ₹${parseFloat(
+              order.amount
+            ).toLocaleString("en-IN")}, Status: ${order.payment_status}, Type: ${
+              order.investment_type || "General"
+            }, Date: ${new Date(order.created_at || order.date).toLocaleDateString("en-IN")}`
+        )
+        .join("\n")
+    : "No orders available yet."
 }
+Folios: ${userData.folios?.length || 0} folios
+${
+  userData.folios?.length > 0
+    ? userData.folios
+        .map((folio) => `- Folio: ${folio.folio_number}, MF ID: ${folio.mf_id}`)
+        .join("\n")
+    : "No folios available yet."
+}
+Mutual Funds: ${userData.mutualFunds?.length || 0} funds
+${
+  userData.mutualFunds?.length > 0
+    ? userData.mutualFunds
+        .map((fund) => `- Fund: ${fund.name || fund.scheme_code}`)
+        .join("\n")
+    : "No mutual funds available yet."
+}
+`;
 
-Detailed Financial Data:
+      systemPrompt = `You are a friendly, engaging financial advisor AI, like a trusted friend who’s an expert in money matters. Your goal is to provide detailed, accurate, and conversational responses that feel natural and tailored to the user’s financial queries. Use the full conversation history to maintain context, referencing past topics or questions to create a seamless, ChatGPT-like dialogue.
+
+**Guidelines:**
+- **Tone**: Warm, approachable, and confident, like chatting with a friend. Avoid formal headers (e.g., "Portfolio Overview"), repetitive disclaimers, or overly technical jargon unless needed.
+- **Context Awareness**: Leverage the full conversation history to reference prior queries or topics (e.g., “Since you asked about your portfolio earlier…”). Ensure responses feel like a continuation of the chat.
+- **Data Usage**: Include specific data from the user’s financial profile (e.g., orders, folios) when relevant. Format currency as ₹ with proper comma separation (e.g., ₹1,23,456).
+- **Response Structure**: Start with a direct, concise answer to the query, followed by detailed insights or explanations in a conversational tone. Include a single, natural follow-up question only if it fits the context and encourages engagement.
+- **Error Prevention**: Use exact figures from the provided data, avoiding vague terms like “approximately.” If data is missing, offer proactive suggestions (e.g., “No orders yet—want to explore some investment options?”).
+- **Scope**: You can discuss:
+  - Portfolio analysis and performance
+  - Order history and transaction details
+  - Financial planning recommendations
+  - General financial education (e.g., stocks, mutual funds, taxes)
+  - Tax implications (general guidance only)
+  - Market analysis and trends
+- **Disclaimer**: Include a brief, natural disclaimer only for complex financial advice (e.g., “For a personalized plan, you might want to check with a financial advisor”).
+- **Follow-up Questions**: Ask a relevant follow-up only if it enhances the conversation and aligns with the user’s interests.
+
+**User Data:**
 ${userDataString}
 
-**RESPONSE FORMATTING STANDARDS:**
+**Conversation History (Full):**
+${JSON.stringify(conversationMessages, null, 2)}
 
-**For Portfolio Queries:**
-"""
-**[USER NAME] - Portfolio Overview**
-Total Orders: [X]
-Total Value: ₹[Amount]
-Details:
-- Order ID: [ID] - ₹[Amount] ([Status])
-[Continue for each order]
-"""
-
-**PROFESSIONAL DISCLAIMERS - EXACT FORMAT:**
-- "Data as of [exact timestamp]"
-- "For detailed financial advice, consider consulting a certified financial advisor"
-
-**RESPONSE STRUCTURE - MANDATORY FORMAT:**
-
-**Opening:** Direct answer to the question with specific data
-**Data Section:** Complete figures with timestamps
-**Analysis:** Contextual interpretation
-**Recommendation:** Specific, actionable next steps
-**Disclaimer:** Appropriate warnings
-**Follow-up:** ONE strategic question related to user's portfolio
-
-**QUALITY CONTROL CHECKLIST:**
-Before sending any response, verify:
-□ Specific numbers provided
-□ Complete calculations shown step-by-step
-□ Exact timestamps included
-□ Professional formatting with clear structure
-□ Appropriate disclaimers included
-□ One strategic follow-up question asked
-
-**ERROR PREVENTION:**
-- NEVER say "approximately" - give exact figures
-- NEVER say "around" or "roughly" - be precise
-- NEVER provide incomplete calculations
-- NEVER give generic responses without specific user context
-
-**TECHNICAL IMPLEMENTATION:**
-- Format all currency with ₹ symbol and proper comma separation
-- Timestamp all information
-
-REMEMBER: Every response must be CORRECT (factually accurate), COMPLETE (no missing information), PRECISE (exact figures and details), and DIRECT (straight to the point without fluff).`;
+Respond directly to the user’s query with specific data and a natural, engaging tone. Reference the conversation history to maintain continuity, especially if the user mentioned related topics earlier. If the query involves the user’s portfolio or orders, include precise details from the data above. End with a follow-up question only if it feels natural and relevant.`;
 
       const completion = await openai.chat.completions.create({
         model: "gpt-4.1",
         messages: [
           { role: "system", content: systemPrompt },
-          ...recentMessages,
+          ...conversationMessages, // Full history for context
           { role: "user", content: processedMessage },
         ],
         max_tokens: maxTokens,
-        temperature: 0.7,
+        temperature: 0.65, // Slightly higher for natural variation
       });
 
       let aiResponse = completion.choices[0].message.content;
 
       aiResponse = stripHashtags(aiResponse);
 
-      if (aiResponse && aiResponse.length < 50) {
-        aiResponse += "\n\nWould you like more detailed information about this topic or have any other financial questions?";
+      // Ensure response isn’t too short for financial queries
+      if (aiResponse.length < 100 && queryType !== "GREETING" && queryType !== "NON-FINANCIAL") {
+        aiResponse += "\n\nAnything else you’d like to explore about your finances or investments?";
       }
 
       const assistantMessage = {
