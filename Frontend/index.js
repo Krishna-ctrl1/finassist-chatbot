@@ -2366,18 +2366,99 @@ async function handleTicketCreation(button) {
   // Extract data from conversation
   for (const message of botMessages) {
     const content = message.textContent || message.innerText;
+    console.log('Bot message content:', content.substring(0, 200) + '...');
 
     const titleMatch = content.match(/Your issue title: ["']([^"']+)["']/);
     if (titleMatch) {
       issueTitle = titleMatch[1];
+      console.log('Found issue title:', issueTitle);
     }
 
     const categoryMatch = content.match(/Category selected: ([^\n\r]+)/);
     if (categoryMatch) {
       category = categoryMatch[1].trim();
+      console.log('Raw category match:', category);
       // Additional cleanup to remove any text after the category
-      const cleanCategory = category.split('Now please provide')[0].trim();
+      const cleanCategory = category.split(/\n/)[0].split('Step')[0].split('Now please provide')[0].trim();
       category = cleanCategory;
+      console.log('Cleaned category:', category);
+    }
+  }
+  
+  // Alternative extraction method if category not found from bot messages
+  if (!category) {
+    // Look through chat messages to find user's category selection
+    const chatMessages = Array.from(elements.chatMessages.querySelectorAll('.message'));
+    let foundStep2 = false;
+    
+    for (let i = 0; i < chatMessages.length; i++) {
+      const msg = chatMessages[i];
+      const content = msg.textContent || msg.innerText;
+      
+      // Find Step 2 message
+      if (content.includes('Step 2 of 4') && content.includes('Choose a category')) {
+        foundStep2 = true;
+        continue;
+      }
+      
+      // Get the next user message after Step 2
+      if (foundStep2 && msg.classList.contains('user')) {
+        const userResponse = content.toLowerCase().trim();
+        
+        // Map user response to category
+        const categoryMap = {
+          '1': 'General Enquiry',
+          '2': 'KYC Related',
+          '3': 'Products Related',
+          '4': 'Orders Related',
+          '5': 'Payment/Bank Accounts',
+          '6': 'Account Related',
+          '7': 'Others',
+          'general enquiry': 'General Enquiry',
+          'general': 'General Enquiry',
+          'kyc related': 'KYC Related',
+          'kyc': 'KYC Related',
+          'products related': 'Products Related',
+          'products': 'Products Related',
+          'orders related': 'Orders Related',
+          'orders': 'Orders Related',
+          'payment/bank accounts': 'Payment/Bank Accounts',
+          'payment': 'Payment/Bank Accounts',
+          'bank accounts': 'Payment/Bank Accounts',
+          'account related': 'Account Related',
+          'account': 'Account Related',
+          'others': 'Others',
+          'other': 'Others'
+        };
+        
+        category = categoryMap[userResponse] || categoryMap[content.trim().toLowerCase()];
+        if (category) {
+          console.log('Found category from user message:', category);
+          break;
+        }
+      }
+    }
+  }
+  
+  // Final fallback: extract from all messages containing "Category selected:"
+  if (!category) {
+    console.log('Trying final fallback for category extraction...');
+    const allMessages = Array.from(elements.chatMessages.querySelectorAll('.message'));
+    
+    for (const msg of allMessages) {
+      const content = msg.textContent || msg.innerText;
+      if (content.includes('Category selected:')) {
+        // Extract everything after "Category selected:" up to the next line or step
+        const match = content.match(/Category selected:\s*([^\n\r]+)/);
+        if (match) {
+          let extractedCategory = match[1].trim();
+          // Clean up any extra text
+          extractedCategory = extractedCategory.split('\n')[0].split('Step')[0].split('**')[0].trim();
+          console.log('Final fallback found category:', extractedCategory);
+          category = extractedCategory;
+          break;
+        }
+      }
     }
   }
 
@@ -2387,8 +2468,21 @@ async function handleTicketCreation(button) {
     description = userMessages[2].textContent || userMessages[2].innerText || '';
   }
 
+  // Debug log the extracted values
+  console.log('Extracted ticket data:', {
+    issueTitle: issueTitle,
+    category: category,
+    description: description ? description.substring(0, 100) + '...' : 'No description'
+  });
+
   if (!issueTitle || !category || !description) {
-    showNotification('Missing ticket information. Please ensure you have completed all steps.', 'error');
+    const missingFields = [];
+    if (!issueTitle) missingFields.push('issue title');
+    if (!category) missingFields.push('category');
+    if (!description) missingFields.push('description');
+    
+    console.error('Missing ticket fields:', missingFields);
+    showNotification(`Missing ticket information: ${missingFields.join(', ')}. Please ensure you have completed all steps.`, 'error');
     return;
   }
 
@@ -2418,6 +2512,15 @@ async function handleTicketCreation(button) {
     // Add chatId to the form data
     if (currentChatId) {
       formData.append('chatId', currentChatId);
+    }
+    
+    console.log('FormData contents:');
+    for (let [key, value] of formData.entries()) {
+      if (value instanceof File) {
+        console.log(`${key}: File - ${value.name} (${value.size} bytes)`);
+      } else {
+        console.log(`${key}: ${value}`);
+      }
     }
 
     const response = await fetch(`${API_BASE}/tickets/create`, {
@@ -2476,10 +2579,24 @@ Is there anything else I can help you with regarding your investments or account
 
   } catch (error) {
     console.error('Error creating ticket:', error);
-    showNotification(error.message || 'Failed to create ticket. Please try again.', 'error');
+    
+    // Show more detailed error message to help with debugging
+    const errorMessage = error.message || 'Failed to create ticket. Please try again.';
+    console.error('Full error details:', {
+      error: error,
+      message: errorMessage,
+      stack: error.stack
+    });
+    
+    showNotification(errorMessage, 'error');
 
-    // Add error message to chat
-    appendMessage('bot', 'I\'m sorry, there was an error creating your ticket with attachments. Please try again or contact our support team directly.');
+    // Add error message to chat with more details for debugging
+    const detailedErrorMessage = `I'm sorry, there was an error creating your ticket with attachments. 
+
+Error details: ${errorMessage}
+
+Please try again or contact our support team directly.`;
+    appendMessage('bot', detailedErrorMessage);
   } finally {
     // Reset button state
     button.disabled = false;

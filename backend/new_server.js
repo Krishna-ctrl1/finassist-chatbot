@@ -3,12 +3,14 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const path = require("path");
-const apiRoutes = require("./routes/api");
 const rateLimit = require("express-rate-limit");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { MongoClient, ObjectId } = require("mongodb");
 const OpenAI = require("openai");
+
+// Import ticket model
+const Ticket = require("./models/ticketModel");
 
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
@@ -35,6 +37,9 @@ async function initMongoDB() {
     mongoClient = new MongoClient(MONGO_URI);
     await mongoClient.connect();
     console.log("MongoDB client connected for customer authentication");
+
+    // Make MongoDB client available to routes
+    app.set('mongoClient', mongoClient);
 
     const db = mongoClient.db("financeai");
 
@@ -523,6 +528,42 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       content: msg.processedContent || msg.content,
     }));
 
+    // Check for ticket raising workflow
+    const isTicketRequest = checkIfTicketRequest(processedMessage, conversationContext);
+    
+    if (isTicketRequest) {
+      const ticketResponse = await handleTicketWorkflow(message, chat, req.user);
+      
+      if (ticketResponse.shouldRespond) {
+        const assistantMessage = {
+          sender: "bot",
+          content: ticketResponse.response,
+          timestamp: new Date(),
+        };
+
+        chat.messages.push(assistantMessage);
+        chat.updatedAt = new Date();
+
+        if (chat._id) {
+          await chatsCollection.updateOne(
+            { _id: chat._id },
+            {
+              $set: {
+                messages: chat.messages,
+                updatedAt: chat.updatedAt,
+              },
+              $inc: { __v: 1 },
+            }
+          );
+        } else {
+          const result = await chatsCollection.insertOne(chat);
+          chat._id = result.insertedId;
+        }
+
+        return res.json(chat);
+      }
+    }
+
     const queryType = await classifyQueryWithAI(
       processedMessage,
       conversationContext
@@ -847,6 +888,331 @@ app.get("/api/debug/userdata", authenticateToken, async (req, res) => {
   }
 });
 
+// Ticket workflow functions
+function checkIfTicketRequest(message, conversationContext) {
+  const lowerMessage = message.toLowerCase().trim();
+  
+  // Check for explicit ticket raising requests
+  const ticketKeywords = [
+    'raise a ticket',
+    'create a ticket', 
+    'i want to raise a ticket',
+    'having a problem',
+    'having some problems',
+    'having an issue',
+    'i am having an issue',
+    'i am having a problem',
+    'i am having some problems',
+    'i have an issue',
+    'i have a problem',
+    'need help with',
+    'support ticket',
+    'ticket',
+    'issue with',
+    'problem with'
+  ];
+  
+  // Check if message contains ticket-related keywords
+  const hasTicketKeyword = ticketKeywords.some(keyword => 
+    lowerMessage.includes(keyword)
+  );
+  
+  // Check conversation context for ongoing ticket flow
+  const isInTicketFlow = conversationContext.some(msg => 
+    msg.content && (
+      msg.content.includes('Step 1 of 4') ||
+      msg.content.includes('Step 2 of 4') ||
+      msg.content.includes('Step 3 of 4') ||
+      msg.content.includes('Step 4 of 4') ||
+      msg.content.includes('Issue Detail') ||
+      msg.content.includes('Choose a category') ||
+      msg.content.includes('Description')
+    )
+  );
+  
+  return hasTicketKeyword || isInTicketFlow;
+}
+
+async function handleTicketWorkflow(message, chat, user) {
+  const lowerMessage = message.toLowerCase().trim();
+  const conversationHistory = chat.messages || [];
+  
+  // Find the current step based on conversation history
+  const lastBotMessage = conversationHistory
+    .slice()
+    .reverse()
+    .find(msg => msg.sender === 'bot');
+  
+  const lastBotContent = lastBotMessage?.content || '';
+  
+  // Check if this is the initial ticket request
+  const isInitialRequest = (
+    lowerMessage.includes('raise a ticket') ||
+    lowerMessage.includes('create a ticket') ||
+    lowerMessage.includes('i want to raise a ticket') ||
+    lowerMessage.includes('having a problem') ||
+    lowerMessage.includes('having some problems') ||
+    lowerMessage.includes('having an issue') ||
+    lowerMessage.includes('i am having an issue') ||
+    lowerMessage.includes('i am having a problem') ||
+    lowerMessage.includes('i am having some problems') ||
+    lowerMessage.includes('i have an issue') ||
+    lowerMessage.includes('i have a problem')
+  ) && !lastBotContent.includes('Step');
+  
+  if (isInitialRequest) {
+    // Step 1: Ask for issue details
+    return {
+      shouldRespond: true,
+      response: `Sure, I can help you raise a ticket for this issue. Let me guide you through the process.
+
+**Step 1 of 4: Issue Detail**
+
+Please provide a brief title or summary of your issue. This will help our support team understand your concern quickly.
+
+For example: "Unable to access my portfolio" or "Payment not reflecting in account"`
+    };
+  }
+  
+  // Check if we're in Step 1 (collecting issue title)
+  if (lastBotContent.includes('Step 1 of 4') && lastBotContent.includes('Issue Detail')) {
+    // User provided issue title, move to Step 2
+    return {
+      shouldRespond: true,
+      response: `Thank you! Your issue title: "${message}"
+
+**Step 2 of 4: Choose a category**
+
+Please select the category that best describes your issue:
+
+1. General Enquiry
+2. KYC Related
+3. Products Related
+4. Orders Related
+5. Payment/Bank Accounts
+6. Account Related
+7. Others
+
+You can respond with either the number (1-7) or the category name.`
+    };
+  }
+  
+  // Check if we're in Step 2 (collecting category)
+  if (lastBotContent.includes('Step 2 of 4') && lastBotContent.includes('Choose a category')) {
+    // Map user response to category
+    const categoryMap = {
+      '1': 'General Enquiry',
+      '2': 'KYC Related',
+      '3': 'Products Related', 
+      '4': 'Orders Related',
+      '5': 'Payment/Bank Accounts',
+      '6': 'Account Related',
+      '7': 'Others',
+      'general enquiry': 'General Enquiry',
+      'general': 'General Enquiry',
+      'kyc related': 'KYC Related',
+      'kyc': 'KYC Related',
+      'products related': 'Products Related',
+      'products': 'Products Related',
+      'orders related': 'Orders Related',
+      'orders': 'Orders Related',
+      'payment/bank accounts': 'Payment/Bank Accounts',
+      'payment': 'Payment/Bank Accounts',
+      'bank accounts': 'Payment/Bank Accounts',
+      'account related': 'Account Related',
+      'account': 'Account Related',
+      'others': 'Others',
+      'other': 'Others'
+    };
+    
+    const selectedCategory = categoryMap[lowerMessage] || categoryMap[message.trim()];
+    
+    if (selectedCategory) {
+      return {
+        shouldRespond: true,
+        response: `Category selected: ${selectedCategory}
+
+**Step 3 of 4: Description**
+
+Now please provide a detailed description of your issue. Include any relevant information such as:
+- When did this issue occur?
+- What steps did you take?
+- Any error messages you received?
+- How is this affecting you?
+
+The more details you provide, the better our support team can assist you.`
+      };
+    } else {
+      return {
+        shouldRespond: true,
+        response: `I didn't recognize that category. Please choose from:
+
+1. General Enquiry
+2. KYC Related
+3. Products Related
+4. Orders Related
+5. Payment/Bank Accounts
+6. Account Related
+7. Others
+
+Respond with either the number (1-7) or the category name.`
+      };
+    }
+  }
+  
+  // Check if we're in Step 3 (collecting description)
+  if (lastBotContent.includes('Step 3 of 4') && lastBotContent.includes('Description')) {
+    // User provided description, move to Step 4
+    return {
+      shouldRespond: true,
+      response: `Thank you for the detailed description.
+
+**Step 4 of 4: Upload Supporting Documents (Optional)**
+
+You can now upload supporting documents such as screenshots, receipts, or any other relevant files to help us resolve your issue faster.
+
+**Supported file types:** Images (JPEG, PNG, GIF, WebP) and PDF files
+**Maximum file size:** 10MB per file
+**Maximum files:** 3 files
+
+[File Upload Field]
+
+A file upload interface will appear after this message. You can either:
+- Upload supporting documents and create the ticket
+- Skip the upload and create the ticket without attachments
+
+Both options will create your support ticket successfully.`
+    };
+  }
+  
+  // Handle "no" response for file upload
+  if (lowerMessage === 'no' && lastBotContent.includes('Step 4 of 4')) {
+    // Create ticket without attachments
+    try {
+      // Extract ticket data from conversation
+      const messages = chat.messages || [];
+      let issueTitle = '';
+      let category = '';
+      let description = '';
+      
+      // Find the issue title (first user message after Step 1)
+      const step1Index = messages.findIndex(msg => 
+        msg.content && msg.content.includes('Step 1 of 4')
+      );
+      if (step1Index !== -1 && messages[step1Index + 1]) {
+        issueTitle = messages[step1Index + 1].content;
+      }
+      
+      // Find the category (first user message after Step 2)
+      const step2Index = messages.findIndex(msg => 
+        msg.content && msg.content.includes('Step 2 of 4')
+      );
+      if (step2Index !== -1 && messages[step2Index + 1]) {
+        const userCategoryResponse = messages[step2Index + 1].content.toLowerCase().trim();
+        const categoryMap = {
+          '1': 'General Enquiry', '2': 'KYC Related', '3': 'Products Related',
+          '4': 'Orders Related', '5': 'Payment/Bank Accounts', 
+          '6': 'Account Related', '7': 'Others',
+          'general enquiry': 'General Enquiry', 'general': 'General Enquiry',
+          'kyc related': 'KYC Related', 'kyc': 'KYC Related',
+          'products related': 'Products Related', 'products': 'Products Related',
+          'orders related': 'Orders Related', 'orders': 'Orders Related',
+          'payment/bank accounts': 'Payment/Bank Accounts', 'payment': 'Payment/Bank Accounts',
+          'bank accounts': 'Payment/Bank Accounts', 'account related': 'Account Related',
+          'account': 'Account Related', 'others': 'Others', 'other': 'Others'
+        };
+        category = categoryMap[userCategoryResponse] || 'Others';
+      }
+      
+      // Find the description (first user message after Step 3)
+      const step3Index = messages.findIndex(msg => 
+        msg.content && msg.content.includes('Step 3 of 4')
+      );
+      if (step3Index !== -1 && messages[step3Index + 1]) {
+        description = messages[step3Index + 1].content;
+      }
+      
+      if (issueTitle && category && description) {
+        // Create ticket without files
+        const ticketId = `TCK${Date.now()}${Math.floor(Math.random() * 10000)}`;
+        
+        const ticket = new Ticket({
+          customer_id: user.customerId || user.id,
+          customer_email: user.email,
+          issue_title: issueTitle,
+          category: category,
+          description: description,
+          status: "Open",
+          priority: "Medium",
+          ticket_id: ticketId,
+          attachments: []
+        });
+        
+        await ticket.save();
+        console.log('Ticket created without attachments:', ticketId);
+        
+        return {
+          shouldRespond: true,
+          response: `✅ **Ticket Created Successfully!**
+
+**Ticket ID:** ${ticketId}
+**Title:** ${issueTitle}
+**Category:** ${category}
+**Status:** Open
+**Attachments:** None
+
+Your support ticket has been created and assigned to our team. You'll receive updates on the progress via email.
+
+**What's next?**
+- Our support team will review your ticket within 24 hours
+- You'll receive email notifications for any updates
+- You can reference your ticket using ID: ${ticketId}
+
+Is there anything else I can help you with regarding your investments or account?`
+        };
+      } else {
+        return {
+          shouldRespond: true,
+          response: 'I\'m sorry, there seems to be missing information for creating your ticket. Please start the ticket creation process again by saying "I want to raise a ticket".'
+        };
+      }
+    } catch (error) {
+      console.error('Error creating ticket without attachments:', error);
+      return {
+        shouldRespond: true,
+        response: 'I\'m sorry, there was an error creating your ticket. Please try again or contact our support team directly.'
+      };
+    }
+  }
+  
+  // Default response if we can't determine the step
+  return {
+    shouldRespond: false,
+    response: ''
+  };
+}
+
+// Get all chats for a user
+app.get("/api/chat", authenticateToken, async (req, res) => {
+  try {
+    const userId = new ObjectId(req.user._id);
+    const db = mongoClient.db("financeai");
+    const chatsCollection = db.collection("chats");
+
+    const chats = await chatsCollection
+      .find({ userId: userId })
+      .sort({ updatedAt: -1 })
+      .limit(100)
+      .toArray();
+
+    res.json(chats);
+  } catch (error) {
+    console.error("Chat list error:", error);
+    res.status(500).json({ error: "Failed to load chats" });
+  }
+});
+
+// Get specific chat
 app.get("/api/chat/:chatId", authenticateToken, async (req, res) => {
   try {
     const { chatId } = req.params;
@@ -872,6 +1238,78 @@ app.get("/api/chat/:chatId", authenticateToken, async (req, res) => {
   } catch (error) {
     console.error("Chat load error:", error);
     res.status(500).json({ error: "Failed to load chat" });
+  }
+});
+
+// Delete a chat
+app.delete("/api/chat/:chatId", authenticateToken, async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const userId = new ObjectId(req.user._id);
+
+    if (!ObjectId.isValid(chatId)) {
+      return res.status(400).json({ error: "Invalid chat ID format" });
+    }
+
+    const db = mongoClient.db("financeai");
+    const chatsCollection = db.collection("chats");
+
+    const result = await chatsCollection.deleteOne({
+      _id: new ObjectId(chatId),
+      userId: userId,
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: "Chat not found" });
+    }
+
+    res.json({ message: "Chat deleted successfully" });
+  } catch (error) {
+    console.error("Chat deletion error:", error);
+    res.status(500).json({ error: "Failed to delete chat" });
+  }
+});
+
+// Update chat title
+app.put("/api/chat/:chatId", authenticateToken, async (req, res) => {
+  try {
+    const { chatId } = req.params;
+    const { title } = req.body;
+    const userId = new ObjectId(req.user._id);
+
+    if (!ObjectId.isValid(chatId)) {
+      return res.status(400).json({ error: "Invalid chat ID format" });
+    }
+
+    if (!title || title.trim().length === 0) {
+      return res.status(400).json({ error: "Title is required" });
+    }
+
+    const db = mongoClient.db("financeai");
+    const chatsCollection = db.collection("chats");
+
+    const result = await chatsCollection.updateOne(
+      {
+        _id: new ObjectId(chatId),
+        userId: userId,
+      },
+      {
+        $set: {
+          title: title.trim(),
+          updatedAt: new Date(),
+        },
+        $inc: { __v: 1 },
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: "Chat not found" });
+    }
+
+    res.json({ message: "Chat title updated successfully", title: title.trim() });
+  } catch (error) {
+    console.error("Chat title update error:", error);
+    res.status(500).json({ error: "Failed to update chat title" });
   }
 });
 
@@ -1148,7 +1586,9 @@ app.get("/", (req, res) => {
   });
 });
 
-app.use("/api", apiRoutes);
+// Include ticket routes directly
+const ticketRoutes = require("./routes/ticketRoutes");
+app.use("/api/tickets", ticketRoutes);
 
 app.use((err, req, res, next) => {
   console.error("Global error:", err.stack);

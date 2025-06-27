@@ -18,6 +18,16 @@ const sanitizeInput = (input) => {
     return purify.sanitize(input);
 };
 
+const ticketRoutes = require('./ticketRoutes');
+
+// Use ticket routes
+router.use('/tickets', ticketRoutes);
+
+// Health check route
+router.get('/health', (req, res) => {
+  res.json({ status: 'OK', message: 'API is working', timestamp: new Date().toISOString() });
+});
+
 // Signup
 router.post('/auth/signup', async (req, res) => {
     try {
