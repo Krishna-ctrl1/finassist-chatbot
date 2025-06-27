@@ -2539,32 +2539,11 @@ async function handleTicketCreation(button) {
     const result = await response.json();
     console.log('Ticket created successfully:', result);
 
-    // Show success message in chat immediately
-    const successMessage = `✅ **Ticket Created Successfully!**
-
-**Ticket ID:** ${result.ticket.ticket_id}
-**Title:** ${issueTitle}
-**Category:** ${category}
-**Status:** Open
-**Attachments:** ${selectedFiles.length} file(s)
-
-Your support ticket has been created and assigned to our team. You'll receive updates on the progress via email.
-
-**What's next?**
-- Our support team will review your ticket within 24 hours
-- You'll receive email notifications for any updates
-- You can reference your ticket using ID: ${result.ticket.ticket_id}
-
-Is there anything else I can help you with regarding your investments or account?`;
-
     // Clear the file upload interface
     const fileUploadContainer = document.querySelector('.file-upload-container');
     if (fileUploadContainer) {
       fileUploadContainer.remove();
     }
-
-    // Display success message in chat immediately
-    appendMessage('bot', successMessage);
 
     // Reset state
     selectedFiles = [];
@@ -2572,7 +2551,14 @@ Is there anything else I can help you with regarding your investments or account
 
     showNotification(`Ticket ${result.ticket.ticket_id} created successfully!`, 'success');
     
-    // Optional: Reload chat history to show the updated ticket in sidebar (but don't reload the current chat)
+    // Reload the current chat to show the success message that was added by the backend
+    if (currentChatId) {
+      setTimeout(() => {
+        loadChat(currentChatId);
+      }, 500);
+    }
+    
+    // Also reload chat history to update sidebar
     setTimeout(() => {
       loadChatHistory();
     }, 1000);

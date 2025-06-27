@@ -850,7 +850,7 @@ Respond directly to the user’s query with specific data and a natural, engagin
           { role: "user", content: processedMessage },
         ],
         max_tokens: maxTokens,
-        temperature: 0.7,
+        temperature: 0.65,
       });
 
       let aiResponse = completion.choices[0].message.content;

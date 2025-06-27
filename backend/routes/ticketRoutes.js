@@ -180,17 +180,47 @@ router.post("/create", authenticateToken, upload.array('attachments', 3), async 
           const db = mongoClient.db("financeai");
           const chatsCollection = db.collection("chats");
           
+          // Create the success message that will be added to chat history
+          const successMessage = `✅ **Ticket Created Successfully!**
+
+**Ticket ID:** ${ticket_id}
+**Title:** ${issue_title}
+**Category:** ${category}
+**Status:** Open
+**Attachments:** ${attachments.length} file(s)
+
+Your support ticket has been created and assigned to our team. You'll receive updates on the progress via email.
+
+**What's next?**
+- Our support team will review your ticket within 24 hours
+- You'll receive email notifications for any updates
+- You can reference your ticket using ID: ${ticket_id}
+
+Is there anything else I can help you with regarding your investments or account?`;
+          
+          // Add the success message to the chat history
+          const botMessage = {
+            sender: "bot",
+            content: successMessage,
+            timestamp: new Date(),
+          };
+          
           await chatsCollection.updateOne(
             { _id: new ObjectId(chatId) },
             { 
               $set: { 
                 hasTicket: true, 
                 ticketId: ticket_id,
-                ticketCreatedAt: new Date()
-              } 
+                ticketCreatedAt: new Date(),
+                updatedAt: new Date()
+              },
+              $push: {
+                messages: botMessage
+              },
+              $inc: { __v: 1 }
             }
           );
-          console.log(`Chat ${chatId} updated with ticket reference`);
+          console.log(`Chat ${chatId} updated with ticket reference and success message`);
         }
       } catch (chatError) {
         console.error("Error updating chat with ticket reference:", chatError);
