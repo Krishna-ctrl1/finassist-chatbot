@@ -2763,6 +2763,7 @@ function showLandingArea(user) {
         }
       } catch (error) {
         console.error('Error checking ProfileDropdown availability:', error);
+        console.error('Error checking ProfileDropdown availability:', error);
       }
     }, 100);
     
