@@ -8,7 +8,9 @@ const apiRoutes = require("./routes/api");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { MongoClient, ObjectId, GridFSBucket } = require("mongodb");
+const CustomerMutualFunds = require("./models/customerMutualFundsModel");
 const OpenAI = require("openai");
+const nodemailer = require("nodemailer");
 
 // Import ticket model
 const Ticket = require("./models/ticketModel");
@@ -21,9 +23,20 @@ const app = express();
 const MONGO_URI = process.env.MONGO_URI;
 const JWT_SECRET = process.env.JWT_SECRET;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const EMAIL_USER = process.env.EMAIL_USER;
+const EMAIL_PASS = process.env.EMAIL_PASS;
 
 const openai = new OpenAI({
   apiKey: OPENAI_API_KEY,
+});
+
+// Configure nodemailer transporter
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: EMAIL_USER,
+    pass: EMAIL_PASS,
+  },
 });
 
 let mongoClient;
@@ -39,12 +52,10 @@ async function initMongoDB() {
     await mongoClient.connect();
     console.log("MongoDB client connected for customer authentication");
 
-    // Make MongoDB client available to routes
-    app.set('mongoClient', mongoClient);
+    app.set("mongoClient", mongoClient);
 
     const db = mongoClient.db("financeai");
 
-    // Test database connection
     await db.admin().ping();
     console.log("MongoDB ping successful");
 
@@ -62,8 +73,8 @@ async function initMongoDB() {
 
 // Rate limiting for authentication endpoints
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per window
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: "Too many requests from this IP, please try again later.",
 });
 app.use("/api/auth", authLimiter);
@@ -183,16 +194,6 @@ async function getUserData(customerId) {
       throw new Error("Invalid customer ID");
     }
 
-    const customerExists = await db
-      .collection("customer")
-      .findOne({ id: numericCustomerId });
-    console.log(
-      "Customer verification:",
-      customerExists
-        ? `Found customer: ${customerExists.name}`
-        : "Customer not found"
-    );
-
     const [
       customer,
       customerDetail,
@@ -201,6 +202,10 @@ async function getUserData(customerId) {
       investmentPerformance,
       investmentReturns,
       orders,
+      bankAccounts,
+      upiAccounts,
+      cards,
+      mutualFundsInvested, // Add this to fetch customer_mutual_funds
     ] = await Promise.all([
       db
         .collection("customer")
@@ -255,6 +260,38 @@ async function getUserData(customerId) {
           console.error("Error fetching orders:", err);
           return [];
         }),
+      db
+        .collection("customer_bank_accounts")
+        .find({ customer_id: numericCustomerId })
+        .toArray()
+        .catch((err) => {
+          console.error("Error fetching bank accounts:", err);
+          return [];
+        }),
+      db
+        .collection("customer_upi")
+        .find({ customer_id: numericCustomerId })
+        .toArray()
+        .catch((err) => {
+          console.error("Error fetching UPI accounts:", err);
+          return [];
+        }),
+      db
+        .collection("customer_cards")
+        .find({ customer_id: numericCustomerId })
+        .toArray()
+        .catch((err) => {
+          console.error("Error fetching cards:", err);
+          return [];
+        }),
+      db
+        .collection("customer_mutual_funds")
+        .find({ customer_id: numericCustomerId })
+        .toArray()
+        .catch((err) => {
+          console.error("Error fetching customer mutual funds:", err);
+          return [];
+        }),
     ]);
 
     let orderDetails = [];
@@ -280,6 +317,7 @@ async function getUserData(customerId) {
       ...new Set([
         ...(folios || []).map((f) => f?.mf_id),
         ...(investmentReturns || []).map((r) => r?.mf_id),
+        ...(mutualFundsInvested || []).map((m) => m?.fund_name), // Include fund names or IDs if applicable
       ]),
     ].filter((id) => id);
 
@@ -303,6 +341,10 @@ async function getUserData(customerId) {
       ordersCount: orders?.length || 0,
       foliosCount: folios?.length || 0,
       orderDetailsCount: orderDetails?.length || 0,
+      bankAccountsCount: bankAccounts?.length || 0,
+      upiAccountsCount: upiAccounts?.length || 0,
+      cardsCount: cards?.length || 0,
+      mutualFundsInvestedCount: mutualFundsInvested?.length || 0, // Log mutual funds count
     });
 
     return {
@@ -326,6 +368,10 @@ async function getUserData(customerId) {
       orders: orders || [],
       orderDetails: orderDetails || [],
       mutualFunds: mutualFunds || [],
+      bankAccounts: bankAccounts || [],
+      upiAccounts: upiAccounts || [],
+      cards: cards || [],
+      mutualFundsInvested: mutualFundsInvested || [], // Add mutual funds data
     };
   } catch (error) {
     console.error("Error fetching user data:", error);
@@ -340,6 +386,10 @@ async function getUserData(customerId) {
       orders: [],
       orderDetails: [],
       mutualFunds: [],
+      bankAccounts: [],
+      upiAccounts: [],
+      cards: [],
+      mutualFundsInvested: [], // Add mutual funds data in case of error
     };
   }
 }
@@ -357,13 +407,11 @@ const entityMapping = {
 function preprocessQuery(message) {
   let processedMessage = message.toLowerCase().trim();
 
-  // Replace abbreviations and common typos
   Object.keys(entityMapping).forEach((key) => {
     const regex = new RegExp(`\\b${key}\\b`, "gi");
     processedMessage = processedMessage.replace(regex, entityMapping[key]);
   });
 
-  // Complete partial sentences
   if (!processedMessage.match(/[.!?]$/)) {
     processedMessage += " details";
   }
@@ -392,18 +440,15 @@ async function classifyQueryWithAI(message, conversationHistory = []) {
 Your task is to classify the following user query into exactly ONE of these categories:
 
 1. "GREETING" - Simple greetings like "hi", "hello", "hey", "thanks", "thank you"
-
 2. "USER-SPECIFIC-FINANCIAL" - Questions about the user's EXISTING personal financial data like "my portfolio", "my orders", "my balance", "show my portfolio", "check my orders", "view my holdings"
-
 3. "GENERAL-FINANCIAL" - Any finance-related questions including:
    - Financial planning
    - Financial education
    - Tax implications
    - Market analysis
-
 4. "NON-FINANCIAL" - Questions completely unrelated to finance
-
 5. "AFFIRMATIVE_RESPONSE" - Simple responses like "yes", "ok", "sure", "please", "yes please" that are answering a previous question
+6. "INVESTMENT_REQUEST" - Requests to start an investment, like "I want to make an investment", "start investing", "invest money"
 
 User query: "${message}"${contextInfo}
 
@@ -426,6 +471,7 @@ Respond with ONLY the category name. Do not include any explanation.`;
       "GENERAL-FINANCIAL",
       "NON-FINANCIAL",
       "AFFIRMATIVE_RESPONSE",
+      "INVESTMENT_REQUEST",
     ];
     if (!validCategories.includes(classification)) {
       console.warn(
@@ -455,6 +501,16 @@ function fallbackClassifyQuery(message) {
     return "GREETING";
   }
 
+  const investmentKeywords = [
+    "make an investment",
+    "start investing",
+    "invest money",
+    "i want to make an investment",
+    "i want to invest",
+    "start an sip",
+    "lumpsum investment",
+  ];
+
   const financialKeywords = [
     "portfolio",
     "money",
@@ -470,10 +526,17 @@ function fallbackClassifyQuery(message) {
     "investment",
   ];
 
+  const hasInvestmentKeyword = investmentKeywords.some((keyword) =>
+    lowerMessage.includes(keyword)
+  );
   const hasFinancialKeyword = financialKeywords.some((keyword) =>
     lowerMessage.includes(keyword)
   );
   const hasUserSpecific = lowerMessage.includes("my ");
+
+  if (hasInvestmentKeyword) {
+    return "INVESTMENT_REQUEST";
+  }
 
   if (!hasFinancialKeyword) {
     return "NON-FINANCIAL";
@@ -482,7 +545,1524 @@ function fallbackClassifyQuery(message) {
   return hasUserSpecific ? "USER-SPECIFIC-FINANCIAL" : "GENERAL-FINANCIAL";
 }
 
-// Chat Route
+// Function to check if message is an investment request
+function checkIfInvestmentRequest(message, conversationContext, chat) {
+  const lowerMessage = message.toLowerCase().trim();
+
+  const investmentKeywords = [
+    "make an investment",
+    "start investing",
+    "invest money",
+    "i want to make an investment",
+    "i want to invest",
+    "start an sip",
+    "lumpsum investment",
+    "sip",
+    "lumpsum",
+    "cancel my sip",
+    "pause my sip",
+    "cancel my lumpsum",
+    "pause my lumpsum",
+  ];
+
+  const hasInvestmentKeyword = investmentKeywords.some((keyword) =>
+    lowerMessage.includes(keyword)
+  );
+
+  const workflowState = chat.workflowState || {};
+  const isInWorkflow = workflowState.step && workflowState.step >= 1;
+
+  // Only consider conversation context for workflow continuation if in an active workflow
+  const isInInvestmentFlow = isInWorkflow && conversationContext.some(
+    (msg) =>
+      msg.content &&
+      (msg.content.toLowerCase().includes("sip or lumpsum") ||
+        msg.content.toLowerCase().includes("step") ||
+        msg.content.toLowerCase().includes("investing for a specific goal") ||
+        msg.content.toLowerCase().includes("accumulate for this goal") ||
+        msg.content.toLowerCase().includes("mutual fund") ||
+        msg.content.toLowerCase().includes("otp sent") ||
+        msg.content.toLowerCase().includes("payment mandate") ||
+        msg.content.toLowerCase().includes("pay using your saved upi") ||
+        msg.content.toLowerCase().includes("select the investment") ||
+        msg.content.toLowerCase().includes("authorize the cancel") ||
+        msg.content.toLowerCase().includes("authorize the pause"))
+  );
+
+  // Allow explicit cancellation
+  const isCancellation = ["cancel", "exit", "stop", "pause"].some((keyword) =>
+    lowerMessage.includes(keyword)
+  );
+
+  console.log("checkIfInvestmentRequest:", {
+    message: lowerMessage,
+    hasInvestmentKeyword,
+    isInInvestmentFlow,
+    isInWorkflow,
+    isCancellation,
+    workflowState,
+  });
+
+  if (isCancellation && isInWorkflow) {
+    chat.workflowState = {}; // Reset workflow state
+    return false;
+  }
+
+  return hasInvestmentKeyword || isInInvestmentFlow;
+}
+
+// Function to generate OTP
+function generateOTP() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+// Function to send OTP via email
+async function sendOTPEmail(email, otp) {
+  try {
+    if (!EMAIL_USER || !EMAIL_PASS) {
+      throw new Error(
+        "Email configuration is missing (EMAIL_USER or EMAIL_PASS)"
+      );
+    }
+
+    const mailOptions = {
+      from: EMAIL_USER,
+      to: email,
+      subject: "Investment Authorization OTP",
+      text: `Your OTP for authorizing the investment is ${otp}. It is valid for 10 minutes.`,
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`OTP ${otp} sent to ${email}`);
+    return true;
+  } catch (error) {
+    console.error(`Error sending OTP to ${email}:`, error.message);
+    return false;
+  }
+}
+ 
+// Function to handle cancel/pause workflow
+async function handleCancelPauseWorkflow(message, chat, user) {
+  const lowerMessage = message.toLowerCase().trim();
+  const conversationHistory = chat.messages || [];
+  const lastBotMessage = conversationHistory
+    .slice()
+    .reverse()
+    .find((msg) => msg.sender === "bot");
+  const lastBotContent = lastBotMessage?.content || "";
+  const db = mongoClient.db("financeai");
+
+  chat.workflowState = chat.workflowState || {};
+  const workflowState = chat.workflowState;
+
+  // Step 1: Check if it's a new cancel/pause request or a specific cancellation
+  const isInitialRequest =
+    (lowerMessage.includes("cancel my sip") ||
+      lowerMessage.includes("pause my sip") ||
+      lowerMessage.includes("stop my sip") ||
+      lowerMessage.includes("cancel my lumpsum") ||
+      lowerMessage.includes("pause my lumpsum") ||
+      lowerMessage.includes("stop my lumpsum") ||
+      lowerMessage.includes("cancel an investment") ||
+      lowerMessage.includes("pause an investment")) &&
+    !lastBotContent.includes("Your active investments:");
+
+  const isSpecificCancelRequest =
+    lowerMessage.includes("cancel") &&
+    (lowerMessage.includes("sip") || lowerMessage.includes("lumpsum")) &&
+    lowerMessage.includes("in");
+
+  if (isInitialRequest) {
+    const action = lowerMessage.includes("cancel") ? "cancel" : "pause";
+    workflowState.action = action;
+
+    // Fetch user's active mutual funds
+    const mutualFunds = await db
+      .collection("customer_mutual_funds")
+      .find({
+        customer_id: parseInt(user.customerId || user.id),
+        status: "Active",
+      })
+      .toArray();
+
+    if (!mutualFunds || mutualFunds.length === 0) {
+      chat.workflowState = {};
+      return {
+        shouldRespond: true,
+        response: `No active investments found to ${action}.`,
+        tempData: { step: null },
+      };
+    }
+
+    // Format each investment as a numbered item
+    const formattedInvestments = mutualFunds
+      .map((mf, index) => {
+        const details = [
+          `${index + 1}. ${mf.fund_name} (${mf.investment_type})`,
+          `Amount: ₹${mf.amount.toLocaleString("en-IN")}`,
+          `Goal: ${mf.goal || "General"}`,
+        ];
+        if (mf.investment_type === "SIP") {
+          details.push(`Deduction: ${mf.deduction_date}`);
+        }
+        return details.join(" - ");
+      })
+      .join("\n");
+
+    workflowState.mutualFunds = mutualFunds;
+    workflowState.step = 1;
+    const responseMessage = `Your active investments:\n\n${formattedInvestments}\n\nReply with the number (1-${mutualFunds.length}) to ${action} or "Cancel" to exit.`;
+
+    return {
+      shouldRespond: true,
+      response: responseMessage,
+      tempData: { step: 1, action, mutualFunds },
+    };
+  }
+
+  // Handle specific cancellation request (e.g., "Cancel SIP of ₹4,790 in Mirae Asset Large Cap Fund")
+  if (isSpecificCancelRequest && !workflowState.step) {
+    const mutualFunds = await db
+      .collection("customer_mutual_funds")
+      .find({
+        customer_id: parseInt(user.customerId || user.id),
+        status: "Active",
+      })
+      .toArray();
+
+    if (!mutualFunds || mutualFunds.length === 0) {
+      chat.workflowState = {};
+      return {
+        shouldRespond: true,
+        response: `No active investments found to cancel.`,
+        tempData: { step: null },
+      };
+    }
+
+    // Parse the message to extract fund name and amount
+    const matchFund = lowerMessage.match(/in\s+(.+?)\s*(?:fund|$)/i);
+    const matchAmount = lowerMessage.match(/₹?\s*([\d,]+)\s*(?:\/month)?/i);
+    const fundName = matchFund ? matchFund[1].trim() : null;
+    const amount = matchAmount ? parseFloat(matchAmount[1].replace(/,/g, "")) : null;
+    const isSIP = lowerMessage.includes("sip");
+
+    const matchedInvestment = mutualFunds.find(
+      (mf) =>
+        mf.fund_name.toLowerCase().includes(fundName) &&
+        mf.amount === amount &&
+        mf.investment_type === (isSIP ? "SIP" : "Lumpsum")
+    );
+
+    if (!matchedInvestment) {
+      // If no specific match, show the numbered list
+      const formattedInvestments = mutualFunds
+        .map((mf, index) => {
+          const details = [
+            `${index + 1}. ${mf.fund_name} (${mf.investment_type})`,
+            `Amount: ₹${mf.amount.toLocaleString("en-IN")}`,
+            `Goal: ${mf.goal || "General"}`,
+          ];
+          if (mf.investment_type === "SIP") {
+            details.push(`Deduction: ${mf.deduction_date}`);
+          }
+          return details.join(" - ");
+        })
+        .join("\n");
+
+      workflowState.mutualFunds = mutualFunds;
+      workflowState.step = 1;
+      workflowState.action = "cancel";
+      return {
+        shouldRespond: true,
+        response: `Could not find the specified investment. Here are your active investments:\n\n${formattedInvestments}\n\nReply with the number (1-${mutualFunds.length}) to cancel or "Cancel" to exit.`,
+        tempData: { step: 1, action: "cancel", mutualFunds },
+      };
+    }
+
+    workflowState.selectedInvestment = matchedInvestment;
+    workflowState.step = 2;
+    workflowState.action = "cancel";
+
+    const responseMessage = `Confirm cancel of ${matchedInvestment.fund_name} (${matchedInvestment.investment_type}, ₹${matchedInvestment.amount.toLocaleString("en-IN")}). Reply "Confirm" or "Cancel".`;
+
+    return {
+      shouldRespond: true,
+      response: responseMessage,
+      tempData: { step: 2, selectedInvestment: matchedInvestment, action: "cancel" },
+    };
+  }
+
+  // Step 2: Handle investment selection (by number or "Cancel <number>")
+  if (
+    (lastBotContent.includes("Your active investments:") || lastBotContent.includes("Could not find the specified investment")) &&
+    workflowState.step === 1
+  ) {
+    if (lowerMessage === "cancel") {
+      chat.workflowState = {};
+      return {
+        shouldRespond: true,
+        response: `Cancelled the ${workflowState.action} request.`,
+        tempData: { step: null },
+      };
+    }
+
+    // Handle "Cancel <number>" or just "<number>"
+    let selectionIndex;
+    if (lowerMessage.startsWith("cancel ")) {
+      selectionIndex = parseInt(lowerMessage.replace("cancel ", "")) - 1;
+    } else {
+      selectionIndex = parseInt(message) - 1;
+    }
+
+    const mutualFunds = workflowState.mutualFunds || [];
+
+    if (isNaN(selectionIndex) || selectionIndex < 0 || selectionIndex >= mutualFunds.length) {
+      return {
+        shouldRespond: true,
+        response: `Please reply with a number (1-${mutualFunds.length}) or "Cancel <number>" to ${workflowState.action}, or "Cancel" to exit.`,
+        tempData: { step: 1, action: workflowState.action, mutualFunds },
+      };
+    }
+
+    const selectedInvestment = mutualFunds[selectionIndex];
+    workflowState.selectedInvestment = selectedInvestment;
+    workflowState.step = 2;
+
+    const responseMessage = `Confirm ${workflowState.action} of ${selectedInvestment.fund_name} (${selectedInvestment.investment_type}, ₹${selectedInvestment.amount.toLocaleString("en-IN")}). Reply "Confirm" or "Cancel".`;
+
+    return {
+      shouldRespond: true,
+      response: responseMessage,
+      tempData: { step: 2, selectedInvestment, action: workflowState.action },
+    };
+  }
+
+  // Step 3: Handle confirmation
+  if (
+    lastBotContent.includes("Reply \"Confirm\"") &&
+    workflowState.step === 2
+  ) {
+    if (lowerMessage === "cancel") {
+      chat.workflowState = {};
+      return {
+        shouldRespond: true,
+        response: `Cancelled the ${workflowState.action} request.`,
+        tempData: { step: null },
+      };
+    }
+
+    if (lowerMessage === "confirm") {
+      const otp = generateOTP();
+      workflowState.otp = otp;
+      workflowState.otpTimestamp = Date.now();
+
+      const emailSent = await sendOTPEmail(user.email, otp);
+      if (!emailSent) {
+        return {
+          shouldRespond: true,
+          response: `Failed to send OTP to ${user.email}. Please try again or contact support.`,
+          tempData: { step: 2, selectedInvestment: workflowState.selectedInvestment, action: workflowState.action },
+        };
+      }
+
+      workflowState.step = 3;
+      return {
+        shouldRespond: true,
+        response: `OTP sent to ${user.email}. Please enter the 6-digit OTP to ${workflowState.action}.`,
+        tempData: {
+          step: 3,
+          selectedInvestment: workflowState.selectedInvestment,
+          otp,
+          otpTimestamp: Date.now(),
+          action: workflowState.action,
+        },
+      };
+    }
+
+    return {
+      shouldRespond: true,
+      response: `Please reply "Confirm" or "Cancel".`,
+      tempData: { step: 2, selectedInvestment: workflowState.selectedInvestment, action: workflowState.action },
+    };
+  }
+
+  // Step 4: OTP Verification
+  if (
+    lastBotContent.includes("Enter the 6-digit OTP") &&
+    workflowState.step === 3
+  ) {
+    if (lowerMessage === "resend otp") {
+      const otp = generateOTP();
+      workflowState.otp = otp;
+      workflowState.otpTimestamp = Date.now();
+
+      const emailSent = await sendOTPEmail(user.email, otp);
+      if (!emailSent) {
+        return {
+          shouldRespond: true,
+          response: `Failed to resend OTP to ${user.email}. Please try again or contact support.`,
+          tempData: { step: 3, selectedInvestment: workflowState.selectedInvestment, action: workflowState.action },
+        };
+      }
+
+      return {
+        shouldRespond: true,
+        response: `New OTP sent to ${user.email}. Please enter the 6-digit OTP.`,
+        tempData: { otp, otpTimestamp: Date.now(), action: workflowState.action, selectedInvestment: workflowState.selectedInvestment },
+      };
+    }
+
+    if (
+      message === workflowState.otp &&
+      Date.now() - workflowState.otpTimestamp < 10 * 60 * 1000
+    ) {
+      try {
+        const selectedInvestment = workflowState.selectedInvestment;
+        const newStatus = workflowState.action === "cancel" ? "Cancelled" : "Paused";
+
+        // Update customer_mutual_funds collection
+        const updateResult = await db.collection("customer_mutual_funds").updateOne(
+          {
+            _id: new ObjectId(selectedInvestment._id),
+            customer_id: parseInt(user.customerId || user.id),
+          },
+          {
+            $set: { status: newStatus, updated_at: new Date() },
+          }
+        );
+
+        if (updateResult.matchedCount === 0) {
+          return {
+            shouldRespond: true,
+            response: `Error: Could not ${workflowState.action} investment. Please try again or contact support.`,
+            tempData: { step: null },
+          };
+        }
+
+        // Update corresponding order status
+        await db.collection("order").updateOne(
+          {
+            id: selectedInvestment.order_id,
+            customer_id: parseInt(user.customerId || user.id),
+          },
+          {
+            $set: { payment_status: newStatus, updated_at: new Date() },
+          }
+        );
+
+        chat.workflowState = {};
+        return {
+          shouldRespond: true,
+          response: `${selectedInvestment.fund_name} (${selectedInvestment.investment_type}, ₹${selectedInvestment.amount.toLocaleString("en-IN")}) ${newStatus.toLowerCase()}.`,
+          tempData: { step: null },
+        };
+      } catch (error) {
+        console.error(`Error ${workflowState.action}ing investment:`, error);
+        return {
+          shouldRespond: true,
+          response: `Error ${workflowState.action}ing investment. Please try again or contact support.`,
+          tempData: { step: null },
+        };
+      }
+    }
+
+    return {
+      shouldRespond: true,
+      response: `Invalid or expired OTP. Please enter a valid 6-digit OTP or say "Resend OTP".`,
+      tempData: { step: 3, selectedInvestment: workflowState.selectedInvestment, action: workflowState.action },
+    };
+  }
+
+  return {
+    shouldRespond: false,
+    response: "",
+  };
+}
+
+// Function to handle investment workflow
+async function handleInvestmentWorkflow(message, chat, user) {
+  const lowerMessage = message.toLowerCase().trim();
+  const conversationHistory = chat.messages || [];
+  const lastBotMessage = conversationHistory
+    .slice()
+    .reverse()
+    .find((msg) => msg.sender === "bot");
+  const lastBotContent = lastBotMessage?.content || "";
+  const userData = await getUserData(user.customerId || user.id);
+
+  chat.workflowState = chat.workflowState || {};
+  const workflowState = chat.workflowState;
+
+  console.log("Investment Workflow - Message:", message);
+  console.log("Last Bot Content:", lastBotContent);
+  console.log("Current Workflow State:", workflowState);
+
+  const investmentKeywords = [
+    "make an investment",
+    "start investing",
+    "invest money",
+    "i want to make an investment",
+    "i want to invest",
+    "start an sip",
+    "lumpsum investment",
+  ];
+  const isInitialRequest =
+    investmentKeywords.some((keyword) => lowerMessage.includes(keyword)) &&
+    !lastBotContent.includes("Step");
+
+  if (isInitialRequest) {
+    console.log("Starting new investment workflow - Step 1");
+    workflowState.step = 1;
+    workflowState.investmentType = null;
+    return {
+      shouldRespond: true,
+      response: `Great! Would you like to start a SIP (Systematic Investment Plan) or make a Lumpsum investment?\n\n**Options:**\n- SIP\n- Lumpsum`,
+      tempData: { step: 1 },
+    };
+  }
+
+  // SIP Flow: Step 2 - Ask for investment goal
+  if (
+    lowerMessage === "sip" &&
+    (lastBotContent.includes("SIP or Lumpsum") || workflowState.step === 1)
+  ) {
+    console.log("Advancing to Step 2 - Investment Goal");
+    workflowState.step = 2;
+    workflowState.investmentType = "SIP";
+    return {
+      shouldRespond: true,
+      response: `Awesome! Let’s get started.\n**Step 2 of 6: Investment Goal**\n\nAre you investing for a specific goal like education, retirement, or just growing wealth?`,
+      tempData: { step: 2, investmentType: "SIP" },
+    };
+  }
+
+  if (
+    lastBotContent.includes("Step 2 of 6") &&
+    lastBotContent.includes("Investment Goal")
+  ) {
+    workflowState.step = 3;
+    workflowState.goal = message;
+    return {
+      shouldRespond: true,
+      response: `Got it, you're investing for ${message}.\n**Step 3 of 6: Target Amount**\n\nHow much do you want to accumulate for this goal? (e.g., ₹20 lakhs)`,
+      tempData: { step: 3, goal: message },
+    };
+  }
+
+  if (
+    lastBotContent.includes("Step 3 of 6") &&
+    lastBotContent.includes("Target Amount")
+  ) {
+    const targetAmount = message.match(
+      /₹?\s*([\d,]+(?:\.\d+)?)\s*(lakh|lakhs)?/i
+    );
+    if (targetAmount) {
+      let amount = parseFloat(targetAmount[1].replace(/,/g, ""));
+      if (targetAmount[2]) amount *= 100000;
+      workflowState.step = 4;
+      workflowState.targetAmount = amount;
+      return {
+        shouldRespond: true,
+        response: `Noted, your target is ₹${amount.toLocaleString(
+          "en-IN"
+        )}.\n**Step 4 of 6: Investment Horizon**\n\nIn how many years do you want to achieve this goal?`,
+        tempData: { step: 4, targetAmount: amount },
+      };
+    } else {
+      return {
+        shouldRespond: true,
+        response: `Please provide a valid amount (e.g., ₹20 lakhs or ₹2000000).`,
+      };
+    }
+  }
+
+  if (
+    lastBotContent.includes("Step 4 of 6") &&
+    lastBotContent.includes("Investment Horizon")
+  ) {
+    const years = parseInt(message);
+    if (isNaN(years) || years <= 0) {
+      return {
+        shouldRespond: true,
+        response: `Please provide a valid number of years (e.g., 15).`,
+      };
+    }
+
+    const targetAmount = workflowState.targetAmount || 0;
+    const monthlyRate = 0.12 / 12;
+    const months = years * 12;
+    const sipAmount = Math.round(
+      targetAmount / ((Math.pow(1 + monthlyRate, months) - 1) / monthlyRate)
+    );
+
+    workflowState.step = 5;
+    workflowState.years = years;
+    workflowState.sipAmount = sipAmount;
+    return {
+      shouldRespond: true,
+      response: `To reach ₹${targetAmount.toLocaleString(
+        "en-IN"
+      )} in ${years} years, you should invest about ₹${sipAmount.toLocaleString(
+        "en-IN"
+      )}/month (at ~12% return).\n\n**Step 5 of 6: Confirm SIP Amount**\n\nWould you like to go with this or enter your own amount? (Reply "Go with this" or specify an amount, e.g., ₹5000)`,
+      tempData: { step: 5, years, sipAmount },
+    };
+  }
+
+  if (
+    lastBotContent.includes("Step 5 of 6") &&
+    lastBotContent.includes("Confirm SIP Amount")
+  ) {
+    let sipAmount = 0;
+    if (lowerMessage === "go with this") {
+      sipAmount = workflowState.sipAmount || 0;
+    } else {
+      const amountMatch = message.match(/₹?\s*([\d,]+)/);
+      if (amountMatch) {
+        sipAmount = parseInt(amountMatch[1].replace(/,/g, ""));
+      } else {
+        return {
+          shouldRespond: true,
+          response: `Please specify a valid amount (e.g., ₹5000) or say "Go with this".`,
+        };
+      }
+    }
+
+    workflowState.step = 6;
+    workflowState.sipAmount = sipAmount;
+    return {
+      shouldRespond: true,
+      response: `Got it, your SIP amount is ₹${sipAmount.toLocaleString(
+        "en-IN"
+      )}/month.\n**Step 6 of 6: Choose Mutual Fund**\n\nWould you like me to recommend a mutual fund, or do you want to pick one yourself?\n\n**Options:**\n- Recommend for me\n- I’ll choose`,
+      tempData: { step: 6, sipAmount },
+    };
+  }
+
+  if (
+    lastBotContent.includes("Step 6 of 6") &&
+    lastBotContent.includes("Choose Mutual Fund")
+  ) {
+    if (lowerMessage.includes("recommend for me")) {
+      const fund = workflowState.goal?.toLowerCase().includes("retirement")
+        ? "Mirae Asset Large Cap Fund (Direct – Growth)"
+        : "SBI Bluechip Fund (Direct – Growth)";
+      workflowState.fund = fund;
+      return {
+        shouldRespond: true,
+        response: `Based on your goal and timeline, I suggest ${fund}.\nWould you like to go ahead with this? (Reply "Yes" or "No")`,
+        tempData: { step: 7, fund },
+      };
+    } else if (lowerMessage.includes("i’ll choose")) {
+      return {
+        shouldRespond: true,
+        response: `Please specify the mutual fund you'd like to invest in (e.g., Mirae Asset Large Cap Fund).`,
+      };
+    } else {
+      return {
+        shouldRespond: true,
+        response: `Please choose an option: "Recommend for me" or "I’ll choose".`,
+      };
+    }
+  }
+
+  if (
+    (lastBotContent.includes("suggest") || lastBotContent.includes("chosen")) &&
+    (lastBotContent.includes("mutual fund") ||
+      lastBotContent.includes("SBI Bluechip Fund") ||
+      lastBotContent.includes("Mirae Asset Large Cap Fund")) &&
+    lowerMessage === "yes" &&
+    workflowState.step === 7
+  ) {
+    console.log("Advancing to Step 8 - Investment Summary and Deduction Date");
+    workflowState.step = 8;
+    const { sipAmount, fund, goal, targetAmount, years } = workflowState;
+    return {
+      shouldRespond: true,
+      response: `Here’s a summary of your SIP investment:\n\n**Goal:** ${
+        goal || "General"
+      }\n**Target Amount:** ₹${targetAmount.toLocaleString(
+        "en-IN"
+      )}\n**Horizon:** ${years} years\n**SIP Amount:** ₹${sipAmount.toLocaleString(
+        "en-IN"
+      )}/month\n**Mutual Fund:** ${fund}\n\nWhich date should your SIP be deducted each month? (e.g., 1st, 5th, 10th)`,
+      tempData: { step: 8 },
+    };
+  }
+
+  if (
+    lastBotContent.includes("deducted each month") &&
+    message.match(/\d+(st|nd|rd|th)/i)
+  ) {
+    const dayMatch = message.match(/\d+/);
+    const day = parseInt(dayMatch[0]);
+    if (day < 1 || day > 28) {
+      return {
+        shouldRespond: true,
+        response: `Please select a valid date between the 1st and 28th of the month.`,
+      };
+    }
+
+    const otp = generateOTP();
+    workflowState.step = 9;
+    workflowState.deductionDate = message;
+    workflowState.otp = otp;
+    workflowState.otpTimestamp = Date.now();
+
+    const emailSent = await sendOTPEmail(user.email, otp);
+    if (!emailSent) {
+      return {
+        shouldRespond: true,
+        response: `Failed to send OTP to your registered email. Please try again or contact support.`,
+      };
+    }
+
+    return {
+      shouldRespond: true,
+      response: `Please enter the OTP sent to your registered email (${user.email}) to authorize the investment.`,
+      tempData: {
+        step: 9,
+        deductionDate: message,
+        otp,
+        otpTimestamp: Date.now(),
+      },
+    };
+  }
+
+  if (
+    lastBotContent.includes("OTP sent to your registered email") &&
+    workflowState.investmentType === "SIP"
+  ) {
+    if (
+      message === workflowState.otp &&
+      Date.now() - workflowState.otpTimestamp < 10 * 60 * 1000
+    ) {
+      const paymentMethods = [];
+      if (userData.bankAccounts && userData.bankAccounts.length > 0) {
+        userData.bankAccounts.forEach((account, index) => {
+          paymentMethods.push({
+            id: `bank_${account._id}`,
+            display: `Bank Account: ${account.bank_name} (****${
+              account.account_number?.slice(-4) || "unknown"
+            })`,
+          });
+        });
+      }
+      if (userData.upiAccounts && userData.upiAccounts.length > 0) {
+        userData.upiAccounts.forEach((upi, index) => {
+          paymentMethods.push({
+            id: `upi_${upi._id}`,
+            display: `UPI: ${upi.upi_id}`,
+          });
+        });
+      }
+      if (userData.cards && userData.cards.length > 0) {
+        userData.cards.forEach((card, index) => {
+          paymentMethods.push({
+            id: `card_${card._id}`,
+            display: `Card: ${card.card_type} (****${
+              card.card_number?.slice(-4) || "unknown"
+            })`,
+          });
+        });
+      }
+
+      let responseMessage = `OTP verified!\nPlease select a payment method for your SIP investment:\n\n`;
+      if (paymentMethods.length > 0) {
+        responseMessage +=
+          paymentMethods
+            .map((method, index) => `${index + 1}. ${method.display}`)
+            .join("\n") +
+          `\n${paymentMethods.length + 1}. Add a new payment method`;
+        workflowState.paymentMethods = paymentMethods;
+        return {
+          shouldRespond: true,
+          response: responseMessage,
+          tempData: { step: 10, paymentMethods },
+        };
+      } else {
+        return {
+          shouldRespond: true,
+          response: `No saved payment methods found. Would you like to add a new payment method? (Reply "Yes" or "Cancel")`,
+          tempData: { step: 10, paymentMethods: [] },
+        };
+      }
+    } else {
+      return {
+        shouldRespond: true,
+        response: `Invalid or expired OTP. Please enter a valid 6-digit OTP or request a new one by saying "Resend OTP".`,
+      };
+    }
+  }
+
+  if (
+    lastBotContent.includes("Please select a payment method") &&
+    workflowState.step === 10
+  ) {
+    if (lowerMessage === "resend otp") {
+      const otp = generateOTP();
+      workflowState.otp = otp;
+      workflowState.otpTimestamp = Date.now();
+
+      const emailSent = await sendOTPEmail(user.email, otp);
+      if (!emailSent) {
+        return {
+          shouldRespond: true,
+          response: `Failed to send OTP to your registered email. Please try again or contact support.`,
+        };
+      }
+
+      return {
+        shouldRespond: true,
+        response: `A new OTP has been sent to your registered email (${user.email}). Please enter the OTP.`,
+        tempData: { otp, otpTimestamp: Date.now() },
+      };
+    }
+
+    const paymentMethods = workflowState.paymentMethods || [];
+    const selectionIndex = parseInt(message) - 1;
+
+    if (
+      message.toLowerCase() === "add a new payment method" ||
+      (selectionIndex === paymentMethods.length && paymentMethods.length > 0)
+    ) {
+      workflowState.step = 11;
+      return {
+        shouldRespond: true,
+        response: `Please provide the details for the new payment method:\n- Type (Bank Account, UPI, or Card)\n- Details (e.g., for Bank: bank name, account number, IFSC; for UPI: UPI ID; for Card: card type, card number, expiry, CVV)`,
+        tempData: { step: 11 },
+      };
+    }
+
+    if (selectionIndex >= 0 && selectionIndex < paymentMethods.length) {
+      const selectedMethod = paymentMethods[selectionIndex];
+      workflowState.selectedPaymentMethod = selectedMethod.id;
+
+      try {
+        const { sipAmount, fund, deductionDate, goal, targetAmount, years } =
+          workflowState;
+        const db = mongoClient.db("financeai");
+
+        // Create order in the 'order' collection
+        const orderId = `ORD${Date.now()}${Math.floor(Math.random() * 10000)}`;
+        const order = {
+          customer_id: user.customerId || user.id,
+          id: orderId,
+          amount: sipAmount,
+          investment_type: "SIP",
+          payment_status: "Pending",
+          created_at: new Date(),
+          fund_name: fund,
+          deduction_date: deductionDate,
+          goal: goal || "General",
+          target_amount: targetAmount || 0,
+          investment_horizon: years || 0,
+          payment_method: selectedMethod.id,
+        };
+        await db.collection("order").insertOne(order);
+
+        // Save SIP details to 'customer_mutual_funds' collection
+        const mutualFundRecord = {
+          customer_id: user.customerId || user.id,
+          fund_name: fund,
+          amount: sipAmount,
+          deduction_date: deductionDate,
+          investment_type: "SIP",
+          goal: goal || "General",
+          target_amount: targetAmount || 0,
+          investment_horizon: years || 0,
+          order_id: orderId,
+          created_at: new Date(),
+          status: "Active",
+        };
+        await db
+          .collection("customer_mutual_funds")
+          .insertOne(mutualFundRecord);
+
+        // Fetch payment method details for display
+        let paymentDisplay = selectedMethod.display;
+        if (selectedMethod.id.startsWith("bank_")) {
+          const bankId = selectedMethod.id.replace("bank_", "");
+          const bankAccount = await db
+            .collection("customer_bank_accounts")
+            .findOne({
+              _id: new ObjectId(bankId),
+              customer_id: user.customerId || user.id,
+            });
+          if (bankAccount) {
+            paymentDisplay = `Bank Account: ${bankAccount.bank_name} (****${
+              bankAccount.account_number?.slice(-4) || "unknown"
+            })`;
+          } else {
+            paymentDisplay = "Bank Account: Unknown";
+          }
+        } else if (selectedMethod.id.startsWith("upi_")) {
+          const upiId = selectedMethod.id.replace("upi_", "");
+          const upiAccount = await db.collection("customer_upi").findOne({
+            _id: new ObjectId(upiId),
+            customer_id: user.customerId || user.id,
+          });
+          paymentDisplay = upiAccount
+            ? `UPI: ${upiAccount.upi_id}`
+            : "UPI: Unknown";
+        } else if (selectedMethod.id.startsWith("card_")) {
+          const cardId = selectedMethod.id.replace("card_", "");
+          const card = await db.collection("customer_cards").findOne({
+            _id: new ObjectId(cardId),
+            customer_id: user.customerId || user.id,
+          });
+          paymentDisplay = card
+            ? `Card: ${card.card_type} (****${
+                card.card_number?.slice(-4) || "unknown"
+              })`
+            : "Card: Unknown";
+        }
+
+        workflowState.step = null;
+        return {
+          shouldRespond: true,
+          response: `Done! Your SIP of ₹${sipAmount.toLocaleString(
+            "en-IN"
+          )}/month in ${fund} will start from the ${deductionDate} using ${paymentDisplay}.\nYou’re all set! You'll receive a confirmation soon.\n\n**Order ID:** ${orderId}\n**Goal:** ${
+            goal || "General"
+          }\n**Target Amount:** ₹${targetAmount.toLocaleString(
+            "en-IN"
+          )}\n**Horizon:** ${years} years\n\nIs there anything else I can help you with?`,
+          tempData: { step: null },
+        };
+      } catch (error) {
+        console.error(
+          "Error creating SIP order or saving to customer_mutual_funds:",
+          error
+        );
+        return {
+          shouldRespond: true,
+          response: `Sorry, there was an error setting up your SIP. Please try again or contact support.`,
+        };
+      }
+    }
+
+    return {
+      shouldRespond: true,
+      response: `Please select a valid option by number (1-${
+        paymentMethods.length + 1
+      }) or say "Add a new payment method".`,
+    };
+  }
+
+  if (
+    lastBotContent.includes(
+      "Please provide the details for the new payment method"
+    ) &&
+    workflowState.step === 11 &&
+    workflowState.investmentType === "SIP"
+  ) {
+    try {
+      const db = mongoClient.db("financeai");
+      const { sipAmount, fund, deductionDate, goal, targetAmount, years } =
+        workflowState;
+      let paymentMethodId;
+
+      const paymentDetails = lowerMessage;
+      if (paymentDetails.includes("bank")) {
+        const bankDetails = {
+          customer_id: user.customerId || user.id,
+          bank_name: message.match(/bank name: ([^\n]+)/i)?.[1] || "User Bank",
+          account_number:
+            message.match(/account number: (\d+)/i)?.[1] || "1234567890",
+          ifsc_code: message.match(/ifsc: ([^\n]+)/i)?.[1] || "ABCD0001234",
+        };
+        const result = await db
+          .collection("customer_bank_accounts")
+          .insertOne(bankDetails);
+        paymentMethodId = `bank_${result.insertedId}`;
+      } else if (paymentDetails.includes("upi")) {
+        const upiDetails = {
+          customer_id: user.customerId || user.id,
+          upi_id: message.match(/upi id: ([^\n]+)/i)?.[1] || "user@upi",
+        };
+        const result = await db
+          .collection("customer_upi")
+          .insertOne(upiDetails);
+        paymentMethodId = `upi_${result.insertedId}`;
+      } else if (paymentDetails.includes("card")) {
+        const cardDetails = {
+          customer_id: user.customerId || user.id,
+          card_type: message.match(/card type: ([^\n]+)/i)?.[1] || "Visa",
+          card_number:
+            message.match(/card number: (\d+)/i)?.[1] || "1234567890123456",
+          expiry: message.match(/expiry: ([^\n]+)/i)?.[1] || "12/25",
+          cvv: message.match(/cvv: (\d+)/i)?.[1] || "123",
+        };
+        const result = await db
+          .collection("customer_cards")
+          .insertOne(cardDetails);
+        paymentMethodId = `card_${result.insertedId}`;
+      } else {
+        return {
+          shouldRespond: true,
+          response: `Invalid payment method details. Please specify Type (Bank Account, UPI, or Card) and provide relevant details (e.g., for Bank: bank name, account number, IFSC; for UPI: UPI ID; for Card: card type, card number, expiry, CVV).`,
+        };
+      }
+
+      const orderId = `ORD${Date.now()}${Math.floor(Math.random() * 10000)}`;
+      const order = {
+        customer_id: user.customerId || user.id,
+        id: orderId,
+        amount: sipAmount,
+        investment_type: "SIP",
+        payment_status: "Pending",
+        created_at: new Date(),
+        fund_name: fund,
+        deduction_date: deductionDate,
+        goal: goal || "General",
+        target_amount: targetAmount || 0,
+        investment_horizon: years || 0,
+        payment_method: paymentMethodId,
+      };
+      await db.collection("order").insertOne(order);
+
+      // Save SIP details to 'customer_mutual_funds' collection
+      const mutualFundRecord = {
+        customer_id: user.customerId || user.id,
+        fund_name: fund,
+        amount: sipAmount,
+        deduction_date: deductionDate,
+        investment_type: "SIP",
+        goal: goal || "General",
+        target_amount: targetAmount || 0,
+        investment_horizon: years || 0,
+        order_id: orderId,
+        created_at: new Date(),
+        status: "Active",
+      };
+      await db.collection("customer_mutual_funds").insertOne(mutualFundRecord);
+
+      // Fetch payment method details for display
+      let paymentDisplay = "Unknown";
+      if (paymentMethodId.startsWith("bank_")) {
+        const bankId = paymentMethodId.replace("bank_", "");
+        const bankAccount = await db
+          .collection("customer_bank_accounts")
+          .findOne({
+            _id: new ObjectId(bankId),
+            customer_id: user.customerId || user.id,
+          });
+        if (bankAccount) {
+          paymentDisplay = `Bank Account: ${bankAccount.bank_name} (****${
+            bankAccount.account_number?.slice(-4) || "unknown"
+          })`;
+        }
+      } else if (paymentMethodId.startsWith("upi_")) {
+        const upiId = paymentMethodId.replace("upi_", "");
+        const upiAccount = await db.collection("customer_upi").findOne({
+          _id: new ObjectId(upiId),
+          customer_id: user.customerId || user.id,
+        });
+        paymentDisplay = upiAccount
+          ? `UPI: ${upiAccount.upi_id}`
+          : "UPI: Unknown";
+      } else if (paymentMethodId.startsWith("card_")) {
+        const cardId = paymentMethodId.replace("card_", "");
+        const card = await db.collection("customer_cards").findOne({
+          _id: new ObjectId(cardId),
+          customer_id: user.customerId || user.id,
+        });
+        paymentDisplay = card
+          ? `Card: ${card.card_type} (****${
+              card.card_number?.slice(-4) || "unknown"
+            })`
+          : "Card: Unknown";
+      }
+
+      workflowState.step = null;
+      return {
+        shouldRespond: true,
+        response: `New payment method added and SIP of ₹${sipAmount.toLocaleString(
+          "en-IN"
+        )}/month in ${fund} will start from the ${deductionDate} using ${paymentDisplay}.\nYou’re all set! You'll receive a confirmation soon.\n\n**Order ID:** ${orderId}\n**Goal:** ${
+          goal || "General"
+        }\n**Target Amount:** ₹${targetAmount.toLocaleString(
+          "en-IN"
+        )}\n**Horizon:** ${years} years\n\nIs there anything else I can help you with?`,
+        tempData: { step: null },
+      };
+    } catch (error) {
+      console.error("Error creating SIP order with new payment method:", error);
+      return {
+        shouldRespond: true,
+        response: `Sorry, there was an error adding your new payment method and setting up your SIP. Please try again or contact support.`,
+      };
+    }
+  }
+
+  // Lumpsum Flow: Step 2 - Ask for investment amount
+  if (lowerMessage === "lumpsum" && lastBotContent.includes("SIP or Lumpsum")) {
+    workflowState.step = 2;
+    workflowState.investmentType = "Lumpsum";
+    return {
+      shouldRespond: true,
+      response: `Great!\n**Step 2 of 5: Investment Amount**\n\nHow much would you like to invest? (e.g., ₹50,000)`,
+      tempData: { step: 2, investmentType: "Lumpsum" },
+    };
+  }
+
+  if (
+    lastBotContent.includes("Step 2 of 5") &&
+    lastBotContent.includes("Investment Amount")
+  ) {
+    const amountMatch = message.match(/₹?\s*([\d,]+)/);
+    if (amountMatch) {
+      const lumpsumAmount = parseInt(amountMatch[1].replace(/,/g, ""));
+      workflowState.step = 3;
+      workflowState.lumpsumAmount = lumpsumAmount;
+      return {
+        shouldRespond: true,
+        response: `Got it, you want to invest ₹${lumpsumAmount.toLocaleString(
+          "en-IN"
+        )}.\n**Step 3 of 5: Choose Mutual Fund**\n\nWould you like me to recommend a mutual fund or pick one yourself?\n\n**Options:**\n- Recommend for me\n- I’ll choose`,
+        tempData: { step: 3, lumpsumAmount },
+      };
+    } else {
+      return {
+        shouldRespond: true,
+        response: `Please provide a valid amount (e.g., ₹50,000).`,
+      };
+    }
+  }
+
+  if (
+    lastBotContent.includes("Step 3 of 5") &&
+    lastBotContent.includes("Choose Mutual Fund")
+  ) {
+    if (lowerMessage.includes("recommend for me")) {
+      const fund = "Parag Parikh Flexi Cap Fund (Direct – Growth)";
+      workflowState.fund = fund;
+      return {
+        shouldRespond: true,
+        response: `Based on your profile, I recommend ${fund}.\nWould you like to go ahead with this? (Reply "Yes" or "No")`,
+        tempData: { step: 4, fund },
+      };
+    } else if (lowerMessage.includes("i’ll choose")) {
+      return {
+        shouldRespond: true,
+        response: `Please specify the mutual fund you'd like to invest in (e.g., Parag Parikh Flexi Cap Fund).`,
+      };
+    } else {
+      return {
+        shouldRespond: true,
+        response: `Please choose an option: "Recommend for me" or "I’ll choose".`,
+      };
+    }
+  }
+
+  if (
+    (lastBotContent.includes("suggest") || lastBotContent.includes("chosen")) &&
+    (lastBotContent.includes("mutual fund") ||
+      lastBotContent.includes("Parag Parikh Flexi Cap Fund")) &&
+    lowerMessage === "yes" &&
+    workflowState.step === 4
+  ) {
+    workflowState.step = 5;
+    const { lumpsumAmount, fund } = workflowState;
+    const otp = generateOTP();
+    workflowState.otp = otp;
+    workflowState.otpTimestamp = Date.now();
+
+    const emailSent = await sendOTPEmail(user.email, otp);
+    if (!emailSent) {
+      return {
+        shouldRespond: true,
+        response: `Failed to send OTP to your registered email. Please try again or contact support.`,
+      };
+    }
+
+    return {
+      shouldRespond: true,
+      response: `Here’s a summary of your Lumpsum investment:\n\n**Amount:** ₹${lumpsumAmount.toLocaleString(
+        "en-IN"
+      )}\n**Mutual Fund:** ${fund}\n\nPlease enter the OTP sent to your registered email (${
+        user.email
+      }) to authorize the investment.`,
+      tempData: { step: 5, otp, otpTimestamp: Date.now() },
+    };
+  }
+
+  if (
+    lastBotContent.includes("OTP sent to your registered email") &&
+    workflowState.investmentType === "Lumpsum"
+  ) {
+    if (
+      message === workflowState.otp &&
+      Date.now() - workflowState.otpTimestamp < 10 * 60 * 1000
+    ) {
+      const paymentMethods = [];
+      if (userData.bankAccounts && userData.bankAccounts.length > 0) {
+        userData.bankAccounts.forEach((account, index) => {
+          paymentMethods.push({
+            id: `bank_${account._id}`,
+            display: `Bank Account: ${account.bank_name} (****${
+              account.account_number?.slice(-4) || "unknown"
+            })`,
+          });
+        });
+      }
+      if (userData.upiAccounts && userData.upiAccounts.length > 0) {
+        userData.upiAccounts.forEach((upi, index) => {
+          paymentMethods.push({
+            id: `upi_${upi._id}`,
+            display: `UPI: ${upi.upi_id}`,
+          });
+        });
+      }
+      if (userData.cards && userData.cards.length > 0) {
+        userData.cards.forEach((card, index) => {
+          paymentMethods.push({
+            id: `card_${card._id}`,
+            display: `Card: ${card.card_type} (****${
+              card.card_number?.slice(-4) || "unknown"
+            })`,
+          });
+        });
+      }
+
+      let responseMessage = `OTP verified!\nPlease select a payment method for your Lumpsum investment:\n\n`;
+      if (paymentMethods.length > 0) {
+        responseMessage +=
+          paymentMethods
+            .map((method, index) => `${index + 1}. ${method.display}`)
+            .join("\n") +
+          `\n${paymentMethods.length + 1}. Add a new payment method`;
+        workflowState.paymentMethods = paymentMethods;
+        return {
+          shouldRespond: true,
+          response: responseMessage,
+          tempData: { step: 6, paymentMethods },
+        };
+      } else {
+        return {
+          shouldRespond: true,
+          response: `No saved payment methods found. Would you like to add a new payment method? (Reply "Yes" or "Cancel")`,
+          tempData: { step: 6, paymentMethods: [] },
+        };
+      }
+    } else {
+      return {
+        shouldRespond: true,
+        response: `Invalid or expired OTP. Please enter a valid 6-digit OTP or request a new one by saying "Resend OTP".`,
+      };
+    }
+  }
+
+  if (
+    lastBotContent.includes("Please select a payment method") &&
+    workflowState.step === 6 &&
+    workflowState.investmentType === "Lumpsum"
+  ) {
+    if (lowerMessage === "resend otp") {
+      const otp = generateOTP();
+      workflowState.otp = otp;
+      workflowState.otpTimestamp = Date.now();
+
+      const emailSent = await sendOTPEmail(user.email, otp);
+      if (!emailSent) {
+        return {
+          shouldRespond: true,
+          response: `Failed to send OTP to your registered email. Please try again or contact support.`,
+        };
+      }
+
+      return {
+        shouldRespond: true,
+        response: `A new OTP has been sent to your registered email (${user.email}). Please enter the OTP.`,
+        tempData: { otp, otpTimestamp: Date.now() },
+      };
+    }
+
+    const paymentMethods = workflowState.paymentMethods || [];
+    const selectionIndex = parseInt(message) - 1;
+
+    if (
+      message.toLowerCase() === "add a new payment method" ||
+      (selectionIndex === paymentMethods.length && paymentMethods.length > 0)
+    ) {
+      workflowState.step = 7;
+      return {
+        shouldRespond: true,
+        response: `Please provide the details for the new payment method:\n- Type (Bank Account, UPI, or Card)\n- Details (e.g., for Bank: bank name, account number, IFSC; for UPI: UPI ID; for Card: card type, card number, expiry, CVV)`,
+        tempData: { step: 7 },
+      };
+    }
+
+    if (selectionIndex >= 0 && selectionIndex < paymentMethods.length) {
+      const selectedMethod = paymentMethods[selectionIndex];
+      workflowState.selectedPaymentMethod = selectedMethod.id;
+
+      try {
+        const { lumpsumAmount, fund } = workflowState;
+        const db = mongoClient.db("financeai");
+
+        // Create order in the 'order' collection
+        const orderId = `ORD${Date.now()}${Math.floor(Math.random() * 10000)}`;
+        const order = {
+          customer_id: user.customerId || user.id,
+          id: orderId,
+          amount: lumpsumAmount,
+          investment_type: "Lumpsum",
+          payment_status: "Pending",
+          created_at: new Date(),
+          fund_name: fund,
+          payment_method: selectedMethod.id,
+        };
+        await db.collection("order").insertOne(order);
+
+        // Save lumpsum details to 'customer_mutual_funds' collection
+        const mutualFundRecord = {
+          customer_id: user.customerId || user.id,
+          fund_name: fund,
+          amount: lumpsumAmount,
+          investment_type: "Lumpsum",
+          order_id: orderId,
+          created_at: new Date(),
+          status: "Active",
+        };
+        await db
+          .collection("customer_mutual_funds")
+          .insertOne(mutualFundRecord);
+
+        // Fetch payment method details for display
+        let paymentDisplay = selectedMethod.display;
+        if (selectedMethod.id.startsWith("bank_")) {
+          const bankId = selectedMethod.id.replace("bank_", "");
+          const bankAccount = await db
+            .collection("customer_bank_accounts")
+            .findOne({
+              _id: new ObjectId(bankId),
+              customer_id: user.customerId || user.id,
+            });
+          if (bankAccount) {
+            paymentDisplay = `Bank Account: ${bankAccount.bank_name} (****${
+              bankAccount.account_number?.slice(-4) || "unknown"
+            })`;
+          } else {
+            paymentDisplay = "Bank Account: Unknown";
+          }
+        } else if (selectedMethod.id.startsWith("upi_")) {
+          const upiId = selectedMethod.id.replace("upi_", "");
+          const upiAccount = await db.collection("customer_upi").findOne({
+            _id: new ObjectId(upiId),
+            customer_id: user.customerId || user.id,
+          });
+          paymentDisplay = upiAccount
+            ? `UPI: ${upiAccount.upi_id}`
+            : "UPI: Unknown";
+        } else if (selectedMethod.id.startsWith("card_")) {
+          const cardId = selectedMethod.id.replace("card_", "");
+          const card = await db.collection("customer_cards").findOne({
+            _id: new ObjectId(cardId),
+            customer_id: user.customerId || user.id,
+          });
+          paymentDisplay = card
+            ? `Card: ${card.card_type} (****${
+                card.card_number?.slice(-4) || "unknown"
+              })`
+            : "Card: Unknown";
+        }
+
+        workflowState.step = null;
+        return {
+          shouldRespond: true,
+          response: `Investment successful! ₹${lumpsumAmount.toLocaleString(
+            "en-IN"
+          )} has been invested in ${fund} using ${paymentDisplay}.\nYou’ll receive a confirmation soon.\n\n**Order ID:** ${orderId}\n\nIs there anything else I can help you with?`,
+          tempData: { step: null },
+        };
+      } catch (error) {
+        console.error(
+          "Error creating Lumpsum order or saving to customer_mutual_funds:",
+          error
+        );
+        return {
+          shouldRespond: true,
+          response: `Sorry, there was an error processing your investment. Please try again or contact support.`,
+        };
+      }
+    }
+
+    return {
+      shouldRespond: true,
+      response: `Please select a valid option by number (1-${
+        paymentMethods.length + 1
+      }) or say "Add a new payment method".`,
+    };
+  }
+
+  if (
+    lastBotContent.includes(
+      "Please provide the details for the new payment method"
+    ) &&
+    workflowState.step === 7 &&
+    workflowState.investmentType === "Lumpsum"
+  ) {
+    try {
+      const db = mongoClient.db("financeai");
+      const { lumpsumAmount, fund } = workflowState;
+      let paymentMethodId;
+
+      const paymentDetails = lowerMessage;
+      if (paymentDetails.includes("bank")) {
+        const bankDetails = {
+          customer_id: user.customerId || user.id,
+          bank_name: message.match(/bank name: ([^\n]+)/i)?.[1] || "User Bank",
+          account_number:
+            message.match(/account number: (\d+)/i)?.[1] || "1234567890",
+          ifsc_code: message.match(/ifsc: ([^\n]+)/i)?.[1] || "ABCD0001234",
+        };
+        const result = await db
+          .collection("customer_bank_accounts")
+          .insertOne(bankDetails);
+        paymentMethodId = `bank_${result.insertedId}`;
+      } else if (paymentDetails.includes("upi")) {
+        const upiDetails = {
+          customer_id: user.customerId || user.id,
+          upi_id: message.match(/upi id: ([^\n]+)/i)?.[1] || "user@upi",
+        };
+        const result = await db
+          .collection("customer_upi")
+          .insertOne(upiDetails);
+        paymentMethodId = `upi_${result.insertedId}`;
+      } else if (paymentDetails.includes("card")) {
+        const cardDetails = {
+          customer_id: user.customerId || user.id,
+          card_type: message.match(/card type: ([^\n]+)/i)?.[1] || "Visa",
+          card_number:
+            message.match(/card number: (\d+)/i)?.[1] || "1234567890123456",
+          expiry: message.match(/expiry: ([^\n]+)/i)?.[1] || "12/25",
+          cvv: message.match(/cvv: (\d+)/i)?.[1] || "123",
+        };
+        const result = await db
+          .collection("customer_cards")
+          .insertOne(cardDetails);
+        paymentMethodId = `card_${result.insertedId}`;
+      } else {
+        return {
+          shouldRespond: true,
+          response: `Invalid payment method details. Please specify Type (Bank Account, UPI, or Card) and provide relevant details (e.g., for Bank: bank name, account number, IFSC; for UPI: UPI ID; for Card: card type, card number, expiry, CVV).`,
+        };
+      }
+
+      const orderId = `ORD${Date.now()}${Math.floor(Math.random() * 10000)}`;
+      const order = {
+        customer_id: user.customerId || user.id,
+        id: orderId,
+        amount: lumpsumAmount,
+        investment_type: "Lumpsum",
+        payment_status: "Pending",
+        created_at: new Date(),
+        fund_name: fund,
+        payment_method: paymentMethodId,
+      };
+      await db.collection("order").insertOne(order);
+
+      // Save lumpsum details to 'customer_mutual_funds' collection
+      const mutualFundRecord = {
+        customer_id: user.customerId || user.id,
+        fund_name: fund,
+        amount: lumpsumAmount,
+        investment_type: "Lumpsum",
+        order_id: orderId,
+        created_at: new Date(),
+        status: "Active",
+      };
+      await db.collection("customer_mutual_funds").insertOne(mutualFundRecord);
+
+      // Fetch payment method details for display
+      let paymentDisplay = "Unknown";
+      if (paymentMethodId.startsWith("bank_")) {
+        const bankId = paymentMethodId.replace("bank_", "");
+        const bankAccount = await db
+          .collection("customer_bank_accounts")
+          .findOne({
+            _id: new ObjectId(bankId),
+            customer_id: user.customerId || user.id,
+          });
+        if (bankAccount) {
+          paymentDisplay = `Bank Account: ${bankAccount.bank_name} (****${
+            bankAccount.account_number?.slice(-4) || "unknown"
+          })`;
+        }
+      } else if (paymentMethodId.startsWith("upi_")) {
+        const upiId = paymentMethodId.replace("upi_", "");
+        const upiAccount = await db.collection("customer_upi").findOne({
+          _id: new ObjectId(upiId),
+          customer_id: user.customerId || user.id,
+        });
+        paymentDisplay = upiAccount
+          ? `UPI: ${upiAccount.upi_id}`
+          : "UPI: Unknown";
+      } else if (paymentMethodId.startsWith("card_")) {
+        const cardId = paymentMethodId.replace("card_", "");
+        const card = await db.collection("customer_cards").findOne({
+          _id: new ObjectId(cardId),
+          customer_id: user.customerId || user.id,
+        });
+        paymentDisplay = card
+          ? `Card: ${card.card_type} (****${
+              card.card_number?.slice(-4) || "unknown"
+            })`
+          : "Card: Unknown";
+      }
+
+      workflowState.step = null;
+      return {
+        shouldRespond: true,
+        response: `New payment method added and ₹${lumpsumAmount.toLocaleString(
+          "en-IN"
+        )} has been invested in ${fund} using ${paymentDisplay}.\nYou’ll receive a confirmation soon.\n\n**Order ID:** ${orderId}\n\nIs there anything else I can help you with?`,
+        tempData: { step: null },
+      };
+    } catch (error) {
+      console.error(
+        "Error creating Lumpsum order with new payment method:",
+        error
+      );
+      return {
+        shouldRespond: true,
+        response: `Sorry, there was an error adding your new payment method and processing your investment. Please try again or contact support.`,
+      };
+    }
+  }
+
+  if (
+    lastBotContent.includes("Please specify the mutual fund") &&
+    workflowState.investmentType === "SIP"
+  ) {
+    workflowState.fund = message;
+    return {
+      shouldRespond: true,
+      response: `Got it, you’ve chosen ${message}.\nWould you like to go ahead with this? (Reply "Yes" or "No")`,
+      tempData: { step: 7, fund: message },
+    };
+  }
+
+  if (
+    lastBotContent.includes("Please specify the mutual fund") &&
+    workflowState.investmentType === "Lumpsum"
+  ) {
+    workflowState.fund = message;
+    return {
+      shouldRespond: true,
+      response: `Got it, you’ve chosen ${message}.\nWould you like to go ahead with this? (Reply "Yes" or "No")`,
+      tempData: { step: 4, fund: message },
+    };
+  }
+
+  return {
+    shouldRespond: false,
+    response: "",
+  };
+}
+
 app.post("/api/chat", authenticateToken, async (req, res) => {
   try {
     const { message, chatId } = req.body;
@@ -512,6 +2092,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
         createdAt: new Date(),
         updatedAt: new Date(),
         __v: 0,
+        workflowState: {},
       };
     }
 
@@ -523,9 +2104,6 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       timestamp: new Date(),
     };
 
-    if (!chat.messages) {
-      chat.messages = [];
-    }
     chat.messages.push(userMessage);
 
     const conversationContext = chat.messages.map((msg) => ({
@@ -533,13 +2111,33 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       content: msg.processedContent || msg.content,
     }));
 
-    // Check for ticket raising workflow
-    const isTicketRequest = checkIfTicketRequest(processedMessage, conversationContext);
-    
+    // Check for ticket request first
+    const isTicketRequest = checkIfTicketRequest(
+      processedMessage,
+      conversationContext
+    );
+
+    console.log("Processing /api/chat request:", {
+      message,
+      chatId,
+      customerId,
+      isTicketRequest,
+      isInvestmentRequest: checkIfInvestmentRequest(
+        processedMessage,
+        conversationContext,
+        chat
+      ),
+      workflowState: chat.workflowState,
+    });
+
     if (isTicketRequest) {
       const ticketResponse = await handleTicketWorkflow(message, chat, req.user);
-      
+
       if (ticketResponse.shouldRespond) {
+        console.log("Ticket Workflow Response:", {
+          response: ticketResponse.response,
+        });
+
         const assistantMessage = {
           sender: "bot",
           content: ticketResponse.response,
@@ -556,6 +2154,38 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
               $set: {
                 messages: chat.messages,
                 updatedAt: chat.updatedAt,
+                workflowState: chat.workflowState,
+              },
+              $inc: { __v: 1 },
+            }
+          );
+        } else {
+          const result = await chatsCollection.insertOne(chat);
+          chat._id = result.insertedId;
+        }
+
+        return res.json(chat);
+      } else {
+        console.log(
+          "No ticket workflow response generated, falling back to AI"
+        );
+        const assistantMessage = {
+          sender: "bot",
+          content: `It looks like you're in the middle of raising a ticket. Please provide the requested information to continue, or say "cancel" to exit the workflow.`,
+          timestamp: new Date(),
+        };
+
+        chat.messages.push(assistantMessage);
+        chat.updatedAt = new Date();
+
+        if (chat._id) {
+          await chatsCollection.updateOne(
+            { _id: chat._id },
+            {
+              $set: {
+                messages: chat.messages,
+                updatedAt: chat.updatedAt,
+                workflowState: chat.workflowState,
               },
               $inc: { __v: 1 },
             }
@@ -569,336 +2199,334 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       }
     }
 
-    const queryType = await classifyQueryWithAI(
+    // Check for investment request
+    const isInvestmentRequest = checkIfInvestmentRequest(
       processedMessage,
-      conversationContext
+      conversationContext,
+      chat
     );
-    console.log("AI classified query as:", queryType);
-    console.log("Original message:", message);
-    console.log("Processed message:", processedMessage);
 
-    const conversationMessages = chat.messages.map((msg) => ({
-      role: msg.sender === "user" ? "user" : "assistant",
-      content: msg.processedContent || msg.content,
+    if (isInvestmentRequest) {
+      // Handle specific investment cancellation (e.g., "I want to cancel my SIP of ₹4,790 in Mirae Asset Large Cap Fund")
+      const lowerMessage = processedMessage.toLowerCase().trim();
+      if (
+        lowerMessage.includes("cancel") &&
+        (lowerMessage.includes("sip") || lowerMessage.includes("lumpsum")) &&
+        lowerMessage.includes("in")
+      ) {
+        const mutualFunds = await db
+          .collection("customer_mutual_funds")
+          .find({
+            customer_id: parseInt(customerId),
+            status: "Active",
+          })
+          .toArray();
+
+        if (!mutualFunds || mutualFunds.length === 0) {
+          chat.workflowState = {};
+          const response = `No active investments found to cancel.`;
+          const assistantMessage = {
+            sender: "bot",
+            content: response,
+            timestamp: new Date(),
+          };
+          chat.messages.push(assistantMessage);
+          chat.updatedAt = new Date();
+          if (chat._id) {
+            await chatsCollection.updateOne(
+              { _id: chat._id },
+              {
+                $set: {
+                  messages: chat.messages,
+                  updatedAt: chat.updatedAt,
+                  workflowState: chat.workflowState,
+                },
+                $inc: { __v: 1 },
+              }
+            );
+          } else {
+            const result = await chatsCollection.insertOne(chat);
+            chat._id = result.insertedId;
+          }
+          return res.json(chat);
+        }
+
+        // Parse the message to extract fund name and amount
+        const matchFund = lowerMessage.match(/in\s+(.+?)\s*(?:fund|$)/i);
+        const matchAmount = lowerMessage.match(/₹?\s*([\d,]+)\s*(?:\/month)?/i);
+        const fundName = matchFund ? matchFund[1].trim() : null;
+        const amount = matchAmount ? parseFloat(matchAmount[1].replace(/,/g, "")) : null;
+        const isSIP = lowerMessage.includes("sip");
+
+        const matchedInvestment = mutualFunds.find(
+          (mf) =>
+            mf.fund_name.toLowerCase().includes(fundName) &&
+            mf.amount === amount &&
+            mf.investment_type === (isSIP ? "SIP" : "Lumpsum")
+        );
+
+        if (matchedInvestment) {
+          chat.workflowState = {
+            action: "cancel",
+            step: 2,
+            selectedInvestment: matchedInvestment,
+          };
+          const responseMessage = `Confirm cancel of ${matchedInvestment.fund_name} (${matchedInvestment.investment_type}, ₹${matchedInvestment.amount.toLocaleString("en-IN")}). Reply "Confirm" or "Cancel".`;
+          const assistantMessage = {
+            sender: "bot",
+            content: responseMessage,
+            timestamp: new Date(),
+          };
+          chat.messages.push(assistantMessage);
+          chat.updatedAt = new Date();
+          if (chat._id) {
+            await chatsCollection.updateOne(
+              { _id: chat._id },
+              {
+                $set: {
+                  messages: chat.messages,
+                  updatedAt: chat.updatedAt,
+                  workflowState: chat.workflowState,
+                },
+                $inc: { __v: 1 },
+              }
+            );
+          } else {
+            const result = await chatsCollection.insertOne(chat);
+            chat._id = result.insertedId;
+          }
+          return res.json(chat);
+        }
+      }
+
+      // Handle cancel/pause workflow
+      const cancelPauseResponse = await handleCancelPauseWorkflow(
+        message,
+        chat,
+        req.user
+      );
+
+      if (cancelPauseResponse.shouldRespond) {
+        console.log("Cancel/Pause Workflow Response:", {
+          response: cancelPauseResponse.response,
+          tempData: cancelPauseResponse.tempData,
+        });
+
+        const assistantMessage = {
+          sender: "bot",
+          content: cancelPauseResponse.response,
+          timestamp: new Date(),
+        };
+
+        chat.messages.push(assistantMessage);
+        chat.updatedAt = new Date();
+        if (cancelPauseResponse.tempData) {
+          chat.workflowState = {
+            ...chat.workflowState,
+            ...cancelPauseResponse.tempData,
+          };
+        }
+
+        if (chat._id) {
+          await chatsCollection.updateOne(
+            { _id: chat._id },
+            {
+              $set: {
+                messages: chat.messages,
+                updatedAt: chat.updatedAt,
+                workflowState: chat.workflowState,
+              },
+              $inc: { __v: 1 },
+            }
+          );
+        } else {
+          const result = await chatsCollection.insertOne(chat);
+          chat._id = result.insertedId;
+        }
+
+        return res.json(chat);
+      }
+
+      // Proceed with investment workflow if not a cancel/pause request
+      const investmentResponse = await handleInvestmentWorkflow(
+        message,
+        chat,
+        req.user
+      );
+
+      if (investmentResponse.shouldRespond) {
+        console.log("Investment Workflow Response:", {
+          response: investmentResponse.response,
+          tempData: investmentResponse.tempData,
+        });
+
+        const assistantMessage = {
+          sender: "bot",
+          content: investmentResponse.response,
+          timestamp: new Date(),
+        };
+
+        chat.messages.push(assistantMessage);
+        chat.updatedAt = new Date();
+        if (investmentResponse.tempData) {
+          chat.workflowState = {
+            ...chat.workflowState,
+            ...investmentResponse.tempData,
+          };
+        }
+
+        if (chat._id) {
+          await chatsCollection.updateOne(
+            { _id: chat._id },
+            {
+              $set: {
+                messages: chat.messages,
+                updatedAt: chat.updatedAt,
+                workflowState: chat.workflowState,
+              },
+              $inc: { __v: 1 },
+            }
+          );
+        } else {
+          const result = await chatsCollection.insertOne(chat);
+          chat._id = result.insertedId;
+        }
+
+        return res.json(chat);
+      } else {
+        console.log(
+          "No investment workflow response generated, falling back to AI"
+        );
+        const assistantMessage = {
+          sender: "bot",
+          content: `It looks like you're in the middle of an investment process. Please provide the requested information to continue, or say "cancel" to exit the workflow.`,
+          timestamp: new Date(),
+        };
+
+        chat.messages.push(assistantMessage);
+        chat.updatedAt = new Date();
+
+        if (chat._id) {
+          await chatsCollection.updateOne(
+            { _id: chat._id },
+            {
+              $set: {
+                messages: chat.messages,
+                updatedAt: chat.updatedAt,
+                workflowState: chat.workflowState,
+              },
+              $inc: { __v: 1 },
+            }
+          );
+        } else {
+          const result = await chatsCollection.insertOne(chat);
+          chat._id = result.insertedId;
+        }
+
+        return res.json(chat);
+      }
+    }
+
+    // Fetch user data including mutual funds and orders
+    const userData = await getUserData(customerId);
+
+    // Prepare mutual funds data for the prompt
+    const mutualFundsData = userData.mutualFundsInvested.map((mf) => ({
+      fund_name: mf.fund_name,
+      amount: mf.amount,
+      investment_type: mf.investment_type,
+      deduction_date: mf.deduction_date || null,
+      goal: mf.goal || "General",
+      target_amount: mf.target_amount || 0,
+      investment_horizon: mf.investment_horizon || 0,
+      status: mf.status,
+      created_at: mf.created_at,
     }));
 
-    const recentMessages = conversationMessages.slice(-10);
-    const isFirstMessage = chat.messages.length === 1;
+    // Prepare orders data for the prompt
+    const ordersData = userData.orders.map((order) => ({
+      order_id: order.id,
+      amount: order.amount,
+      investment_type: order.investment_type,
+      fund_name: order.fund_name || "N/A",
+      payment_status: order.payment_status,
+      created_at: order.created_at,
+      goal: order.goal || "General",
+      target_amount: order.target_amount || 0,
+      investment_horizon: order.investment_horizon || 0,
+      payment_method: order.payment_method || "N/A",
+    }));
 
-    let maxTokens;
-    switch (queryType) {
-      case "GREETING":
-      case "NON-FINANCIAL":
-        maxTokens = 250; // Slightly increased for richer casual responses
-        break;
-      case "USER-SPECIFIC-FINANCIAL":
-        maxTokens = processedMessage.includes("details") ? 1000 : 800; // More room for detailed financial data
-        break;
-      case "GENERAL-FINANCIAL":
-        maxTokens = processedMessage.includes("analysis") ? 1200 : 900; // Extra tokens for complex topics
-        break;
-      case "AFFIRMATIVE_RESPONSE":
-        maxTokens = 500; // Moderate for contextual follow-ups
-        break;
-      default:
-        maxTokens = 600; // Balanced default
-    }
+    const prompt = `
+      You are a financial assistant bot for an Indian audience. Provide accurate and concise answers about personal finance, investments, or related topics. Use Indian Rupees (₹) for currency and consider Indian financial regulations and products. If the user asks about a specific investment or action, guide them through relevant steps or suggest consulting a financial advisor for personalized advice. Avoid giving definitive investment advice without context.
 
-    let systemPrompt;
-    let userData = {};
+      **User's Mutual Fund Investments:**
+      ${JSON.stringify(mutualFundsData, null, 2)}
 
-    console.log("=== FETCHING USER DATA ===");
-    userData = await getUserData(customerId);
-    console.log(
-      "User data fetched. Orders found:",
-      userData.orders?.length || 0
-    );
-    console.log("=== END USER DATA FETCH ===");
+      **User's Orders:**
+      ${JSON.stringify(ordersData, null, 2)}
 
-    if (queryType === "GREETING") {
-      const previousGreeting = conversationContext
-        .slice(0, -1)
-        .reverse()
-        .find((msg) => msg.role === "assistant" && msg.content.toLowerCase().includes("hey"));
-      const aiResponse = previousGreeting
-        ? `Hey ${userData.customer?.name || "friend"}, great to catch up again! Ready to dive into your finances or got something new on your mind?`
-        : `Hi ${userData.customer?.name || "there"}! I’m your go-to financial buddy—excited to help with your money matters. What’s up?`;
-      const assistantMessage = {
-        sender: "bot",
-        content: aiResponse,
-        timestamp: new Date(),
-      };
+      User message: ${processedMessage}
+      Conversation context: ${JSON.stringify(conversationContext, null, 2)}
+      User details: ${JSON.stringify(
+        {
+          customerId: userData.customer.id,
+          email: userData.customer.email,
+          name: userData.customer.name,
+        },
+        null, 2
+      )}
+    `;
 
-      chat.messages.push(assistantMessage);
-      chat.updatedAt = new Date();
-
-      if (chat._id) {
-        await chatsCollection.updateOne(
-          { _id: chat._id },
-          {
-            $set: {
-              messages: chat.messages,
-              updatedAt: chat.updatedAt,
-            },
-            $inc: { __v: 1 },
-          }
-        );
-      } else {
-        const result = await chatsCollection.insertOne(chat);
-        chat._id = result.insertedId;
-      }
-
-      return res.json(chat);
-    } else if (queryType === "AFFIRMATIVE_RESPONSE") {
-      const lastBotMessage = conversationContext
-        .slice(0, -1)
-        .reverse()
-        .find((msg) => msg.role === "assistant");
-
-      let contextualResponse;
-      if (
-        lastBotMessage &&
-        lastBotMessage.content.toLowerCase().includes("would you like")
-      ) {
-        if (
-           lastBotMessage.content.toLowerCase().includes("portfolio") ||
-          lastBotMessage.content.toLowerCase().includes("orders")
-
-        ) {
-
-          contextualResponse =
-
-            userData.orders && userData.orders.length > 0
-
-              ? `Awesome, let’s check out your portfolio. You’ve got ${
-
-                  userData.orders.length
-
-                } orders worth a total of ₹${userData.orders
-
-                  .reduce((sum, order) => sum + (parseFloat(order.amount) || 0), 0)
-
-                  .toLocaleString("en-IN")}. For instance, Order ID ${
-
-                  userData.orders[0].id
-
-                } is ₹${parseFloat(userData.orders[0].amount).toLocaleString(
-
-                  "en-IN"
-
-                )} and marked as ${userData.orders[0].payment_status}. Want to dig into a specific order or see how they’re performing overall?`
-
-              : `Looks like you don’t have any orders yet, but no worries! Want to explore some investment options, like the mutual funds we discussed before, or start fresh with something new?`;
-
-        } else {
-
-          contextualResponse = `Got it! Since we were chatting about “${lastBotMessage.content
-
-            .slice(0, 50)
-
-            .toLowerCase()}…”, what’s next? Maybe a peek at your investments or some financial tips?`;
-
-        }
-      } else {
-        contextualResponse = `Sweet, you’re on board! What’s the next thing you want to talk about—your portfolio, investment ideas, or maybe something like tax planning?`;
-       }
-
-      const assistantMessage = {
-        sender: "bot",
-        content: contextualResponse,
-        timestamp: new Date(),
-      };
-
-      chat.messages.push(assistantMessage);
-      chat.updatedAt = new Date();
-
-      if (chat._id) {
-        await chatsCollection.updateOne(
-          { _id: chat._id },
-          {
-            $set: {
-              messages: chat.messages,
-              updatedAt: chat.updatedAt,
-            },
-            $inc: { __v: 1 },
-          }
-        );
-      } else {
-        const result = await chatsCollection.insertOne(chat);
-        chat._id = result.insertedId;
-      }
-
-      return res.json(chat);
-    } else if (queryType === "NON-FINANCIAL") {
-      const previousNonFinancial = conversationContext
-
-        .slice(0, -1)
-
-        .reverse()
-
-        .find((msg) => msg.role === "user" && !msg.content.toLowerCase().includes("portfolio"));
-
-      const aiResponse = previousNonFinancial
-
-        ? `Haha, going off-topic again with “${previousNonFinancial.content.slice(
-
-            0,
-
-            30
-
-          )}…”? I’m all about the money stuff, so how about we swing back to your finances? Maybe check your orders or talk about investment goals?`
-
-        : `Hey ${userData.customer?.name || "there"}, that’s a bit outside my financial wheelhouse! Want to talk about your portfolio or maybe some money-saving strategies instead?`;
-
-      const assistantMessage = {
-        sender: "bot",
-        content: aiResponse,
-        timestamp: new Date(),
-      };
-
-      chat.messages.push(assistantMessage);
-      chat.updatedAt = new Date();
-
-      if (chat._id) {
-        await chatsCollection.updateOne(
-          { _id: chat._id },
-          {
-            $set: {
-              messages: chat.messages,
-              updatedAt: chat.updatedAt,
-            },
-            $inc: { __v: 1 },
-          }
-        );
-      } else {
-        const result = await chatsCollection.insertOne(chat);
-        chat._id = result.insertedId;
-      }
-
-      return res.json(chat);
-    } else {
-      let userDataString = `
-Customer: ${userData.customer?.name || "Unknown"} (ID: ${userData.customer?.id || "Unknown"}, RAYI ID: ${
-        userData.customer?.rayi_customer_id || "Unknown"
-      })
-Email: ${userData.customer?.email || "unknown@email.com"}
-Orders: ${userData.orders?.length || 0} orders
-${
-  userData.orders?.length > 0
-    ? userData.orders
-        .map(
-          (order) =>
-            `- Order ID: ${order.id}, Amount: ₹${parseFloat(
-              order.amount
-            ).toLocaleString("en-IN")}, Status: ${order.payment_status}, Type: ${
-              order.investment_type || "General"
-            }, Date: ${new Date(order.created_at || order.date).toLocaleDateString("en-IN")}`
-        )
-        .join("\n")
-    : "No orders available yet."
-}
-Folios: ${userData.folios?.length || 0} folios
-${
-  userData.folios?.length > 0
-    ? userData.folios
-        .map((folio) => `- Folio: ${folio.folio_number}, MF ID: ${folio.mf_id}`)
-        .join("\n")
-    : "No folios available yet."
-}
-Mutual Funds: ${userData.mutualFunds?.length || 0} funds
-${
-  userData.mutualFunds?.length > 0
-    ? userData.mutualFunds
-        .map((fund) => `- Fund: ${fund.name || fund.scheme_code}`)
-        .join("\n")
-    : "No mutual funds available yet."
-}
-`;
-
-      systemPrompt = `You are a friendly, engaging financial advisor AI, like a trusted friend who’s an expert in money matters. Your goal is to provide detailed, accurate, and conversational responses that feel natural and tailored to the user’s financial queries. Use the full conversation history to maintain context, referencing past topics or questions to create a seamless, ChatGPT-like dialogue.
-
-**Guidelines:**
-- **Tone**: Warm, approachable, and confident, like chatting with a friend. Avoid formal headers (e.g., "Portfolio Overview"), repetitive disclaimers, or overly technical jargon unless needed.
-- **Context Awareness**: Leverage the full conversation history to reference prior queries or topics (e.g., “Since you asked about your portfolio earlier…”). Ensure responses feel like a continuation of the chat.
-- **Data Usage**: Include specific data from the user’s financial profile (e.g., orders, folios) when relevant. Format currency as ₹ with proper comma separation (e.g., ₹1,23,456).
-- **Response Structure**: Start with a direct, concise answer to the query, followed by detailed insights or explanations in a conversational tone. Include a single, natural follow-up question only if it fits the context and encourages engagement.
-- **Error Prevention**: Use exact figures from the provided data, avoiding vague terms like “approximately.” If data is missing, offer proactive suggestions (e.g., “No orders yet—want to explore some investment options?”).
-- **Scope**: You can discuss:
-  - Portfolio analysis and performance
-  - Order history and transaction details
-  - Financial planning recommendations
-  - General financial education (e.g., stocks, mutual funds, taxes)
-  - Tax implications (general guidance only)
-  - Market analysis and trends
-- **Disclaimer**: Include a brief, natural disclaimer only for complex financial advice (e.g., “For a personalized plan, you might want to check with a financial advisor”).
-- **Follow-up Questions**: Ask a relevant follow-up only if it enhances the conversation and aligns with the user’s interests.
-
-**User Data:**
-${userDataString}
-
-**Conversation History (Full):**
-${JSON.stringify(conversationMessages, null, 2)}
-
-Respond directly to the user’s query with specific data and a natural, engaging tone. Reference the conversation history to maintain continuity, especially if the user mentioned related topics earlier. If the query involves the user’s portfolio or orders, include precise details from the data above. End with a follow-up question only if it feels natural and relevant.`;
-
-
-      const completion = await openai.chat.completions.create({
+    let aiResponse;
+    try {
+      const response = await openai.chat.completions.create({
         model: "gpt-4.1",
         messages: [
-          { role: "system", content: systemPrompt },
-          ...conversationMessages, // Full history for context
+          { role: "system", content: prompt },
           { role: "user", content: processedMessage },
         ],
-        max_tokens: maxTokens,
-        temperature: 0.65,
+        max_tokens: 500,
+        temperature: 0.7,
       });
 
-      let aiResponse = completion.choices[0].message.content;
-
-      aiResponse = stripHashtags(aiResponse);
-
-      
-
-      // Ensure response isn’t too short for financial queries
-
-      if (aiResponse.length < 100 && queryType !== "GREETING" && queryType !== "NON-FINANCIAL") {
-
-        aiResponse += "\n\nAnything else you’d like to explore about your finances or investments?";
-
-      }
-      const assistantMessage = {
-        sender: "bot",
-        content: aiResponse,
-        timestamp: new Date(),
-      };
-
-      chat.messages.push(assistantMessage);
-      chat.updatedAt = new Date();
-
-      if (chat._id) {
-        await chatsCollection.updateOne(
-          { _id: chat._id },
-          {
-            $set: {
-              messages: chat.messages,
-              updatedAt: chat.updatedAt,
-            },
-            $inc: { __v: 1 },
-          }
-        );
-      } else {
-        const result = await chatsCollection.insertOne(chat);
-        chat._id = result.insertedId;
-      }
-
-      res.json(chat);
+      aiResponse = response.choices[0].message.content;
+    } catch (error) {
+      console.error("Error calling OpenAI API:", error.message);
+      aiResponse =
+        "Sorry, I couldn't process your request. Please try again or contact support.";
     }
+
+    const assistantMessage = {
+      sender: "bot",
+      content: aiResponse,
+      timestamp: new Date(),
+    };
+
+    chat.messages.push(assistantMessage);
+    chat.updatedAt = new Date();
+
+    if (chat._id) {
+      await chatsCollection.updateOne(
+        { _id: chat._id },
+        {
+          $set: {
+            messages: chat.messages,
+            updatedAt: chat.updatedAt,
+            workflowState: chat.workflowState,
+          },
+          $inc: { __v: 1 },
+        }
+      );
+    } else {
+      const result = await chatsCollection.insertOne(chat);
+      chat._id = result.insertedId;
+    }
+
+    return res.json(chat);
   } catch (error) {
-    console.error("Chat processing error:", error);
-    res.status(500).json({
-      error: "Failed to process message",
-      details: error.message,
-    });
+    console.error("Error in /api/chat:", error);
+    return res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -927,254 +2555,202 @@ app.get("/api/debug/userdata", authenticateToken, async (req, res) => {
   }
 });
 
-// Ticket workflow functions
 function checkIfTicketRequest(message, conversationContext) {
   const lowerMessage = message.toLowerCase().trim();
-  
-  // Check for explicit ticket raising requests
+
   const ticketKeywords = [
-    'raise a ticket',
-    'create a ticket', 
-    'i want to raise a ticket',
-    'having a problem',
-    'having some problems',
-    'having an issue',
-    'i am having an issue',
-    'i am having a problem',
-    'i am having some problems',
-    'i have an issue',
-    'i have a problem',
-    'need help with',
-    'support ticket',
-    'ticket',
-    'issue with',
-    'problem with'
+    "raise a ticket",
+    "create a ticket",
+    "i want to raise a ticket",
+    "having a problem",
+    "having some problems",
+    "having an issue",
+    "i am having an issue",
+    "i am having a problem",
+    "i am having some problems",
+    "i have an issue",
+    "i have a problem",
+    "need help with",
+    "support ticket",
+    "ticket",
+    "issue with",
+    "problem with",
   ];
-  
-  // Check if message contains ticket-related keywords
-  const hasTicketKeyword = ticketKeywords.some(keyword => 
+
+  const hasTicketKeyword = ticketKeywords.some((keyword) =>
     lowerMessage.includes(keyword)
   );
-  
-  // Check conversation context for ongoing ticket flow
-  const isInTicketFlow = conversationContext.some(msg => 
-    msg.content && (
-      msg.content.includes('Step 1 of 4') ||
-      msg.content.includes('Step 2 of 4') ||
-      msg.content.includes('Step 3 of 4') ||
-      msg.content.includes('Step 4 of 4') ||
-      msg.content.includes('Issue Detail') ||
-      msg.content.includes('Choose a category') ||
-      msg.content.includes('Description')
-    )
+
+  const isInTicketFlow = conversationContext.some(
+    (msg) =>
+      msg.content &&
+      (msg.content.includes("Step 1 of 4") ||
+        msg.content.includes("Step 2 of 4") ||
+        msg.content.includes("Step 3 of 4") ||
+        msg.content.includes("Step 4 of 4") ||
+        msg.content.includes("Issue Detail") ||
+        msg.content.includes("Choose a category") ||
+        msg.content.includes("Description"))
   );
-  
+
   return hasTicketKeyword || isInTicketFlow;
 }
 
 async function handleTicketWorkflow(message, chat, user) {
   const lowerMessage = message.toLowerCase().trim();
   const conversationHistory = chat.messages || [];
-  
-  // Find the current step based on conversation history
+
   const lastBotMessage = conversationHistory
     .slice()
     .reverse()
-    .find(msg => msg.sender === 'bot');
-  
-  const lastBotContent = lastBotMessage?.content || '';
-  
-  // Check if this is the initial ticket request
-  const isInitialRequest = (
-    lowerMessage.includes('raise a ticket') ||
-    lowerMessage.includes('create a ticket') ||
-    lowerMessage.includes('i want to raise a ticket') ||
-    lowerMessage.includes('having a problem') ||
-    lowerMessage.includes('having some problems') ||
-    lowerMessage.includes('having an issue') ||
-    lowerMessage.includes('i am having an issue') ||
-    lowerMessage.includes('i am having a problem') ||
-    lowerMessage.includes('i am having some problems') ||
-    lowerMessage.includes('i have an issue') ||
-    lowerMessage.includes('i have a problem')
-  ) && !lastBotContent.includes('Step');
-  
+    .find((msg) => msg.sender === "bot");
+
+  const lastBotContent = lastBotMessage?.content || "";
+
+  const isInitialRequest =
+    (lowerMessage.includes("raise a ticket") ||
+      lowerMessage.includes("create a ticket") ||
+      lowerMessage.includes("i want to raise a ticket") ||
+      lowerMessage.includes("having a problem") ||
+      lowerMessage.includes("having some problems") ||
+      lowerMessage.includes("having an issue") ||
+      lowerMessage.includes("i am having an issue") ||
+      lowerMessage.includes("i am having a problem") ||
+      lowerMessage.includes("i am having some problems") ||
+      lowerMessage.includes("i have an issue") ||
+      lowerMessage.includes("i have a problem")) &&
+    !lastBotContent.includes("Step");
+
   if (isInitialRequest) {
-    // Step 1: Ask for issue details
     return {
       shouldRespond: true,
-      response: `Sure, I can help you raise a ticket for this issue. Let me guide you through the process.
-
-**Step 1 of 4: Issue Detail**
-
-Please provide a brief title or summary of your issue. This will help our support team understand your concern quickly.
-
-For example: "Unable to access my portfolio" or "Payment not reflecting in account"`
+      response: `Sure, I can help you raise a ticket for this issue. Let me guide you through the process.\n\n**Step 1 of 4: Issue Detail**\n\nPlease provide a brief title or summary of your issue. This will help our support team understand your concern quickly.\n\nFor example: "Unable to access my portfolio" or "Payment not reflecting in account"`,
     };
   }
-  
-  // Check if we're in Step 1 (collecting issue title)
-  if (lastBotContent.includes('Step 1 of 4') && lastBotContent.includes('Issue Detail')) {
-    // User provided issue title, move to Step 2
+
+  if (
+    lastBotContent.includes("Step 1 of 4") &&
+    lastBotContent.includes("Issue Detail")
+  ) {
     return {
       shouldRespond: true,
-      response: `Thank you! Your issue title: "${message}"
-
-**Step 2 of 4: Choose a category**
-
-Please select the category that best describes your issue:
-
-1. General Enquiry
-2. KYC Related
-3. Products Related
-4. Orders Related
-5. Payment/Bank Accounts
-6. Account Related
-7. Others
-
-You can respond with either the number (1-7) or the category name.`
+      response: `Thank you! Your issue title: "${message}"\n\n**Step 2 of 4: Choose a category**\n\nPlease select the category that best describes your issue:\n\n1. General Enquiry\n2. KYC Related\n3. Products Related\n4. Orders Related\n5. Payment/Bank Accounts\n6. Account Related\n7. Others\n\nYou can respond with either the number (1-7) or the category name.`,
     };
   }
-  
-  // Check if we're in Step 2 (collecting category)
-  if (lastBotContent.includes('Step 2 of 4') && lastBotContent.includes('Choose a category')) {
-    // Map user response to category
+
+  if (
+    lastBotContent.includes("Step 2 of 4") &&
+    lastBotContent.includes("Choose a category")
+  ) {
     const categoryMap = {
-      '1': 'General Enquiry',
-      '2': 'KYC Related',
-      '3': 'Products Related', 
-      '4': 'Orders Related',
-      '5': 'Payment/Bank Accounts',
-      '6': 'Account Related',
-      '7': 'Others',
-      'general enquiry': 'General Enquiry',
-      'general': 'General Enquiry',
-      'kyc related': 'KYC Related',
-      'kyc': 'KYC Related',
-      'products related': 'Products Related',
-      'products': 'Products Related',
-      'orders related': 'Orders Related',
-      'orders': 'Orders Related',
-      'payment/bank accounts': 'Payment/Bank Accounts',
-      'payment': 'Payment/Bank Accounts',
-      'bank accounts': 'Payment/Bank Accounts',
-      'account related': 'Account Related',
-      'account': 'Account Related',
-      'others': 'Others',
-      'other': 'Others'
+      1: "General Enquiry",
+      2: "KYC Related",
+      3: "Products Related",
+      4: "Orders Related",
+      5: "Payment/Bank Accounts",
+      6: "Account Related",
+      7: "Others",
+      "general enquiry": "General Enquiry",
+      general: "General Enquiry",
+      "kyc related": "KYC Related",
+      kyc: "KYC Related",
+      "products related": "Products Related",
+      products: "Products Related",
+      "orders related": "Orders Related",
+      orders: "Orders Related",
+      "payment/bank accounts": "Payment/Bank Accounts",
+      payment: "Payment/Bank Accounts",
+      "bank accounts": "Payment/Bank Accounts",
+      "account related": "Account Related",
+      account: "Account Related",
+      others: "Others",
+      other: "Others",
     };
-    
-    const selectedCategory = categoryMap[lowerMessage] || categoryMap[message.trim()];
-    
+
+    const selectedCategory =
+      categoryMap[lowerMessage] || categoryMap[message.trim()];
+
     if (selectedCategory) {
       return {
         shouldRespond: true,
-        response: `Category selected: ${selectedCategory}
-
-**Step 3 of 4: Description**
-
-Now please provide a detailed description of your issue. Include any relevant information such as:
-- When did this issue occur?
-- What steps did you take?
-- Any error messages you received?
-- How is this affecting you?
-
-The more details you provide, the better our support team can assist you.`
+        response: `Category selected: ${selectedCategory}\n\n**Step 3 of 4: Description**\n\nNow please provide a detailed description of your issue. Include any relevant information such as:\n- When did this issue occur?\n- What steps did you take?\n- Any error messages you received?\n- How is this affecting you?\n\nThe more details you provide, the better our support team can assist you.`,
       };
     } else {
       return {
         shouldRespond: true,
-        response: `I didn't recognize that category. Please choose from:
-
-1. General Enquiry
-2. KYC Related
-3. Products Related
-4. Orders Related
-5. Payment/Bank Accounts
-6. Account Related
-7. Others
-
-Respond with either the number (1-7) or the category name.`
+        response: `I didn't recognize that category. Please choose from:\n\n1. General Enquiry\n2. KYC Related\n3. Products Related\n4. Orders Related\n5. Payment/Bank Accounts\n6. Account Related\n7. Others\n\nRespond with either the number (1-7) or the category name.`,
       };
     }
   }
-  
-  // Check if we're in Step 3 (collecting description)
-  if (lastBotContent.includes('Step 3 of 4') && lastBotContent.includes('Description')) {
-    // User provided description, move to Step 4
+
+  if (
+    lastBotContent.includes("Step 3 of 4") &&
+    lastBotContent.includes("Description")
+  ) {
     return {
       shouldRespond: true,
-      response: `Thank you for the detailed description.
-
-**Step 4 of 4: Upload Supporting Documents (Optional)**
-
-You can now upload supporting documents such as screenshots, receipts, or any other relevant files to help us resolve your issue faster.
-
-**Supported file types:** Images (JPEG, PNG, GIF, WebP) and PDF files
-**Maximum file size:** 10MB per file
-**Maximum files:** 3 files
-
-[File Upload Field]
-
-A file upload interface will appear after this message. You can either:
-- Upload supporting documents and create the ticket
-- Skip the upload and create the ticket without attachments
-
-Both options will create your support ticket successfully.`
+      response: `Thank you for the detailed description.\n\n**Step 4 of 4: Upload Supporting Documents (Optional)**\n\nYou can now upload supporting documents such as screenshots, receipts, or any other relevant files to help us resolve your issue faster.\n\n**Supported file types:** Images (JPEG, PNG, GIF, WebP) and PDF files\n**Maximum file size:** 10MB per file\n**Maximum files:** 3 files\n\n[File Upload Field]\n\nA file upload interface will appear after this message. You can either:\n- Upload supporting documents and create the ticket\n- Skip the upload and create the ticket without attachments\n\nBoth options will create your support ticket successfully.`,
     };
   }
-  
-  // Handle "no" response for file upload
-  if (lowerMessage === 'no' && lastBotContent.includes('Step 4 of 4')) {
-    // Create ticket without attachments
+
+  if (lowerMessage === "no" && lastBotContent.includes("Step 4 of 4")) {
     try {
-      // Extract ticket data from conversation
       const messages = chat.messages || [];
-      let issueTitle = '';
-      let category = '';
-      let description = '';
-      
-      // Find the issue title (first user message after Step 1)
-      const step1Index = messages.findIndex(msg => 
-        msg.content && msg.content.includes('Step 1 of 4')
+      let issueTitle = "";
+      let category = "";
+      let description = "";
+
+      const step1Index = messages.findIndex(
+        (msg) => msg.content && msg.content.includes("Step 1 of 4")
       );
       if (step1Index !== -1 && messages[step1Index + 1]) {
         issueTitle = messages[step1Index + 1].content;
       }
-      
-      // Find the category (first user message after Step 2)
-      const step2Index = messages.findIndex(msg => 
-        msg.content && msg.content.includes('Step 2 of 4')
+
+      const step2Index = messages.findIndex(
+        (msg) => msg.content && msg.content.includes("Step 2 of 4")
       );
       if (step2Index !== -1 && messages[step2Index + 1]) {
-        const userCategoryResponse = messages[step2Index + 1].content.toLowerCase().trim();
+        const userCategoryResponse = messages[step2Index + 1].content
+          .toLowerCase()
+          .trim();
         const categoryMap = {
-          '1': 'General Enquiry', '2': 'KYC Related', '3': 'Products Related',
-          '4': 'Orders Related', '5': 'Payment/Bank Accounts', 
-          '6': 'Account Related', '7': 'Others',
-          'general enquiry': 'General Enquiry', 'general': 'General Enquiry',
-          'kyc related': 'KYC Related', 'kyc': 'KYC Related',
-          'products related': 'Products Related', 'products': 'Products Related',
-          'orders related': 'Orders Related', 'orders': 'Orders Related',
-          'payment/bank accounts': 'Payment/Bank Accounts', 'payment': 'Payment/Bank Accounts',
-          'bank accounts': 'Payment/Bank Accounts', 'account related': 'Account Related',
-          'account': 'Account Related', 'others': 'Others', 'other': 'Others'
+          1: "General Enquiry",
+          2: "KYC Related",
+          3: "Products Related",
+          4: "Orders Related",
+          5: "Payment/Bank Accounts",
+          6: "Account Related",
+          7: "Others",
+          "general enquiry": "General Enquiry",
+          general: "General Enquiry",
+          "kyc related": "KYC Related",
+          kyc: "KYC Related",
+          "products related": "Products Related",
+          products: "Products Related",
+          "orders related": "Orders Related",
+          orders: "Orders Related",
+          "payment/bank accounts": "Payment/Bank Accounts",
+          payment: "Payment/Bank Accounts",
+          "bank accounts": "Payment/Bank Accounts",
+          "account related": "Account Related",
+          account: "Account Related",
+          others: "Others",
+          other: "Others",
         };
-        category = categoryMap[userCategoryResponse] || 'Others';
+        category = categoryMap[userCategoryResponse] || "Others";
       }
-      
-      // Find the description (first user message after Step 3)
-      const step3Index = messages.findIndex(msg => 
-        msg.content && msg.content.includes('Step 3 of 4')
+
+      const step3Index = messages.findIndex(
+        (msg) => msg.content && msg.content.includes("Step 3 of 4")
       );
       if (step3Index !== -1 && messages[step3Index + 1]) {
         description = messages[step3Index + 1].content;
       }
-      
+
       if (issueTitle && category && description) {
-        // Create ticket without files
         const ticketId = `TCK${Date.now()}${Math.floor(Math.random() * 10000)}`;
-        
+
         const ticket = new Ticket({
           customer_id: user.customerId || user.id,
           customer_email: user.email,
@@ -1184,54 +2760,39 @@ Both options will create your support ticket successfully.`
           status: "Open",
           priority: "Medium",
           ticket_id: ticketId,
-          attachments: []
+          attachments: [],
         });
-        
+
         await ticket.save();
-        console.log('Ticket created without attachments:', ticketId);
-        
+        console.log("Ticket created without attachments:", ticketId);
+
         return {
           shouldRespond: true,
-          response: `✅ **Ticket Created Successfully!**
-
-**Ticket ID:** ${ticketId}
-**Title:** ${issueTitle}
-**Category:** ${category}
-**Status:** Open
-**Attachments:** None
-
-Your support ticket has been created and assigned to our team. You'll receive updates on the progress via email.
-
-**What's next?**
-- Our support team will review your ticket within 24 hours
-- You'll receive email notifications for any updates
-- You can reference your ticket using ID: ${ticketId}
-
-Is there anything else I can help you with regarding your investments or account?`
+          response: `✅ **Ticket Created Successfully!**\n\n**Ticket ID:** ${ticketId}\n**Title:** ${issueTitle}\n**Category:** ${category}\n**Status:** Open\n**Attachments:** None\n\nYour support ticket has been created and assigned to our team. You'll receive updates on the progress via email.\n\n**What's next?**\n- Our support team will review your ticket within 24 hours\n- You'll receive email notifications for any updates\n- You can reference your ticket using ID: ${ticketId}\n\nIs there anything else I can help you with regarding your investments or account?`,
         };
       } else {
         return {
           shouldRespond: true,
-          response: 'I\'m sorry, there seems to be missing information for creating your ticket. Please start the ticket creation process again by saying "I want to raise a ticket".'
+          response:
+            "I'm sorry, there seems to be missing information for creating your ticket. Please start the ticket creation process again by saying 'I want to raise a ticket'.",
         };
       }
     } catch (error) {
-      console.error('Error creating ticket without attachments:', error);
+      console.error("Error creating ticket without attachments:", error);
       return {
         shouldRespond: true,
-        response: 'I\'m sorry, there was an error creating your ticket. Please try again or contact our support team directly.'
+        response:
+          "I'm sorry, there was an error creating your ticket. Please try again or contact our support team directly.",
       };
     }
   }
-  
-  // Default response if we can't determine the step
+
   return {
     shouldRespond: false,
-    response: ''
+    response: "",
   };
 }
 
-// Get all chats for a user
 app.get("/api/chat", authenticateToken, async (req, res) => {
   try {
     const userId = new ObjectId(req.user._id);
@@ -1251,7 +2812,6 @@ app.get("/api/chat", authenticateToken, async (req, res) => {
   }
 });
 
-// Get specific chat
 app.get("/api/chat/:chatId", authenticateToken, async (req, res) => {
   try {
     const { chatId } = req.params;
@@ -1280,7 +2840,6 @@ app.get("/api/chat/:chatId", authenticateToken, async (req, res) => {
   }
 });
 
-// Delete a chat
 app.delete("/api/chat/:chatId", authenticateToken, async (req, res) => {
   try {
     const { chatId } = req.params;
@@ -1309,7 +2868,6 @@ app.delete("/api/chat/:chatId", authenticateToken, async (req, res) => {
   }
 });
 
-// Update chat title
 app.put("/api/chat/:chatId", authenticateToken, async (req, res) => {
   try {
     const { chatId } = req.params;
@@ -1345,7 +2903,10 @@ app.put("/api/chat/:chatId", authenticateToken, async (req, res) => {
       return res.status(404).json({ error: "Chat not found" });
     }
 
-    res.json({ message: "Chat title updated successfully", title: title.trim() });
+    res.json({
+      message: "Chat title updated successfully",
+      title: title.trim(),
+    });
   } catch (error) {
     console.error("Chat title update error:", error);
     res.status(500).json({ error: "Failed to update chat title" });
@@ -1356,7 +2917,6 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "OK", timestamp: new Date().toISOString() });
 });
 
-// Dashboard data endpoint
 app.get("/api/dashboard/data", authenticateToken, async (req, res) => {
   try {
     const customerId = req.user.customerId || req.user.id;
@@ -1364,7 +2924,6 @@ app.get("/api/dashboard/data", authenticateToken, async (req, res) => {
 
     const userData = await getUserData(customerId);
 
-    // Calculate portfolio summary
     const portfolioData = {
       totalValue: 0,
       totalInvested: 0,
@@ -1373,18 +2932,16 @@ app.get("/api/dashboard/data", authenticateToken, async (req, res) => {
       assets: [],
     };
 
-    // Calculate from orders data
-    if (userData.orders && userData.orders.length > 0) {
-      const totalInvested = userData.orders
-        .filter(
-          (order) =>
-            order.payment_status === "Paid" ||
-            order.payment_status === "completed"
-        )
-        .reduce((sum, order) => sum + (parseFloat(order.amount) || 0), 0);
+    if (
+      userData.mutualFundsInvested &&
+      userData.mutualFundsInvested.length > 0
+    ) {
+      const totalInvested = userData.mutualFundsInvested
+        .filter((mf) => mf.status === "Active")
+        .reduce((sum, mf) => sum + (parseFloat(mf.amount) || 0), 0);
 
       portfolioData.totalInvested = totalInvested;
-      portfolioData.totalValue = totalInvested * 1.125; // Assuming 12.5% returns
+      portfolioData.totalValue = totalInvested * 1.125; // Assuming 12.5% growth for simplicity
       portfolioData.totalReturns =
         portfolioData.totalValue - portfolioData.totalInvested;
       portfolioData.returnPercentage =
@@ -1394,16 +2951,13 @@ app.get("/api/dashboard/data", authenticateToken, async (req, res) => {
 
       // Group by investment type
       const assetGroups = {};
-      userData.orders.forEach((order) => {
-        const type = order.investment_type || "General";
+      userData.mutualFundsInvested.forEach((mf) => {
+        const type = mf.investment_type || "General";
         if (!assetGroups[type]) {
           assetGroups[type] = 0;
         }
-        if (
-          order.payment_status === "Paid" ||
-          order.payment_status === "completed"
-        ) {
-          assetGroups[type] += parseFloat(order.amount) || 0;
+        if (mf.status === "Active") {
+          assetGroups[type] += parseFloat(mf.amount) || 0;
         }
       });
 
@@ -1417,20 +2971,23 @@ app.get("/api/dashboard/data", authenticateToken, async (req, res) => {
 
     // Transactions
     const transactions = [];
-    if (userData.orders && userData.orders.length > 0) {
-      const recentOrders = userData.orders
+    if (
+      userData.mutualFundsInvested &&
+      userData.mutualFundsInvested.length > 0
+    ) {
+      const recentInvestments = userData.mutualFundsInvested
         .sort(
           (a, b) =>
             new Date(b.created_at || b.date) - new Date(a.created_at || a.date)
         )
         .slice(0, 10);
 
-      recentOrders.forEach((order) => {
+      recentInvestments.forEach((mf) => {
         transactions.push({
-          type: `Order - ${order.id}`,
-          amount: parseFloat(order.amount) || 0,
-          date: order.created_at || order.date || new Date(),
-          status: order.payment_status || "pending",
+          type: `Investment - ${mf.fund_name} (${mf.investment_type})`,
+          amount: parseFloat(mf.amount) || 0,
+          date: mf.created_at || mf.date || new Date(),
+          status: mf.status || "Active",
           isCredit: false,
         });
       });
@@ -1448,27 +3005,21 @@ app.get("/api/dashboard/data", authenticateToken, async (req, res) => {
       },
     };
 
-    // Goals (dummy data based on portfolio)
-    const goals = [
-      {
-        name: "Emergency Fund",
-        target: 100000,
-        current: Math.min(portfolioData.totalValue * 0.4, 85000),
-        progress: Math.min(
-          ((portfolioData.totalValue * 0.4) / 100000) * 100,
-          85
+    // Goals
+    const goals = userData.mutualFundsInvested
+      .filter((mf) => mf.goal && mf.target_amount)
+      .map((mf) => ({
+        name: mf.goal,
+        target: mf.target_amount,
+        current: Math.min(
+          parseFloat(mf.amount) * 1.125,
+          mf.target_amount * 0.9
         ),
-      },
-      {
-        name: "House Down Payment",
-        target: 2000000,
-        current: Math.min(portfolioData.totalValue * 0.6, 1200000),
         progress: Math.min(
-          ((portfolioData.totalValue * 0.6) / 2000000) * 100,
-          60
+          ((parseFloat(mf.amount) * 1.125) / mf.target_amount) * 100,
+          90
         ),
-      },
-    ];
+      }));
 
     const dashboardData = {
       user: {
@@ -1479,10 +3030,33 @@ app.get("/api/dashboard/data", authenticateToken, async (req, res) => {
       portfolio: portfolioData,
       transactions: transactions,
       market: marketData,
-      goals: goals,
+      goals:
+        goals.length > 0
+          ? goals
+          : [
+              {
+                name: "Emergency Fund",
+                target: 100000,
+                current: Math.min(portfolioData.totalValue * 0.4, 85000),
+                progress: Math.min(
+                  ((portfolioData.totalValue * 0.4) / 100000) * 100,
+                  85
+                ),
+              },
+              {
+                name: "House Down Payment",
+                target: 2000000,
+                current: Math.min(portfolioData.totalValue * 0.6, 1200000),
+                progress: Math.min(
+                  ((portfolioData.totalValue * 0.6) / 2000000) * 100,
+                  60
+                ),
+              },
+            ],
       summary: {
         ordersCount: userData.orders?.length || 0,
         foliosCount: userData.folios?.length || 0,
+        mutualFundsCount: userData.mutualFundsInvested?.length || 0,
         totalInvestments: portfolioData.totalValue,
       },
     };
@@ -1674,7 +3248,9 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on:`);
   console.log(`→ Local: http://localhost:${PORT}`);
   console.log(`→ Network: http://${localIP}:${PORT}`);
-  console.log(`→ File Retrieve: http://localhost:${PORT}/file/<enter the gridFSID>`)
+  console.log(
+    `→ File Retrieve: http://localhost:${PORT}/file/<enter the gridFSID>`
+  );
 });
 
 process.on("SIGINT", async () => {
