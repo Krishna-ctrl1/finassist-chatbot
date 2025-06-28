@@ -559,20 +559,31 @@ function checkIfInvestmentRequest(message, conversationContext, chat) {
     "lumpsum investment",
     "sip",
     "lumpsum",
+  ];
+
+  const cancellationKeywords = [
     "cancel my sip",
     "pause my sip",
+    "stop my sip",
     "cancel my lumpsum",
     "pause my lumpsum",
+    "stop my lumpsum",
+    "cancel an investment",
+    "pause an investment",
   ];
 
   const hasInvestmentKeyword = investmentKeywords.some((keyword) =>
     lowerMessage.includes(keyword)
   );
 
+  const hasCancellationKeyword = cancellationKeywords.some((keyword) =>
+    lowerMessage.includes(keyword)
+  );
+
   const workflowState = chat.workflowState || {};
   const isInWorkflow = workflowState.step && workflowState.step >= 1;
 
-  // Only consider conversation context for workflow continuation if in an active workflow
+  // Check if the message is part of an ongoing investment or cancellation/pause workflow
   const isInInvestmentFlow = isInWorkflow && conversationContext.some(
     (msg) =>
       msg.content &&
@@ -586,29 +597,21 @@ function checkIfInvestmentRequest(message, conversationContext, chat) {
         msg.content.toLowerCase().includes("pay using your saved upi") ||
         msg.content.toLowerCase().includes("select the investment") ||
         msg.content.toLowerCase().includes("authorize the cancel") ||
-        msg.content.toLowerCase().includes("authorize the pause"))
-  );
-
-  // Allow explicit cancellation
-  const isCancellation = ["cancel", "exit", "stop", "pause"].some((keyword) =>
-    lowerMessage.includes(keyword)
+        msg.content.toLowerCase().includes("authorize the pause") ||
+        msg.content.toLowerCase().includes("your recent active investments"))
   );
 
   console.log("checkIfInvestmentRequest:", {
     message: lowerMessage,
     hasInvestmentKeyword,
+    hasCancellationKeyword,
     isInInvestmentFlow,
     isInWorkflow,
-    isCancellation,
     workflowState,
   });
 
-  if (isCancellation && isInWorkflow) {
-    chat.workflowState = {}; // Reset workflow state
-    return false;
-  }
-
-  return hasInvestmentKeyword || isInInvestmentFlow;
+  // Return true for both investment and cancellation/pause requests
+  return hasInvestmentKeyword || hasCancellationKeyword || isInInvestmentFlow;
 }
 
 // Function to generate OTP
@@ -665,10 +668,10 @@ async function handleCancelPauseWorkflow(message, chat, user) {
       lowerMessage.includes("stop my lumpsum") ||
       lowerMessage.includes("cancel an investment") ||
       lowerMessage.includes("pause an investment")) &&
-    !lastBotContent.includes("Your active investments:");
+    !lastBotContent.includes("Your recent active investments");
 
   const isSpecificCancelRequest =
-    lowerMessage.includes("cancel") &&
+    (lowerMessage.includes("cancel") || lowerMessage.includes("pause")) &&
     (lowerMessage.includes("sip") || lowerMessage.includes("lumpsum")) &&
     lowerMessage.includes("in");
 
@@ -711,7 +714,7 @@ async function handleCancelPauseWorkflow(message, chat, user) {
 
     workflowState.mutualFunds = mutualFunds;
     workflowState.step = 1;
-    const responseMessage = `Your active investments:\n\n${formattedInvestments}\n\nReply with the number (1-${mutualFunds.length}) to ${action} or "Cancel" to exit.`;
+    const responseMessage = `Your recent active investments:\n\n${formattedInvestments}\n\nPlease reply with the number (1-${mutualFunds.length}) to ${action} or "Cancel" to exit.`;
 
     return {
       shouldRespond: true,
@@ -720,8 +723,9 @@ async function handleCancelPauseWorkflow(message, chat, user) {
     };
   }
 
-  // Handle specific cancellation request (e.g., "Cancel SIP of ₹4,790 in Mirae Asset Large Cap Fund")
+  // Handle specific cancellation/pause request (e.g., "Cancel SIP of ₹4,790 in Mirae Asset Large Cap Fund")
   if (isSpecificCancelRequest && !workflowState.step) {
+    const action = lowerMessage.includes("cancel") ? "cancel" : "pause";
     const mutualFunds = await db
       .collection("customer_mutual_funds")
       .find({
@@ -734,7 +738,7 @@ async function handleCancelPauseWorkflow(message, chat, user) {
       chat.workflowState = {};
       return {
         shouldRespond: true,
-        response: `No active investments found to cancel.`,
+        response: `No active investments found to ${action}.`,
         tempData: { step: null },
       };
     }
@@ -771,30 +775,30 @@ async function handleCancelPauseWorkflow(message, chat, user) {
 
       workflowState.mutualFunds = mutualFunds;
       workflowState.step = 1;
-      workflowState.action = "cancel";
+      workflowState.action = action;
       return {
         shouldRespond: true,
-        response: `Could not find the specified investment. Here are your active investments:\n\n${formattedInvestments}\n\nReply with the number (1-${mutualFunds.length}) to cancel or "Cancel" to exit.`,
-        tempData: { step: 1, action: "cancel", mutualFunds },
+        response: `Could not find the specified investment. Here are your recent active investments:\n\n${formattedInvestments}\n\nPlease reply with the number (1-${mutualFunds.length}) to ${action} or "Cancel" to exit.`,
+        tempData: { step: 1, action, mutualFunds },
       };
     }
 
     workflowState.selectedInvestment = matchedInvestment;
     workflowState.step = 2;
-    workflowState.action = "cancel";
+    workflowState.action = action;
 
-    const responseMessage = `Confirm cancel of ${matchedInvestment.fund_name} (${matchedInvestment.investment_type}, ₹${matchedInvestment.amount.toLocaleString("en-IN")}). Reply "Confirm" or "Cancel".`;
+    const responseMessage = `Confirm ${action} of ${matchedInvestment.fund_name} (${matchedInvestment.investment_type}, ₹${matchedInvestment.amount.toLocaleString("en-IN")}). Reply "Confirm" or "Cancel".`;
 
     return {
       shouldRespond: true,
       response: responseMessage,
-      tempData: { step: 2, selectedInvestment: matchedInvestment, action: "cancel" },
+      tempData: { step: 2, selectedInvestment: matchedInvestment, action },
     };
   }
 
-  // Step 2: Handle investment selection (by number or "Cancel <number>")
+  // Step 2: Handle investment selection (by number, "Cancel <number>", or just "<number>")
   if (
-    (lastBotContent.includes("Your active investments:") || lastBotContent.includes("Could not find the specified investment")) &&
+    (lastBotContent.includes("Your recent active investments") || lastBotContent.includes("Could not find the specified investment")) &&
     workflowState.step === 1
   ) {
     if (lowerMessage === "cancel") {
@@ -806,10 +810,10 @@ async function handleCancelPauseWorkflow(message, chat, user) {
       };
     }
 
-    // Handle "Cancel <number>" or just "<number>"
+    // Handle "Cancel <number>", "Pause <number>", or just "<number>"
     let selectionIndex;
-    if (lowerMessage.startsWith("cancel ")) {
-      selectionIndex = parseInt(lowerMessage.replace("cancel ", "")) - 1;
+    if (lowerMessage.startsWith("cancel ") || lowerMessage.startsWith("pause ")) {
+      selectionIndex = parseInt(lowerMessage.split(" ")[1]) - 1;
     } else {
       selectionIndex = parseInt(message) - 1;
     }
@@ -819,7 +823,7 @@ async function handleCancelPauseWorkflow(message, chat, user) {
     if (isNaN(selectionIndex) || selectionIndex < 0 || selectionIndex >= mutualFunds.length) {
       return {
         shouldRespond: true,
-        response: `Please reply with a number (1-${mutualFunds.length}) or "Cancel <number>" to ${workflowState.action}, or "Cancel" to exit.`,
+        response: `Please reply with a number (1-${mutualFunds.length}) to ${workflowState.action}, or "Cancel" to exit.`,
         tempData: { step: 1, action: workflowState.action, mutualFunds },
       };
     }
@@ -868,7 +872,7 @@ async function handleCancelPauseWorkflow(message, chat, user) {
       workflowState.step = 3;
       return {
         shouldRespond: true,
-        response: `OTP sent to ${user.email}. Please enter the 6-digit OTP to ${workflowState.action}.`,
+        response: `OTP sent to ${user.email}. Enter the 6-digit OTP to ${workflowState.action}.`,
         tempData: {
           step: 3,
           selectedInvestment: workflowState.selectedInvestment,
