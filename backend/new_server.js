@@ -1601,7 +1601,10 @@ async function handleInvestmentWorkflow(message, chat, user) {
   }
 
   // Lumpsum Flow: Step 2 - Ask for investment amount
-  if (lowerMessage === "lumpsum" && lastBotContent.includes("SIP or Lumpsum")) {
+  if (
+    lowerMessage === "lumpsum" &&
+    (lastBotContent.includes("SIP or Lumpsum") || workflowState.step === 1)
+  ) {
     workflowState.step = 2;
     workflowState.investmentType = "Lumpsum";
     return {
@@ -1615,22 +1618,25 @@ async function handleInvestmentWorkflow(message, chat, user) {
     lastBotContent.includes("Step 2 of 5") &&
     lastBotContent.includes("Investment Amount")
   ) {
-    const amountMatch = message.match(/₹?\s*([\d,]+)/);
+    const amountMatch = message.match(
+      /₹?\s*([\d,]+(?:\.\d+)?)\s*(lakh|lakhs)?/i
+    );
     if (amountMatch) {
-      const lumpsumAmount = parseInt(amountMatch[1].replace(/,/g, ""));
+      let lumpsumAmount = parseFloat(amountMatch[1].replace(/,/g, ""));
+      if (amountMatch[2]) lumpsumAmount *= 100000; // Convert lakhs to rupees
       workflowState.step = 3;
       workflowState.lumpsumAmount = lumpsumAmount;
       return {
         shouldRespond: true,
         response: `Got it, you want to invest ₹${lumpsumAmount.toLocaleString(
           "en-IN"
-        )}.\n**Step 3 of 5: Choose Mutual Fund**\n\nWould you like me to recommend a mutual fund or pick one yourself?\n\n**Options:**\n- Recommend for me\n- I’ll choose`,
+        )}.\n**Step 3 of 5: Choose Mutual Fund**\n\nWould you like me to recommend a mutual fund or pick one yourself?\n\n**Options:**\n- Recommend for me\n- I'll choose`,
         tempData: { step: 3, lumpsumAmount },
       };
     } else {
       return {
         shouldRespond: true,
-        response: `Please provide a valid amount (e.g., ₹50,000).`,
+        response: `Please provide a valid amount (e.g., ₹50,000 or ₹1 lakh).`,
       };
     }
   }
@@ -1661,11 +1667,13 @@ async function handleInvestmentWorkflow(message, chat, user) {
   }
 
   if (
-    (lastBotContent.includes("suggest") || lastBotContent.includes("chosen")) &&
+    (lastBotContent.includes("recommend") || lastBotContent.includes("suggest") || lastBotContent.includes("chosen")) &&
     (lastBotContent.includes("mutual fund") ||
       lastBotContent.includes("Parag Parikh Flexi Cap Fund")) &&
+    (lastBotContent.includes("go ahead with this") || lastBotContent.includes("Would you like to go ahead")) &&
     lowerMessage === "yes" &&
-    workflowState.step === 4
+    workflowState.step === 4 &&
+    workflowState.investmentType === "Lumpsum"
   ) {
     workflowState.step = 5;
     const { lumpsumAmount, fund } = workflowState;
@@ -1683,7 +1691,7 @@ async function handleInvestmentWorkflow(message, chat, user) {
 
     return {
       shouldRespond: true,
-      response: `Here’s a summary of your Lumpsum investment:\n\n**Amount:** ₹${lumpsumAmount.toLocaleString(
+      response: `Here's a summary of your Lumpsum investment:\n\n**Amount:** ₹${lumpsumAmount.toLocaleString(
         "en-IN"
       )}\n**Mutual Fund:** ${fund}\n\nPlease enter the OTP sent to your registered email (${
         user.email
