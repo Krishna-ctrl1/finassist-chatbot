@@ -978,7 +978,15 @@ async function handleCancelPauseWorkflow(message, chat, user) {
         }
 
         // Update corresponding order status
-        const orderStatus = workflowState.action === "resume" ? "Pending" : newStatus;
+        let orderStatus;
+        if (workflowState.action === "resume") {
+          orderStatus = "Completed"; // Resume means the investment is active and should be treated as completed
+        } else if (workflowState.action === "cancel") {
+          orderStatus = "Cancelled";
+        } else {
+          orderStatus = "Paused"; // For pause action
+        }
+        
         await db.collection("order").updateOne(
           {
             id: selectedInvestment.order_id,
