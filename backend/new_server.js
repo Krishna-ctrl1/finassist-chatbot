@@ -570,6 +570,12 @@ function checkIfInvestmentRequest(message, conversationContext, chat) {
     "stop my lumpsum",
     "cancel an investment",
     "pause an investment",
+    "resume my sip",
+    "restart my sip",
+    "resume my investment",
+    "restart my investment",
+    "reactivate my sip",
+    "continue my sip",
   ];
 
   const hasInvestmentKeyword = investmentKeywords.some((keyword) =>
@@ -598,7 +604,9 @@ function checkIfInvestmentRequest(message, conversationContext, chat) {
         msg.content.toLowerCase().includes("select the investment") ||
         msg.content.toLowerCase().includes("authorize the cancel") ||
         msg.content.toLowerCase().includes("authorize the pause") ||
-        msg.content.toLowerCase().includes("your recent active investments"))
+        msg.content.toLowerCase().includes("authorize the resume") ||
+        msg.content.toLowerCase().includes("your recent active investments") ||
+        msg.content.toLowerCase().includes("your recent paused investments"))
   );
 
   console.log("checkIfInvestmentRequest:", {
@@ -644,7 +652,7 @@ async function sendOTPEmail(email, otp) {
   }
 }
  
-// Function to handle cancel/pause workflow
+// Function to handle cancel/pause/resume workflow
 async function handleCancelPauseWorkflow(message, chat, user) {
   const lowerMessage = message.toLowerCase().trim();
   const conversationHistory = chat.messages || [];
@@ -658,7 +666,7 @@ async function handleCancelPauseWorkflow(message, chat, user) {
   chat.workflowState = chat.workflowState || {};
   const workflowState = chat.workflowState;
 
-  // Step 1: Check if it's a new cancel/pause request or a specific cancellation
+  // Step 1: Check if it's a new cancel/pause/resume request or a specific action
   const isInitialRequest =
     (lowerMessage.includes("cancel my sip") ||
       lowerMessage.includes("pause my sip") ||
@@ -667,24 +675,39 @@ async function handleCancelPauseWorkflow(message, chat, user) {
       lowerMessage.includes("pause my lumpsum") ||
       lowerMessage.includes("stop my lumpsum") ||
       lowerMessage.includes("cancel an investment") ||
-      lowerMessage.includes("pause an investment")) &&
-    !lastBotContent.includes("Your recent active investments");
+      lowerMessage.includes("pause an investment") ||
+      lowerMessage.includes("resume my sip") ||
+      lowerMessage.includes("restart my sip") ||
+      lowerMessage.includes("resume my investment") ||
+      lowerMessage.includes("restart my investment") ||
+      lowerMessage.includes("reactivate my sip") ||
+      lowerMessage.includes("continue my sip")) &&
+    !lastBotContent.includes("Your recent active investments") &&
+    !lastBotContent.includes("Your recent paused investments");
 
   const isSpecificCancelRequest =
-    (lowerMessage.includes("cancel") || lowerMessage.includes("pause")) &&
+    (lowerMessage.includes("cancel") || lowerMessage.includes("pause") || lowerMessage.includes("resume") || lowerMessage.includes("restart") || lowerMessage.includes("reactivate") || lowerMessage.includes("continue")) &&
     (lowerMessage.includes("sip") || lowerMessage.includes("lumpsum")) &&
     lowerMessage.includes("in");
 
   if (isInitialRequest) {
-    const action = lowerMessage.includes("cancel") ? "cancel" : "pause";
+    let action;
+    if (lowerMessage.includes("cancel")) {
+      action = "cancel";
+    } else if (lowerMessage.includes("resume") || lowerMessage.includes("restart") || lowerMessage.includes("reactivate") || lowerMessage.includes("continue")) {
+      action = "resume";
+    } else {
+      action = "pause";
+    }
     workflowState.action = action;
 
-    // Fetch user's active mutual funds
+    // Fetch user's mutual funds based on action
+    const statusFilter = action === "resume" ? "Paused" : "Active";
     const mutualFunds = await db
       .collection("customer_mutual_funds")
       .find({
         customer_id: parseInt(user.customerId || user.id),
-        status: "Active",
+        status: statusFilter,
       })
       .toArray();
 
@@ -692,7 +715,7 @@ async function handleCancelPauseWorkflow(message, chat, user) {
       chat.workflowState = {};
       return {
         shouldRespond: true,
-        response: `No active investments found to ${action}.`,
+        response: `No ${action === "resume" ? "paused" : "active"} investments found to ${action}.`,
         tempData: { step: null },
       };
     }
@@ -700,21 +723,18 @@ async function handleCancelPauseWorkflow(message, chat, user) {
     // Format each investment as a numbered item
     const formattedInvestments = mutualFunds
       .map((mf, index) => {
-        const details = [
-          `${index + 1}. ${mf.fund_name} (${mf.investment_type})`,
-          `Amount: ₹${mf.amount.toLocaleString("en-IN")}`,
-          `Goal: ${mf.goal || "General"}`,
-        ];
+        let investmentLine = `${index + 1}. ${mf.fund_name} (${mf.investment_type}) - Amount: ₹${mf.amount.toLocaleString("en-IN")} - Goal: ${mf.goal || "General"}`;
         if (mf.investment_type === "SIP") {
-          details.push(`Deduction: ${mf.deduction_date}`);
+          investmentLine += ` - Deduction: ${mf.deduction_date}`;
         }
-        return details.join(" - ");
+        return investmentLine;
       })
       .join("\n");
 
     workflowState.mutualFunds = mutualFunds;
     workflowState.step = 1;
-    const responseMessage = `Your recent active investments:\n\n${formattedInvestments}\n\nPlease reply with the number (1-${mutualFunds.length}) to ${action} or "Cancel" to exit.`;
+    const investmentListTitle = action === "resume" ? "Your recent paused investments:" : "Your recent active investments:";
+    const responseMessage = `${investmentListTitle}\n\n${formattedInvestments}\n\nPlease reply with the number (1-${mutualFunds.length}) to ${action} or "Cancel" to exit.`;
 
     return {
       shouldRespond: true,
@@ -723,22 +743,32 @@ async function handleCancelPauseWorkflow(message, chat, user) {
     };
   }
 
-  // Handle specific cancellation/pause request (e.g., "Cancel SIP of ₹4,790 in Mirae Asset Large Cap Fund")
+  // Handle specific action request (cancel/pause/resume)
   if (isSpecificCancelRequest && !workflowState.step) {
-    const action = lowerMessage.includes("cancel") ? "cancel" : "pause";
+    let action;
+    if (lowerMessage.includes("cancel")) {
+      action = "cancel";
+    } else if (lowerMessage.includes("resume") || lowerMessage.includes("restart") || lowerMessage.includes("reactivate") || lowerMessage.includes("continue")) {
+      action = "resume";
+    } else {
+      action = "pause";
+    }
+    
+    const statusFilter = action === "resume" ? "Paused" : "Active";
     const mutualFunds = await db
       .collection("customer_mutual_funds")
       .find({
         customer_id: parseInt(user.customerId || user.id),
-        status: "Active",
+        status: statusFilter,
       })
       .toArray();
 
     if (!mutualFunds || mutualFunds.length === 0) {
       chat.workflowState = {};
+      const investmentType = action === "resume" ? "paused" : "active";
       return {
         shouldRespond: true,
-        response: `No active investments found to ${action}.`,
+        response: `No ${investmentType} investments found to ${action}.`,
         tempData: { step: null },
       };
     }
@@ -753,7 +783,7 @@ async function handleCancelPauseWorkflow(message, chat, user) {
     const matchedInvestment = mutualFunds.find(
       (mf) =>
         mf.fund_name.toLowerCase().includes(fundName) &&
-        mf.amount === amount &&
+        (!amount || mf.amount === amount) &&
         mf.investment_type === (isSIP ? "SIP" : "Lumpsum")
     );
 
@@ -761,24 +791,21 @@ async function handleCancelPauseWorkflow(message, chat, user) {
       // If no specific match, show the numbered list
       const formattedInvestments = mutualFunds
         .map((mf, index) => {
-          const details = [
-            `${index + 1}. ${mf.fund_name} (${mf.investment_type})`,
-            `Amount: ₹${mf.amount.toLocaleString("en-IN")}`,
-            `Goal: ${mf.goal || "General"}`,
-          ];
+          let investmentLine = `${index + 1}. ${mf.fund_name} (${mf.investment_type}) - Amount: ₹${mf.amount.toLocaleString("en-IN")} - Goal: ${mf.goal || "General"}`;
           if (mf.investment_type === "SIP") {
-            details.push(`Deduction: ${mf.deduction_date}`);
+            investmentLine += ` - Deduction: ${mf.deduction_date}`;
           }
-          return details.join(" - ");
+          return investmentLine;
         })
         .join("\n");
 
       workflowState.mutualFunds = mutualFunds;
       workflowState.step = 1;
       workflowState.action = action;
+      const investmentListTitle = action === "resume" ? "Your recent paused investments:" : "Your recent active investments:";
       return {
         shouldRespond: true,
-        response: `Could not find the specified investment. Here are your recent active investments:\n\n${formattedInvestments}\n\nPlease reply with the number (1-${mutualFunds.length}) to ${action} or "Cancel" to exit.`,
+        response: `Could not find the specified investment. Here are ${investmentListTitle}\n\n${formattedInvestments}\n\nPlease reply with the number (1-${mutualFunds.length}) to ${action} or "Cancel" to exit.`,
         tempData: { step: 1, action, mutualFunds },
       };
     }
@@ -796,9 +823,9 @@ async function handleCancelPauseWorkflow(message, chat, user) {
     };
   }
 
-  // Step 2: Handle investment selection (by number, "Cancel <number>", or just "<number>")
+  // Step 2: Handle investment selection (by number, "<Action> <number>", or just "<number>")
   if (
-    (lastBotContent.includes("Your recent active investments") || lastBotContent.includes("Could not find the specified investment")) &&
+    (lastBotContent.includes("Your recent active investments") || lastBotContent.includes("Your recent paused investments") || lastBotContent.includes("Could not find the specified investment")) &&
     workflowState.step === 1
   ) {
     if (lowerMessage === "cancel") {
@@ -810,9 +837,9 @@ async function handleCancelPauseWorkflow(message, chat, user) {
       };
     }
 
-    // Handle "Cancel <number>", "Pause <number>", or just "<number>"
+    // Handle "<Action> <number>" (e.g., "Pause 1", "Resume 1") or just "<number>"
     let selectionIndex;
-    if (lowerMessage.startsWith("cancel ") || lowerMessage.startsWith("pause ")) {
+    if (lowerMessage.match(/^(cancel|pause|resume|restart|reactivate)\s+\d+$/i)) {
       selectionIndex = parseInt(lowerMessage.split(" ")[1]) - 1;
     } else {
       selectionIndex = parseInt(message) - 1;
@@ -922,7 +949,14 @@ async function handleCancelPauseWorkflow(message, chat, user) {
     ) {
       try {
         const selectedInvestment = workflowState.selectedInvestment;
-        const newStatus = workflowState.action === "cancel" ? "Cancelled" : "Paused";
+        let newStatus;
+        if (workflowState.action === "cancel") {
+          newStatus = "Cancelled";
+        } else if (workflowState.action === "resume") {
+          newStatus = "Active";
+        } else {
+          newStatus = "Paused";
+        }
 
         // Update customer_mutual_funds collection
         const updateResult = await db.collection("customer_mutual_funds").updateOne(
@@ -944,20 +978,22 @@ async function handleCancelPauseWorkflow(message, chat, user) {
         }
 
         // Update corresponding order status
+        const orderStatus = workflowState.action === "resume" ? "Pending" : newStatus;
         await db.collection("order").updateOne(
           {
             id: selectedInvestment.order_id,
             customer_id: parseInt(user.customerId || user.id),
           },
           {
-            $set: { payment_status: newStatus, updated_at: new Date() },
+            $set: { payment_status: orderStatus, updated_at: new Date() },
           }
         );
 
         chat.workflowState = {};
+        const actionPastTense = workflowState.action === "resume" ? "resumed" : newStatus.toLowerCase();
         return {
           shouldRespond: true,
-          response: `${selectedInvestment.fund_name} (${selectedInvestment.investment_type}, ₹${selectedInvestment.amount.toLocaleString("en-IN")}) ${newStatus.toLowerCase()}.`,
+          response: `${selectedInvestment.fund_name} (${selectedInvestment.investment_type}, ₹${selectedInvestment.amount.toLocaleString("en-IN")}) ${actionPastTense}.`,
           tempData: { step: null },
         };
       } catch (error) {
@@ -2219,24 +2255,39 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
     );
 
     if (isInvestmentRequest) {
-      // Handle specific investment cancellation (e.g., "I want to cancel my SIP of ₹4,790 in Mirae Asset Large Cap Fund")
+      // Handle specific investment cancellation/resume (e.g., "I want to cancel my SIP of ₹4,790 in Mirae Asset Large Cap Fund")
       const lowerMessage = processedMessage.toLowerCase().trim();
       if (
-        lowerMessage.includes("cancel") &&
+        (lowerMessage.includes("cancel") || lowerMessage.includes("resume") || lowerMessage.includes("restart") || lowerMessage.includes("reactivate") || lowerMessage.includes("continue")) &&
         (lowerMessage.includes("sip") || lowerMessage.includes("lumpsum")) &&
         lowerMessage.includes("in")
       ) {
+        // Determine action and status filter
+        let action;
+        let statusFilter;
+        if (lowerMessage.includes("cancel")) {
+          action = "cancel";
+          statusFilter = "Active";
+        } else if (lowerMessage.includes("resume") || lowerMessage.includes("restart") || lowerMessage.includes("reactivate") || lowerMessage.includes("continue")) {
+          action = "resume";
+          statusFilter = "Paused";
+        } else {
+          action = "pause";
+          statusFilter = "Active";
+        }
+        
         const mutualFunds = await db
           .collection("customer_mutual_funds")
           .find({
             customer_id: parseInt(customerId),
-            status: "Active",
+            status: statusFilter,
           })
           .toArray();
 
         if (!mutualFunds || mutualFunds.length === 0) {
           chat.workflowState = {};
-          const response = `No active investments found to cancel.`;
+          const investmentType = action === "resume" ? "paused" : "active";
+          const response = `No ${investmentType} investments found to ${action}.`;
           const assistantMessage = {
             sender: "bot",
             content: response,
@@ -2279,11 +2330,11 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
         if (matchedInvestment) {
           chat.workflowState = {
-            action: "cancel",
+            action: action,
             step: 2,
             selectedInvestment: matchedInvestment,
           };
-          const responseMessage = `Confirm cancel of ${matchedInvestment.fund_name} (${matchedInvestment.investment_type}, ₹${matchedInvestment.amount.toLocaleString("en-IN")}). Reply "Confirm" or "Cancel".`;
+          const responseMessage = `Confirm ${action} of ${matchedInvestment.fund_name} (${matchedInvestment.investment_type}, ₹${matchedInvestment.amount.toLocaleString("en-IN")}). Reply "Confirm" or "Cancel".`;
           const assistantMessage = {
             sender: "bot",
             content: responseMessage,
@@ -2470,7 +2521,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
     }));
 
     const prompt = `
-      You are a financial assistant bot for an Indian audience. Provide accurate and concise answers about personal finance, investments, or related topics. Use Indian Rupees (₹) for currency and consider Indian financial regulations and products. If the user asks about a specific investment or action, guide them through relevant steps or suggest consulting a financial advisor for personalized advice. Avoid giving definitive investment advice without context.
+      You are a financial assistant bot for an Indian audience. Provide accurate , complete and concise answers (under 150 words) about personal finance or investments personal finance, investments, or related topics. Use Indian Rupees (₹) for currency and consider Indian financial regulations and products. If the user asks about a specific investment or action, guide them through relevant steps or suggest consulting a financial advisor for personalized advice. Avoid giving definitive investment advice without context.
 
       **User's Mutual Fund Investments:**
       ${JSON.stringify(mutualFundsData, null, 2)}
@@ -2498,7 +2549,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
           { role: "system", content: prompt },
           { role: "user", content: processedMessage },
         ],
-        max_tokens: 500,
+        max_tokens: 1000,
         temperature: 0.7,
       });
 
