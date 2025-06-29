@@ -262,24 +262,24 @@ async function getUserData(customerId) {
         }),
       db
         .collection("customer_bank_accounts")
-        .find({ customer_id: numericCustomerId })
-        .toArray()
+        .findOne({ customer_id: numericCustomerId })
+        .then(result => result?.bank_accounts || [])
         .catch((err) => {
           console.error("Error fetching bank accounts:", err);
           return [];
         }),
       db
         .collection("customer_upi")
-        .find({ customer_id: numericCustomerId })
-        .toArray()
+        .findOne({ customer_id: numericCustomerId })
+        .then(result => result?.upi_details || [])
         .catch((err) => {
           console.error("Error fetching UPI accounts:", err);
           return [];
         }),
       db
         .collection("customer_cards")
-        .find({ customer_id: numericCustomerId })
-        .toArray()
+        .findOne({ customer_id: numericCustomerId })
+        .then(result => result?.cards || [])
         .catch((err) => {
           console.error("Error fetching cards:", err);
           return [];
@@ -959,11 +959,26 @@ async function handleCancelPauseWorkflow(message, chat, user) {
         }
 
         // Update customer_mutual_funds collection
-        const updateResult = await db.collection("customer_mutual_funds").updateOne(
-          {
+        let updateFilter;
+        if (selectedInvestment._id) {
+          // If we have an _id, use it
+          updateFilter = {
             _id: new ObjectId(selectedInvestment._id),
             customer_id: parseInt(user.customerId || user.id),
-          },
+          };
+        } else {
+          // If no _id, use other fields to identify the document
+          updateFilter = {
+            customer_id: parseInt(user.customerId || user.id),
+            fund_name: selectedInvestment.fund_name,
+            amount: selectedInvestment.amount,
+            investment_type: selectedInvestment.investment_type,
+            order_id: selectedInvestment.order_id
+          };
+        }
+        
+        const updateResult = await db.collection("customer_mutual_funds").updateOne(
+          updateFilter,
           {
             $set: { status: newStatus, updated_at: new Date() },
           }
@@ -1289,28 +1304,31 @@ async function handleInvestmentWorkflow(message, chat, user) {
       if (userData.bankAccounts && userData.bankAccounts.length > 0) {
         userData.bankAccounts.forEach((account, index) => {
           paymentMethods.push({
-            id: `bank_${account._id}`,
+            id: `bank_${index}`,
             display: `Bank Account: ${account.bank_name} (****${
               account.account_number?.slice(-4) || "unknown"
             })`,
+            data: account
           });
         });
       }
       if (userData.upiAccounts && userData.upiAccounts.length > 0) {
         userData.upiAccounts.forEach((upi, index) => {
           paymentMethods.push({
-            id: `upi_${upi._id}`,
+            id: `upi_${index}`,
             display: `UPI: ${upi.upi_id}`,
+            data: upi
           });
         });
       }
       if (userData.cards && userData.cards.length > 0) {
         userData.cards.forEach((card, index) => {
           paymentMethods.push({
-            id: `card_${card._id}`,
+            id: `card_${index}`,
             display: `Card: ${card.card_type} (****${
-              card.card_number?.slice(-4) || "unknown"
+              card.card_number_last4 || "unknown"
             })`,
+            data: card
           });
         });
       }
@@ -1430,40 +1448,30 @@ async function handleInvestmentWorkflow(message, chat, user) {
         // Fetch payment method details for display
         let paymentDisplay = selectedMethod.display;
         if (selectedMethod.id.startsWith("bank_")) {
-          const bankId = selectedMethod.id.replace("bank_", "");
-          const bankAccount = await db
-            .collection("customer_bank_accounts")
-            .findOne({
-              _id: new ObjectId(bankId),
-              customer_id: user.customerId || user.id,
-            });
-          if (bankAccount) {
-            paymentDisplay = `Bank Account: ${bankAccount.bank_name} (****${
-              bankAccount.account_number?.slice(-4) || "unknown"
+          const bankIndex = parseInt(selectedMethod.id.replace("bank_", ""));
+          if (selectedMethod.data) {
+            paymentDisplay = `Bank Account: ${selectedMethod.data.bank_name} (****${
+              selectedMethod.data.account_number?.slice(-4) || "unknown"
             })`;
           } else {
             paymentDisplay = "Bank Account: Unknown";
           }
         } else if (selectedMethod.id.startsWith("upi_")) {
-          const upiId = selectedMethod.id.replace("upi_", "");
-          const upiAccount = await db.collection("customer_upi").findOne({
-            _id: new ObjectId(upiId),
-            customer_id: user.customerId || user.id,
-          });
-          paymentDisplay = upiAccount
-            ? `UPI: ${upiAccount.upi_id}`
-            : "UPI: Unknown";
+          const upiIndex = parseInt(selectedMethod.id.replace("upi_", ""));
+          if (selectedMethod.data) {
+            paymentDisplay = `UPI: ${selectedMethod.data.upi_id}`;
+          } else {
+            paymentDisplay = "UPI: Unknown";
+          }
         } else if (selectedMethod.id.startsWith("card_")) {
-          const cardId = selectedMethod.id.replace("card_", "");
-          const card = await db.collection("customer_cards").findOne({
-            _id: new ObjectId(cardId),
-            customer_id: user.customerId || user.id,
-          });
-          paymentDisplay = card
-            ? `Card: ${card.card_type} (****${
-                card.card_number?.slice(-4) || "unknown"
-              })`
-            : "Card: Unknown";
+          const cardIndex = parseInt(selectedMethod.id.replace("card_", ""));
+          if (selectedMethod.data) {
+            paymentDisplay = `Card: ${selectedMethod.data.card_type} (****${
+              selectedMethod.data.card_number_last4 || "unknown"
+            })`;
+          } else {
+            paymentDisplay = "Card: Unknown";
+          }
         }
 
         workflowState.step = null;
@@ -1756,28 +1764,31 @@ async function handleInvestmentWorkflow(message, chat, user) {
       if (userData.bankAccounts && userData.bankAccounts.length > 0) {
         userData.bankAccounts.forEach((account, index) => {
           paymentMethods.push({
-            id: `bank_${account._id}`,
+            id: `bank_${index}`,
             display: `Bank Account: ${account.bank_name} (****${
               account.account_number?.slice(-4) || "unknown"
             })`,
+            data: account
           });
         });
       }
       if (userData.upiAccounts && userData.upiAccounts.length > 0) {
         userData.upiAccounts.forEach((upi, index) => {
           paymentMethods.push({
-            id: `upi_${upi._id}`,
+            id: `upi_${index}`,
             display: `UPI: ${upi.upi_id}`,
+            data: upi
           });
         });
       }
       if (userData.cards && userData.cards.length > 0) {
         userData.cards.forEach((card, index) => {
           paymentMethods.push({
-            id: `card_${card._id}`,
+            id: `card_${index}`,
             display: `Card: ${card.card_type} (****${
-              card.card_number?.slice(-4) || "unknown"
+              card.card_number_last4 || "unknown"
             })`,
+            data: card
           });
         });
       }
@@ -1889,40 +1900,30 @@ async function handleInvestmentWorkflow(message, chat, user) {
         // Fetch payment method details for display
         let paymentDisplay = selectedMethod.display;
         if (selectedMethod.id.startsWith("bank_")) {
-          const bankId = selectedMethod.id.replace("bank_", "");
-          const bankAccount = await db
-            .collection("customer_bank_accounts")
-            .findOne({
-              _id: new ObjectId(bankId),
-              customer_id: user.customerId || user.id,
-            });
-          if (bankAccount) {
-            paymentDisplay = `Bank Account: ${bankAccount.bank_name} (****${
-              bankAccount.account_number?.slice(-4) || "unknown"
+          const bankIndex = parseInt(selectedMethod.id.replace("bank_", ""));
+          if (selectedMethod.data) {
+            paymentDisplay = `Bank Account: ${selectedMethod.data.bank_name} (****${
+              selectedMethod.data.account_number?.slice(-4) || "unknown"
             })`;
           } else {
             paymentDisplay = "Bank Account: Unknown";
           }
         } else if (selectedMethod.id.startsWith("upi_")) {
-          const upiId = selectedMethod.id.replace("upi_", "");
-          const upiAccount = await db.collection("customer_upi").findOne({
-            _id: new ObjectId(upiId),
-            customer_id: user.customerId || user.id,
-          });
-          paymentDisplay = upiAccount
-            ? `UPI: ${upiAccount.upi_id}`
-            : "UPI: Unknown";
+          const upiIndex = parseInt(selectedMethod.id.replace("upi_", ""));
+          if (selectedMethod.data) {
+            paymentDisplay = `UPI: ${selectedMethod.data.upi_id}`;
+          } else {
+            paymentDisplay = "UPI: Unknown";
+          }
         } else if (selectedMethod.id.startsWith("card_")) {
-          const cardId = selectedMethod.id.replace("card_", "");
-          const card = await db.collection("customer_cards").findOne({
-            _id: new ObjectId(cardId),
-            customer_id: user.customerId || user.id,
-          });
-          paymentDisplay = card
-            ? `Card: ${card.card_type} (****${
-                card.card_number?.slice(-4) || "unknown"
-              })`
-            : "Card: Unknown";
+          const cardIndex = parseInt(selectedMethod.id.replace("card_", ""));
+          if (selectedMethod.data) {
+            paymentDisplay = `Card: ${selectedMethod.data.card_type} (****${
+              selectedMethod.data.card_number_last4 || "unknown"
+            })`;
+          } else {
+            paymentDisplay = "Card: Unknown";
+          }
         }
 
         workflowState.step = null;
@@ -2263,112 +2264,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
     );
 
     if (isInvestmentRequest) {
-      // Handle specific investment cancellation/resume (e.g., "I want to cancel my SIP of ₹4,790 in Mirae Asset Large Cap Fund")
-      const lowerMessage = processedMessage.toLowerCase().trim();
-      if (
-        (lowerMessage.includes("cancel") || lowerMessage.includes("resume") || lowerMessage.includes("restart") || lowerMessage.includes("reactivate") || lowerMessage.includes("continue")) &&
-        (lowerMessage.includes("sip") || lowerMessage.includes("lumpsum")) &&
-        lowerMessage.includes("in")
-      ) {
-        // Determine action and status filter
-        let action;
-        let statusFilter;
-        if (lowerMessage.includes("cancel")) {
-          action = "cancel";
-          statusFilter = "Active";
-        } else if (lowerMessage.includes("resume") || lowerMessage.includes("restart") || lowerMessage.includes("reactivate") || lowerMessage.includes("continue")) {
-          action = "resume";
-          statusFilter = "Paused";
-        } else {
-          action = "pause";
-          statusFilter = "Active";
-        }
-        
-        const mutualFunds = await db
-          .collection("customer_mutual_funds")
-          .find({
-            customer_id: parseInt(customerId),
-            status: statusFilter,
-          })
-          .toArray();
-
-        if (!mutualFunds || mutualFunds.length === 0) {
-          chat.workflowState = {};
-          const investmentType = action === "resume" ? "paused" : "active";
-          const response = `No ${investmentType} investments found to ${action}.`;
-          const assistantMessage = {
-            sender: "bot",
-            content: response,
-            timestamp: new Date(),
-          };
-          chat.messages.push(assistantMessage);
-          chat.updatedAt = new Date();
-          if (chat._id) {
-            await chatsCollection.updateOne(
-              { _id: chat._id },
-              {
-                $set: {
-                  messages: chat.messages,
-                  updatedAt: chat.updatedAt,
-                  workflowState: chat.workflowState,
-                },
-                $inc: { __v: 1 },
-              }
-            );
-          } else {
-            const result = await chatsCollection.insertOne(chat);
-            chat._id = result.insertedId;
-          }
-          return res.json(chat);
-        }
-
-        // Parse the message to extract fund name and amount
-        const matchFund = lowerMessage.match(/in\s+(.+?)\s*(?:fund|$)/i);
-        const matchAmount = lowerMessage.match(/₹?\s*([\d,]+)\s*(?:\/month)?/i);
-        const fundName = matchFund ? matchFund[1].trim() : null;
-        const amount = matchAmount ? parseFloat(matchAmount[1].replace(/,/g, "")) : null;
-        const isSIP = lowerMessage.includes("sip");
-
-        const matchedInvestment = mutualFunds.find(
-          (mf) =>
-            mf.fund_name.toLowerCase().includes(fundName) &&
-            mf.amount === amount &&
-            mf.investment_type === (isSIP ? "SIP" : "Lumpsum")
-        );
-
-        if (matchedInvestment) {
-          chat.workflowState = {
-            action: action,
-            step: 2,
-            selectedInvestment: matchedInvestment,
-          };
-          const responseMessage = `Confirm ${action} of ${matchedInvestment.fund_name} (${matchedInvestment.investment_type}, ₹${matchedInvestment.amount.toLocaleString("en-IN")}). Reply "Confirm" or "Cancel".`;
-          const assistantMessage = {
-            sender: "bot",
-            content: responseMessage,
-            timestamp: new Date(),
-          };
-          chat.messages.push(assistantMessage);
-          chat.updatedAt = new Date();
-          if (chat._id) {
-            await chatsCollection.updateOne(
-              { _id: chat._id },
-              {
-                $set: {
-                  messages: chat.messages,
-                  updatedAt: chat.updatedAt,
-                  workflowState: chat.workflowState,
-                },
-                $inc: { __v: 1 },
-              }
-            );
-          } else {
-            const result = await chatsCollection.insertOne(chat);
-            chat._id = result.insertedId;
-          }
-          return res.json(chat);
-        }
-      }
+      // Let all cancel/pause/resume requests go through the complete handleCancelPauseWorkflow
 
       // Handle cancel/pause workflow
       const cancelPauseResponse = await handleCancelPauseWorkflow(
