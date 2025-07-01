@@ -11,6 +11,7 @@ const { MongoClient, ObjectId, GridFSBucket } = require("mongodb");
 const CustomerMutualFunds = require("./models/customerMutualFundsModel");
 const OpenAI = require("openai");
 const nodemailer = require("nodemailer");
+const textToSpeech = require('@google-cloud/text-to-speech');
 
 // Import ticket model
 const Ticket = require("./models/ticketModel");
@@ -29,6 +30,9 @@ const EMAIL_PASS = process.env.EMAIL_PASS;
 const openai = new OpenAI({
   apiKey: OPENAI_API_KEY,
 });
+
+// Initialize Google Cloud Text-to-Speech client
+const ttsClient = new textToSpeech.TextToSpeechClient();
 
 // Configure nodemailer transporter
 const transporter = nodemailer.createTransport({
@@ -205,7 +209,7 @@ async function getUserData(customerId) {
       bankAccounts,
       upiAccounts,
       cards,
-      mutualFundsInvested, // Add this to fetch customer_mutual_funds
+      mutualFundsInvested,
     ] = await Promise.all([
       db
         .collection("customer")
@@ -389,7 +393,7 @@ async function getUserData(customerId) {
       bankAccounts: [],
       upiAccounts: [],
       cards: [],
-      mutualFundsInvested: [], // Add mutual funds data in case of error
+      mutualFundsInvested: [],
     };
   }
 }
@@ -2264,8 +2268,6 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
     );
 
     if (isInvestmentRequest) {
-      // Let all cancel/pause/resume requests go through the complete handleCancelPauseWorkflow
-
       // Handle cancel/pause workflow
       const cancelPauseResponse = await handleCancelPauseWorkflow(
         message,
@@ -2425,25 +2427,110 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
     }));
 
     const prompt = `
-      You are a financial assistant bot for an Indian audience. Provide accurate , complete and concise answers (under 150 words) about personal finance or investments personal finance, investments, or related topics. Use Indian Rupees (₹) for currency and consider Indian financial regulations and products. If the user asks about a specific investment or action, guide them through relevant steps or suggest consulting a financial advisor for personalized advice. Avoid giving definitive investment advice without context.
+You are a specialized AI financial assistant for an Indian audience. You provide accurate, concise (under 150 words), and actionable answers related to personal finance, investments, and mutual funds. Use ₹ (Indian Rupees) for currency, follow Indian regulations and investment norms, and always format currency and percentages properly. Never provide vague or generic suggestions. Always rely on provided data, show calculations, and use the correct schema mappings.
 
-      **User's Mutual Fund Investments:**
-      ${JSON.stringify(mutualFundsData, null, 2)}
+---
 
-      **User's Orders:**
-      ${JSON.stringify(ordersData, null, 2)}
+🧾 USER-SPECIFIC DATA ACCESS:
+**User's Mutual Fund Investments:**
+\${JSON.stringify(mutualFundsData, null, 2)}
 
-      User message: ${processedMessage}
-      Conversation context: ${JSON.stringify(conversationContext, null, 2)}
-      User details: ${JSON.stringify(
-        {
-          customerId: userData.customer.id,
-          email: userData.customer.email,
-          name: userData.customer.name,
-        },
-        null, 2
-      )}
-    `;
+**User's Orders:**
+\${JSON.stringify(ordersData, null, 2)}
+
+User message: \${processedMessage}
+
+Conversation context:  
+\${JSON.stringify(conversationContext, null, 2)}
+
+User details:
+\${JSON.stringify(
+  {
+    customerId: userData.customer.id,
+    email: userData.customer.email,
+    name: userData.customer.name,
+  },
+  null, 2
+)}
+
+---
+
+🗃️ DATABASE MAPPINGS:
+
+1. Login / Register → \`customer.email\` + \`password\`
+2. Profile / PAN / Bank → \`customer\` + \`customer_detail\` via \`customer_id\`
+3. Investment Summary → \`customer_investment_perf_summary\`
+4. Investment Performance → \`customer_investment_performance\` (by \`investment_id\`)
+5. Date Range Returns → \`customer_investment_returns\` (filter by \`created\`)
+6. Folio Info → Join \`customer_folio\` + \`mutual_fund\`
+7. Mutual Funds List → Filter \`mutual_fund.risk\`, \`asset_class\`, \`sub_category\`
+8. Place Order → Insert into \`order\`, then into \`order_detail\`
+9. Order Status → Join \`order\` + \`order_detail\`
+10. User Investments → Join \`customer_folio\` + \`mutual_fund\`
+11. Order History → Join \`order\`, \`order_detail\`, \`mutual_fund\`
+12. Fund Info → \`mutual_fund\` + (optional history)
+13. NAV Queries → Use API or web search for NAV
+14. Fund Suggestions → Filter \`mutual_fund\` by risk + cross-check with \`customer_investment_performance\`
+
+---
+
+⚠️ RESPONSE RULES:
+- ❌ No vague disclaimers
+- ❌ No "as an AI..." statements
+- ❌ No approximations or ranges
+- ✅ Always use ₹ and exact values
+- ✅ Always keep responses <150 words
+- ✅ Use available data fully and cite real-time NAV if needed
+
+---
+
+📌 LIVE DATA SEARCH:
+- **Stock**: "[TICKER] share price today NSE"
+- **Mutual Fund NAV**: "[FUND NAME] NAV today"
+- Always return exact value, % change, timestamp, and source
+
+---
+
+📋 RESPONSE FORMATS:
+
+✅ Mutual Fund:
+\`\`\`
+**[FUND NAME]**
+NAV: ₹XXX.XX (as of [date])
+1Y: X% | 3Y CAGR: X% | 5Y CAGR: X%
+Category: [type] | AUM: ₹X Cr
+\`\`\`
+
+✅ Investment Summary:
+\`\`\`
+Invested: ₹X | Current: ₹Y | Gain: ₹Z | Return: X%
+\`\`\`
+
+✅ Order:
+\`\`\`
+Order ID: [ID]
+Fund: [Name]
+Amount: ₹X | Status: [status]
+\`\`\`
+
+✅ Historical Growth:
+\`\`\`
+₹X invested in [Year] → ₹Y today
+CAGR: X% | Gain: ₹Z
+\`\`\`
+
+---
+
+🇮🇳 INDIAN CONTEXT:
+- Use INR currency
+- Consider Indian categories (ELSS, Large Cap, Debt, etc.)
+- Mention STCG/LTCG briefly if needed
+- Always recommend a financial advisor for specific decisions
+
+🎯 GOAL:
+Be the most accurate, complete, and actionable AI advisor for Indian investors. Rely on structured data, real-time facts, and show full calculations where relevant.
+`;
+
 
     let aiResponse;
     try {
@@ -3169,6 +3256,196 @@ app.get("/", (req, res) => {
 // Include ticket routes directly
 const ticketRoutes = require("./routes/ticketRoutes");
 app.use("/api/tickets", ticketRoutes);
+
+// Text-to-Speech API endpoint
+app.post('/api/text-to-speech', authenticateToken, async (req, res) => {
+  try {
+    const { 
+      text, 
+      voice = 'en-US-Neural2-F', 
+      languageCode = 'en-US',
+      ssmlGender = 'FEMALE',
+      speakingRate = 1.0,
+      pitch = 0.0,
+      volumeGainDb = 0.0,
+      effectsProfileId = []
+    } = req.body;
+
+    if (!text) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Text is required for text-to-speech conversion' 
+      });
+    }
+
+    console.log('TTS Request:', {
+      text: text.substring(0, 50) + '...',
+      voice,
+      languageCode,
+      ssmlGender,
+      speakingRate,
+      pitch
+    });
+
+    // Configure the request
+    const request = {
+      input: { text },
+      voice: {
+        name: voice,
+        languageCode,
+        ssmlGender
+      },
+      audioConfig: {
+        audioEncoding: 'MP3',
+        speakingRate,
+        pitch,
+        volumeGainDb,
+        effectsProfileId
+      }
+    };
+
+    // Call the Text-to-Speech API
+    const [response] = await ttsClient.synthesizeSpeech(request);
+
+    // Send the audio content as a Buffer
+    res.set({
+      'Content-Type': 'audio/mpeg',
+      'Content-Length': response.audioContent.length
+    });
+    res.send(response.audioContent);
+
+  } catch (error) {
+    console.error('Text-to-speech error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error generating speech', 
+      error: error.message 
+    });
+  }
+});
+
+// Get available voices endpoint
+app.get('/api/text-to-speech/voices', authenticateToken, async (req, res) => {
+  try {
+    const [result] = await ttsClient.listVoices({});
+    const voices = result.voices.map(voice => ({
+      name: voice.name,
+      languageCode: voice.languageCodes[0],
+      ssmlGender: voice.ssmlGender,
+      naturalSampleRateHertz: voice.naturalSampleRateHertz
+    }));
+    
+    res.json({
+      success: true,
+      voices
+    });
+  } catch (error) {
+    console.error('Error listing voices:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error fetching available voices', 
+      error: error.message 
+    });
+  }
+});
+
+// Save user voice preferences
+app.post('/api/text-to-speech/preferences', authenticateToken, async (req, res) => {
+  try {
+    const { 
+      voice, 
+      languageCode, 
+      ssmlGender, 
+      speakingRate, 
+      pitch, 
+      volumeGainDb 
+    } = req.body;
+    
+    const userId = req.user._id;
+    
+    const db = mongoClient.db('financeai');
+    const preferencesCollection = db.collection('tts_preferences');
+    
+    // Upsert the preferences (create or update)
+    await preferencesCollection.updateOne(
+      { userId: new ObjectId(userId) },
+      { 
+        $set: { 
+          userId: new ObjectId(userId),
+          voice,
+          languageCode,
+          ssmlGender,
+          speakingRate: parseFloat(speakingRate),
+          pitch: parseFloat(pitch),
+          volumeGainDb: parseFloat(volumeGainDb),
+          updatedAt: new Date()
+        },
+        $setOnInsert: { createdAt: new Date() }
+      },
+      { upsert: true }
+    );
+    
+    res.json({
+      success: true,
+      message: 'Voice preferences saved successfully'
+    });
+    
+  } catch (error) {
+    console.error('Error saving voice preferences:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error saving voice preferences', 
+      error: error.message 
+    });
+  }
+});
+
+// Get user voice preferences
+app.get('/api/text-to-speech/preferences', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    
+    const db = mongoClient.db('financeai');
+    const preferencesCollection = db.collection('tts_preferences');
+    
+    const preferences = await preferencesCollection.findOne({ userId: new ObjectId(userId) });
+    
+    if (preferences) {
+      res.json({
+        success: true,
+        preferences: {
+          voice: preferences.voice,
+          languageCode: preferences.languageCode,
+          ssmlGender: preferences.ssmlGender,
+          speakingRate: preferences.speakingRate,
+          pitch: preferences.pitch,
+          volumeGainDb: preferences.volumeGainDb
+        }
+      });
+    } else {
+      // Return default preferences if none are saved
+      res.json({
+        success: true,
+        preferences: {
+          voice: 'en-US-Neural2-F',
+          languageCode: 'en-US',
+          ssmlGender: 'FEMALE',
+          speakingRate: 1.0,
+          pitch: 0.0,
+          volumeGainDb: 0.0
+        }
+      });
+    }
+    
+  } catch (error) {
+    console.error('Error fetching voice preferences:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error fetching voice preferences', 
+      error: error.message 
+    });
+  }
+});
 
 app.use((err, req, res, next) => {
   console.error("Global error:", err.stack);

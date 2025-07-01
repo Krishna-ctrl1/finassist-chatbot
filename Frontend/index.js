@@ -159,12 +159,17 @@ function setupEventListeners() {
 
   // Send button click handler
   if (elements.sendBtn) {
-    elements.sendBtn.addEventListener("click", sendMessage);
+    elements.sendBtn.addEventListener("click", handleSendButtonClick);
   }
 
   // Waves button click handler
   if (elements.wavesBtn) {
     elements.wavesBtn.addEventListener("click", toggleVoiceOutput);
+  }
+
+  // Voice input button click handler
+  if (elements.voiceBtn) {
+    elements.voiceBtn.addEventListener("click", toggleVoiceInput);
   }
 }
 
@@ -1030,6 +1035,14 @@ function appendMessage(sender, message, animate = true, skipScroll = false) {
   // Check for file upload trigger only for new bot messages
   if (sender === 'bot' && animate) {
     checkForFileUploadTrigger(message);
+    
+    // Speak bot messages if voice output is enabled
+    if (isVoiceOutputEnabled) {
+      // Add a small delay to let the message appear before speaking
+      setTimeout(() => {
+        speakText(message);
+      }, 500);
+    }
   }
 
   return messageDiv;
@@ -2715,21 +2728,236 @@ window.handleTicketCreation = handleTicketCreation;
 window.skipFileUpload = skipFileUpload;
 window.removeFile = removeFile;
 window.toggleVoiceOutput = toggleVoiceOutput;
+window.toggleVoiceInput = toggleVoiceInput;
+
+// Voice input variables
+let isRecording = false;
+let recognition = null;
+let isVoiceInputActive = false;
+let currentTranscript = ''; // Store the transcript separately
+let originalInputValue = ''; // Store original input value
+
+// Voice output variables
+let isVoiceOutputEnabled = false;
+let speechSynthesis = null;
+let currentUtterance = null;
+let voiceOutputQueue = [];
+
+// Audio visualization variables
+let audioContext = null;
+let analyser = null;
+let microphone = null;
+let dataArray = null;
+let animationId = null;
+let audioStream = null;
+
+// Initialize Speech Recognition
+function initializeSpeechRecognition() {
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    console.warn('Speech recognition not supported in this browser');
+    return null;
+  }
+  
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const recognition = new SpeechRecognition();
+  
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = 'en-US';
+  
+  return recognition;
+}
+
+// Initialize Speech Synthesis
+function initializeSpeechSynthesis() {
+  if (!('speechSynthesis' in window)) {
+    console.warn('Speech synthesis not supported in this browser');
+    return null;
+  }
+  
+  return window.speechSynthesis;
+}
+
+// Stop current speech and clear queue
+function stopSpeech() {
+  if (speechSynthesis) {
+    speechSynthesis.cancel();
+    voiceOutputQueue = [];
+    currentUtterance = null;
+  }
+}
+
+// Speak text with queue management
+function speakText(text) {
+  if (!isVoiceOutputEnabled || !speechSynthesis || !text.trim()) {
+    return;
+  }
+
+  // Stop any current speech before starting new one
+  stopSpeech();
+  
+  // Clean the text for better speech synthesis
+  const cleanText = cleanTextForSpeech(text);
+  
+  const utterance = new SpeechSynthesisUtterance(cleanText);
+  
+  // Configure speech settings
+  utterance.rate = 0.9; // Slightly slower for better comprehension
+  utterance.pitch = 1.0;
+  utterance.volume = 0.8;
+  
+  // Try to use a more natural voice if available
+  const voices = speechSynthesis.getVoices();
+  const preferredVoice = voices.find(voice => 
+    voice.name.includes('Google') || 
+    voice.name.includes('Natural') ||
+    voice.name.includes('Enhanced') ||
+    (voice.lang.startsWith('en') && voice.localService === false)
+  ) || voices.find(voice => voice.lang.startsWith('en'));
+  
+  if (preferredVoice) {
+    utterance.voice = preferredVoice;
+  }
+  
+  // Event handlers
+  utterance.onstart = () => {
+    console.log('Speech synthesis started');
+    currentUtterance = utterance;
+    // Add visual feedback that speech is active
+    if (elements.wavesBtn) {
+      elements.wavesBtn.classList.add('speaking');
+    }
+  };
+  
+  utterance.onend = () => {
+    console.log('Speech synthesis ended');
+    currentUtterance = null;
+    // Remove visual feedback
+    if (elements.wavesBtn) {
+      elements.wavesBtn.classList.remove('speaking');
+    }
+  };
+  
+  utterance.onerror = (event) => {
+    console.error('Speech synthesis error:', event.error);
+    currentUtterance = null;
+    if (elements.wavesBtn) {
+      elements.wavesBtn.classList.remove('speaking');
+    }
+  };
+  
+  // Speak the text
+  speechSynthesis.speak(utterance);
+}
+
+// Clean text for better speech synthesis
+function cleanTextForSpeech(text) {
+  return text
+    // Remove HTML tags
+    .replace(/<[^>]*>/g, '')
+    // Convert common symbols to words
+    .replace(/&/g, ' and ')
+    .replace(/@/g, ' at ')
+    .replace(/#/g, ' hash ')
+    .replace(/\$/g, ' dollar ')
+    .replace(/%/g, ' percent ')
+    // Handle abbreviations
+    .replace(/\bAPI\b/g, 'A P I')
+    .replace(/\bURL\b/g, 'U R L')
+    .replace(/\bHTTP\b/g, 'H T T P')
+    .replace(/\bJSON\b/g, 'J S O N')
+    // Remove excessive whitespace
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Toggle voice input function
+function toggleVoiceInput() {
+  if (!elements.voiceBtn || !elements.sendBtn || !elements.messageInput) return;
+  
+  if (!isVoiceInputActive) {
+    startVoiceInput();
+  } else {
+    stopVoiceInput();
+  }
+}
+
+// Start voice input
+function startVoiceInput() {
+  if (!recognition) {
+    recognition = initializeSpeechRecognition();
+    if (!recognition) {
+      showNotification('Voice input not supported in this browser', 'error');
+      return;
+    }
+    setupSpeechRecognitionEvents();
+  }
+  
+  try {
+    // Store the original input value before starting
+    originalInputValue = elements.messageInput.value;
+    currentTranscript = '';
+    
+    recognition.start();
+    isVoiceInputActive = true;
+    updateVoiceInputUI(true);
+    
+    // Start audio visualization
+    startAudioVisualization();
+    
+    showNotification('Listening... Speak now', 'info');
+  } catch (error) {
+    console.error('Error starting voice recognition:', error);
+    showNotification('Failed to start voice input', 'error');
+  }
+}
+
+// Stop voice input
+function stopVoiceInput() {
+  if (recognition) {
+    recognition.stop();
+  }
+  isVoiceInputActive = false;
+  
+  // Stop audio visualization
+  stopAudioVisualization();
+  
+  // Reset voice input variables if cancelling
+  if (!currentTranscript.trim()) {
+    currentTranscript = '';
+    originalInputValue = '';
+  }
+  
+  updateVoiceInputUI(false);
+}
 
 // Toggle voice output function for waves button
 function toggleVoiceOutput() {
   if (!elements.wavesBtn) return;
   
+  // Initialize speech synthesis if not already done
+  if (!speechSynthesis) {
+    speechSynthesis = initializeSpeechSynthesis();
+    if (!speechSynthesis) {
+      showNotification('Voice output not supported in this browser', 'error');
+      return;
+    }
+  }
+  
   const isActive = elements.wavesBtn.classList.contains('active');
   
   if (isActive) {
     // Deactivate voice output
+    isVoiceOutputEnabled = false;
     elements.wavesBtn.classList.remove('active');
+    // Stop any current speech
+    stopSpeech();
     showNotification('Voice output disabled', 'info');
   } else {
     // Activate voice output
+    isVoiceOutputEnabled = true;
     elements.wavesBtn.classList.add('active');
-    showNotification('Voice output enabled', 'success');
+    showNotification('Voice output enabled - bot responses will be spoken aloud', 'success');
   }
   
   // Add visual feedback
@@ -2737,6 +2965,402 @@ function toggleVoiceOutput() {
   setTimeout(() => {
     elements.wavesBtn.style.transform = 'scale(1)';
   }, 100);
+}
+
+// Update UI for voice input state
+function updateVoiceInputUI(isActive) {
+  if (!elements.voiceBtn || !elements.sendBtn) return;
+  
+  if (isActive) {
+    // Change mic button to X (cancel) button
+    elements.voiceBtn.innerHTML = '<i class="fas fa-times" aria-hidden="true"></i>';
+    elements.voiceBtn.setAttribute('title', 'Cancel voice input');
+    elements.voiceBtn.setAttribute('aria-label', 'Cancel voice input');
+    elements.voiceBtn.classList.add('recording');
+    
+    // Change send button to checkmark
+    elements.sendBtn.innerHTML = '<i class="fas fa-check" aria-hidden="true"></i>';
+    elements.sendBtn.setAttribute('title', 'Accept voice input');
+    elements.sendBtn.setAttribute('aria-label', 'Accept voice input');
+    elements.sendBtn.classList.add('voice-confirm');
+    elements.sendBtn.disabled = false;
+    
+    // Add visual feedback for active state
+    elements.voiceBtn.style.background = 'var(--red)';
+    elements.voiceBtn.style.color = 'white';
+    elements.sendBtn.style.background = 'var(--green)';
+    elements.sendBtn.style.color = 'white';
+    
+    // Add live sound waves visualization to textarea
+    elements.messageInput.classList.add('voice-active');
+    elements.messageInput.placeholder = 'Listening... Speak now';
+    
+    // Create audio wave visualization container
+    createAudioWaveContainer();
+    
+  } else {
+    // Reset mic button
+    elements.voiceBtn.innerHTML = '<i class="fas fa-microphone" aria-hidden="true"></i>';
+    elements.voiceBtn.setAttribute('title', 'Voice input');
+    elements.voiceBtn.setAttribute('aria-label', 'Voice input');
+    elements.voiceBtn.classList.remove('recording');
+    
+    // Reset send button
+    elements.sendBtn.innerHTML = '<i class="fas fa-paper-plane" aria-hidden="true"></i>';
+    elements.sendBtn.setAttribute('title', 'Send message');
+    elements.sendBtn.setAttribute('aria-label', 'Send message');
+    elements.sendBtn.classList.remove('voice-confirm');
+    
+    // Reset visual feedback
+    elements.voiceBtn.style.background = '';
+    elements.voiceBtn.style.color = '';
+    elements.sendBtn.style.background = '';
+    elements.sendBtn.style.color = '';
+    
+    // Remove voice active state from textarea
+    elements.messageInput.classList.remove('voice-active');
+    elements.messageInput.placeholder = 'Send a message...';
+    
+    // Remove audio wave visualization
+    removeAudioWaveContainer();
+    
+    // Update send button state
+    updateSendButtonState();
+  }
+}
+
+// Setup speech recognition events
+function setupSpeechRecognitionEvents() {
+  if (!recognition) return;
+  
+  recognition.onstart = () => {
+    console.log('Voice recognition started');
+    isRecording = true;
+  };
+  
+  recognition.onresult = (event) => {
+    let interimTranscript = '';
+    let finalTranscript = '';
+    
+    // Process all results to get complete transcripts
+    for (let i = 0; i < event.results.length; i++) {
+      const transcript = event.results[i][0].transcript;
+      
+      if (event.results[i].isFinal) {
+        finalTranscript += transcript;
+      } else {
+        interimTranscript += transcript;
+      }
+    }
+    
+    // Store the transcript separately - DON'T update the input field during recording
+    // Only update the stored transcript for when user confirms
+    currentTranscript = finalTranscript + (interimTranscript ? ' ' + interimTranscript : '');
+    
+    console.log('Current transcript:', currentTranscript); // For debugging
+    
+    // The textarea will only show live waves animation, no text updates during recording
+  };
+  
+  recognition.onerror = (event) => {
+    console.error('Voice recognition error:', event.error);
+    let errorMessage = 'Voice input error';
+    
+    switch (event.error) {
+      case 'no-speech':
+        errorMessage = 'No speech detected. Please try again.';
+        break;
+      case 'audio-capture':
+        errorMessage = 'Microphone not accessible. Please check permissions.';
+        break;
+      case 'not-allowed':
+        errorMessage = 'Microphone permission denied. Please allow microphone access.';
+        break;
+      case 'network':
+        errorMessage = 'Network error. Please check your connection.';
+        break;
+      default:
+        errorMessage = 'Voice input failed. Please try again.';
+    }
+    
+    showNotification(errorMessage, 'error');
+    stopVoiceInput();
+  };
+  
+  recognition.onend = () => {
+    console.log('Voice recognition ended');
+    isRecording = false;
+    
+    if (isVoiceInputActive) {
+      // Recognition ended but we're still in voice input mode
+      // Clean up the interim indicator
+      if (elements.messageInput) {
+        const currentText = elements.messageInput.value;
+        elements.messageInput.value = currentText.replace(/\s*\.\.\.$/, '');
+      }
+    }
+  };
+}
+
+// Initialize speech recognition and synthesis when DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
+  // Initialize speech recognition if supported
+  if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+    recognition = initializeSpeechRecognition();
+    if (recognition) {
+      setupSpeechRecognitionEvents();
+    }
+  } else {
+    // Hide voice button if not supported
+    if (elements.voiceBtn) {
+      elements.voiceBtn.style.display = 'none';
+    }
+  }
+  
+  // Initialize speech synthesis if supported
+  if ('speechSynthesis' in window) {
+    speechSynthesis = initializeSpeechSynthesis();
+  } else {
+    // Hide waves button if not supported
+    if (elements.wavesBtn) {
+      elements.wavesBtn.style.display = 'none';
+    }
+  }
+});
+
+// Override send button behavior when in voice input mode
+function handleSendButtonClick() {
+  if (isVoiceInputActive) {
+    // Accept voice input and populate text field with transcript
+    stopVoiceInput();
+    
+    // Apply the stored transcript to the input field
+    if (elements.messageInput && currentTranscript.trim()) {
+      // Combine original value with the voice transcript
+      const finalText = originalInputValue + (originalInputValue ? ' ' : '') + currentTranscript.trim();
+      elements.messageInput.value = finalText;
+      
+      // Auto-resize textarea
+      elements.messageInput.style.height = 'auto';
+      const newHeight = Math.min(elements.messageInput.scrollHeight, 120);
+      elements.messageInput.style.height = newHeight + 'px';
+      
+      // Update send button state
+      updateSendButtonState();
+      
+      showNotification('Voice input applied. You can edit the text before sending.', 'success');
+    } else {
+      showNotification('No voice input detected. Please try again.', 'warning');
+    }
+    
+    // Reset voice input variables
+    currentTranscript = '';
+    originalInputValue = '';
+  } else {
+    // Normal send message
+    sendMessage();
+  }
+}
+
+// Audio visualization functions
+function createAudioWaveContainer() {
+  // Remove existing container if any
+  removeAudioWaveContainer();
+  
+  const inputContainer = elements.messageInput.parentElement;
+  if (!inputContainer) return;
+  
+  const waveContainer = document.createElement('div');
+  waveContainer.id = 'audioWaveContainer';
+  waveContainer.className = 'audio-wave-container';
+  
+  // Create canvas for audio visualization
+  const canvas = document.createElement('canvas');
+  canvas.id = 'audioWaveCanvas';
+  canvas.className = 'audio-wave-canvas';
+  
+  waveContainer.appendChild(canvas);
+  inputContainer.appendChild(waveContainer);
+  
+  // Position the container over the input
+  positionAudioWaveContainer();
+}
+
+function removeAudioWaveContainer() {
+  const existingContainer = document.getElementById('audioWaveContainer');
+  if (existingContainer) {
+    existingContainer.remove();
+  }
+}
+
+function positionAudioWaveContainer() {
+  const waveContainer = document.getElementById('audioWaveContainer');
+  const inputElement = elements.messageInput;
+  
+  if (!waveContainer || !inputElement) return;
+  
+  const inputRect = inputElement.getBoundingClientRect();
+  const containerRect = inputElement.parentElement.getBoundingClientRect();
+  
+  waveContainer.style.position = 'absolute';
+  waveContainer.style.left = `${inputRect.left - containerRect.left}px`;
+  waveContainer.style.top = `${inputRect.top - containerRect.top}px`;
+  waveContainer.style.width = `${inputRect.width}px`;
+  waveContainer.style.height = `${inputRect.height}px`;
+  waveContainer.style.pointerEvents = 'none';
+  waveContainer.style.zIndex = '10';
+}
+
+async function startAudioVisualization() {
+  try {
+    // Get user media for audio visualization
+    audioStream = await navigator.mediaDevices.getUserMedia({ 
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      } 
+    });
+    
+    // Create audio context
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioContext.createAnalyser();
+    microphone = audioContext.createMediaStreamSource(audioStream);
+    
+    // Configure analyser
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.8;
+    
+    const bufferLength = analyser.frequencyBinCount;
+    dataArray = new Uint8Array(bufferLength);
+    
+    // Connect microphone to analyser
+    microphone.connect(analyser);
+    
+    // Start visualization
+    visualizeAudio();
+    
+  } catch (error) {
+    console.error('Error accessing microphone for visualization:', error);
+    // Continue without visualization if microphone access fails
+  }
+}
+
+function stopAudioVisualization() {
+  // Cancel animation frame
+  if (animationId) {
+    cancelAnimationFrame(animationId);
+    animationId = null;
+  }
+  
+  // Stop audio stream
+  if (audioStream) {
+    audioStream.getTracks().forEach(track => track.stop());
+    audioStream = null;
+  }
+  
+  // Close audio context
+  if (audioContext) {
+    audioContext.close();
+    audioContext = null;
+  }
+  
+  // Reset variables
+  analyser = null;
+  microphone = null;
+  dataArray = null;
+}
+
+function visualizeAudio() {
+  if (!analyser || !dataArray || !isVoiceInputActive) {
+    return;
+  }
+  
+  const canvas = document.getElementById('audioWaveCanvas');
+  if (!canvas) return;
+  
+  const ctx = canvas.getContext('2d');
+  const containerRect = canvas.parentElement.getBoundingClientRect();
+  
+  // Set canvas size
+  canvas.width = containerRect.width;
+  canvas.height = containerRect.height;
+  
+  // Get audio data
+  analyser.getByteFrequencyData(dataArray);
+  
+  // Clear canvas
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  
+  // Calculate average volume
+  let sum = 0;
+  for (let i = 0; i < dataArray.length; i++) {
+    sum += dataArray[i];
+  }
+  const average = sum / dataArray.length;
+  
+  // Create wave visualization (moving from right to left)
+  const waveHeight = Math.max(2, (average / 255) * (canvas.height * 0.6));
+  const numBars = 40;
+  const barWidth = 3;
+  const barSpacing = 2;
+  const totalWidth = numBars * (barWidth + barSpacing);
+  
+  // Animate bars from right to left
+  const time = Date.now() * 0.005;
+  
+  ctx.fillStyle = getComputedStyle(document.documentElement)
+    .getPropertyValue('--green').trim() || '#10a37f';
+  
+  for (let i = 0; i < numBars; i++) {
+    // Create wave effect with different frequencies
+    const frequency1 = Math.sin(time + i * 0.3) * 0.5;
+    const frequency2 = Math.sin(time * 1.5 + i * 0.2) * 0.3;
+    const frequency3 = Math.sin(time * 0.8 + i * 0.4) * 0.2;
+    
+    // Combine audio data with wave animation
+    const audioInfluence = (dataArray[i * 2] || 0) / 255;
+    const combinedHeight = Math.max(2, 
+      waveHeight * (0.3 + audioInfluence * 0.7) * 
+      (1 + frequency1 + frequency2 + frequency3)
+    );
+    
+    // Position from right to left
+    const x = canvas.width - totalWidth + i * (barWidth + barSpacing);
+    const y = (canvas.height - combinedHeight) / 2;
+    
+    // Add opacity based on position (fade from right to left)
+    const opacity = Math.max(0.2, 1 - (i / numBars) * 0.8);
+    ctx.globalAlpha = opacity;
+    
+    // Draw bar with rounded edges
+    ctx.beginPath();
+    ctx.roundRect(x, y, barWidth, combinedHeight, barWidth / 2);
+    ctx.fill();
+  }
+  
+  // Reset opacity
+  ctx.globalAlpha = 1;
+  
+  // Continue animation
+  animationId = requestAnimationFrame(visualizeAudio);
+}
+
+// Add polyfill for roundRect if not supported
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function(x, y, width, height, radius) {
+    this.beginPath();
+    this.moveTo(x + radius, y);
+    this.lineTo(x + width - radius, y);
+    this.arcTo(x + width, y, x + width, y + radius, radius);
+    this.lineTo(x + width, y + height - radius);
+    this.arcTo(x + width, y + height, x + width - radius, y + height, radius);
+    this.lineTo(x + radius, y + height);
+    this.arcTo(x, y + height, x, y + height - radius, radius);
+    this.lineTo(x, y + radius);
+    this.arcTo(x, y, x + radius, y, radius);
+    this.closePath();
+  };
 }
 function toggleChatView() {
   const chatScreen = document.getElementById("chatScreen");
