@@ -2172,6 +2172,13 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       content: msg.processedContent || msg.content,
     }));
 
+    const conversationMessages = chat.messages.map((msg) => ({
+      role: msg.sender === "user" ? "user" : "assistant",
+      content: msg.processedContent || msg.content,
+    }));
+
+    const recentMessages = conversationMessages.slice(-10);
+
     // Check for ticket request first
     const isTicketRequest = checkIfTicketRequest(
       processedMessage,
@@ -2610,6 +2617,7 @@ For non-financial queries, provide clear redirection to appropriate sources.
         model: "gpt-4.1",
         messages: [
           { role: "system", content: prompt },
+          ...recentMessages,
           { role: "user", content: processedMessage },
         ],
         max_tokens: 1000,
