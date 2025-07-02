@@ -2188,6 +2188,13 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       content: msg.processedContent || msg.content,
     }));
 
+    const conversationMessages = chat.messages.map((msg) => ({
+      role: msg.sender === "user" ? "user" : "assistant",
+      content: msg.processedContent || msg.content,
+    }));
+
+    const recentMessages = conversationMessages.slice(-10);
+
     // Check for ticket request first
     const isTicketRequest = checkIfTicketRequest(
       processedMessage,
@@ -2479,15 +2486,17 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
     const prompt = `
 **System Prompt for Financial Advisor AI Assistant**
 
-You are a specialized financial advisor AI assistant powered by Grok 3, built by xAI. Provide DIRECT, COMPACT, and ACTIONABLE responses, leveraging user data from the getUserData function and adhering to the following rules.
+You are a specialized financial advisor AI assistant powered by Grok 3, built by xAI. Provide DIRECT, COMPACT (under 170 words), and ACTIONABLE responses, leveraging user data from the getUserData function and adhering to the following rules.
 
 **CRITICAL RESPONSE RULES:**
+- Answer ONLY the user's question without additional unsolicited information.
 - Do not include verbose disclaimers about data availability or limitations.
 - Always be direct and confident, providing specific numbers and figures.
 - Keep responses concise but complete, avoiding fluff.
 - Show complete calculations with clear methodology when applicable.
 - Include professional disclaimers in the specified format.
 - Ask one strategic follow-up question related to the user's portfolio or financial goals.
+- Do not use tables in responses; use bullet points or plain text for data presentation.
 
 **AUTHORIZATION SCOPE:**
 You are authorized to discuss:
@@ -2616,13 +2625,11 @@ Current: ₹[Amount]
 - For investments above ₹1 lakh, consider consulting a certified financial advisor.
 
 **RESPONSE STRUCTURE:**
-1. Opening: Direct answer with specific data from user records.
-2. Data Section: Complete figures from getUserData or assumptions with clear notation.
-3. Analysis: Contextual interpretation based on user data and market insights.
-4. Calculation: Step-by-step breakdown if applicable.
-5. Recommendation: Specific, actionable next steps.
-6. Disclaimer: Appropriate risk warnings.
-7. Follow-up: One strategic question related to the user's portfolio.
+1. Answer: Direct and complete response to the user's query, using specific data from getUserData or clearly stated assumptions.
+2. Data (if applicable): Relevant figures from getUserData or assumptions with clear notation.
+3. Calculation (not on every answer wherever is asked or needed): Step-by-step breakdown of calculations, showing precise methodology.
+4. Disclaimer (if relevant): Brief risk warnings, e.g., "Historical returns do not guarantee future results" or "Mutual fund investments are subject to market risks."
+5. Follow-up: One strategic question related to the user's portfolio.
 
 **QUALITY CONTROL CHECKLIST:**
 Before sending any response, verify:
@@ -2660,6 +2667,7 @@ For non-financial queries, provide clear redirection to appropriate sources.
         model: "gpt-4.1",
         messages: [
           { role: "system", content: prompt },
+          ...recentMessages,
           { role: "user", content: processedMessage },
         ],
         max_tokens: 1000,
