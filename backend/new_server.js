@@ -582,6 +582,14 @@ function checkIfInvestmentRequest(message, conversationContext, chat) {
     "continue my sip",
   ];
 
+  const informationalKeywords = [
+    "what are my sips",
+    "list my sips",
+    "show my sips",
+    "my sips",
+    "view my sips",
+  ];
+
   const hasInvestmentKeyword = investmentKeywords.some((keyword) =>
     lowerMessage.includes(keyword)
   );
@@ -590,10 +598,18 @@ function checkIfInvestmentRequest(message, conversationContext, chat) {
     lowerMessage.includes(keyword)
   );
 
+  const hasInformationalKeyword = informationalKeywords.some((keyword) =>
+    lowerMessage.includes(keyword)
+  );
+
   const workflowState = chat.workflowState || {};
   const isInWorkflow = workflowState.step && workflowState.step >= 1;
 
-  // Check if the message is part of an ongoing investment or cancellation/pause workflow
+  // If the query is informational (e.g., "what are my SIPs"), do not treat it as an investment workflow
+  if (hasInformationalKeyword) {
+    return false;
+  }
+
   const isInInvestmentFlow = isInWorkflow && conversationContext.some(
     (msg) =>
       msg.content &&
@@ -617,12 +633,12 @@ function checkIfInvestmentRequest(message, conversationContext, chat) {
     message: lowerMessage,
     hasInvestmentKeyword,
     hasCancellationKeyword,
+    hasInformationalKeyword,
     isInInvestmentFlow,
     isInWorkflow,
     workflowState,
   });
 
-  // Return true for both investment and cancellation/pause requests
   return hasInvestmentKeyword || hasCancellationKeyword || isInInvestmentFlow;
 }
 
@@ -2394,6 +2410,40 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
         return res.json(chat);
       }
+
+      const formattedSIPs = sips
+        .map((sip, index) => {
+          return `${index + 1}. ${sip.fund_name} - Amount: ₹${sip.amount.toLocaleString("en-IN")} - Goal: ${sip.goal || "General"} - Deduction: ${sip.deduction_date}`;
+        })
+        .join("\n");
+
+      const responseMessage = `Here are your active SIPs:\n\n${formattedSIPs}\n\nWould you like to view details of any specific SIP or make changes to your investments?`;
+
+      const assistantMessage = {
+        sender: "bot",
+        content: responseMessage,
+        timestamp: new Date(),
+      };
+      chat.messages.push(assistantMessage);
+      chat.updatedAt = new Date();
+      chat.workflowState = {}; // Reset workflow state
+      if (chat._id) {
+        await chatsCollection.updateOne(
+          { _id: chat._id },
+          {
+            $set: {
+              messages: chat.messages,
+              updatedAt: chat.updatedAt,
+              workflowState: chat.workflowState,
+            },
+            $inc: { __v: 1 },
+          }
+        );
+      } else {
+        const result = await chatsCollection.insertOne(chat);
+        chat._id = result.insertedId;
+      }
+      return res.json(chat);
     }
 
     // Fetch user data including mutual funds and orders
