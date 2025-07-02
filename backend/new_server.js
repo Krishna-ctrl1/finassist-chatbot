@@ -2198,7 +2198,8 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
     // Check for ticket request first
     const isTicketRequest = checkIfTicketRequest(
       processedMessage,
-      conversationContext
+      conversationContext,
+      chat
     );
 
     console.log("Processing /api/chat request:", {
@@ -2739,7 +2740,7 @@ app.get("/api/debug/userdata", authenticateToken, async (req, res) => {
   }
 });
 
-function checkIfTicketRequest(message, conversationContext) {
+function checkIfTicketRequest(message, conversationContext, chat) {
   const lowerMessage = message.toLowerCase().trim();
 
   const ticketKeywords = [
@@ -2761,7 +2762,24 @@ function checkIfTicketRequest(message, conversationContext) {
     "problem with",
   ];
 
+  const nonTicketKeywords = [
+    "portfolio",
+    "my portfolio",
+    "show my portfolio",
+    "view my portfolio",
+    "investment",
+    "sip",
+    "lumpsum",
+    "orders",
+    "my orders",
+    "cancel",
+  ];
+
   const hasTicketKeyword = ticketKeywords.some((keyword) =>
+    lowerMessage.includes(keyword)
+  );
+
+  const hasNonTicketKeyword = nonTicketKeywords.some((keyword) =>
     lowerMessage.includes(keyword)
   );
 
@@ -2776,6 +2794,12 @@ function checkIfTicketRequest(message, conversationContext) {
         msg.content.includes("Choose a category") ||
         msg.content.includes("Description"))
   );
+
+  // If the message contains a non-ticket keyword (e.g., "portfolio") or "cancel", exit the ticket workflow
+  if (hasNonTicketKeyword || lowerMessage === "cancel") {
+    chat.workflowState = {}; // Reset workflow state
+    return false;
+  }
 
   return hasTicketKeyword || isInTicketFlow;
 }
@@ -2944,6 +2968,7 @@ async function handleTicketWorkflow(message, chat, user) {
           status: "Open",
           priority: "Medium",
           ticket_id: ticketId,
+          ticket_id: ticketId,
           attachments: [],
         });
 
@@ -2953,6 +2978,7 @@ async function handleTicketWorkflow(message, chat, user) {
         return {
           shouldRespond: true,
           response: `✅ **Ticket Created Successfully!**\n\n**Ticket ID:** ${ticketId}\n**Title:** ${issueTitle}\n**Category:** ${category}\n**Status:** Open\n**Attachments:** None\n\nYour support ticket has been created and assigned to our team. You'll receive updates on the progress via email.\n\n**What's next?**\n- Our support team will review your ticket within 24 hours\n- You'll receive email notifications for any updates\n- You can reference your ticket using ID: ${ticketId}\n\nIs there anything else I can help you with regarding your investments or account?`,
+          tempData: { step: null },
         };
       } else {
         return {
