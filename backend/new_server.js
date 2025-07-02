@@ -2418,43 +2418,10 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
         return res.json(chat);
       }
+    } // Close the ticket workflow check
 
-      const formattedSIPs = sips
-        .map((sip, index) => {
-          return `${index + 1}. ${sip.fund_name} - Amount: ₹${sip.amount.toLocaleString("en-IN")} - Goal: ${sip.goal || "General"} - Deduction: ${sip.deduction_date}`;
-        })
-        .join("\n");
-
-      const responseMessage = `Here are your active SIPs:\n\n${formattedSIPs}\n\nWould you like to view details of any specific SIP or make changes to your investments?`;
-
-      const assistantMessage = {
-        sender: "bot",
-        content: responseMessage,
-        timestamp: new Date(),
-      };
-      chat.messages.push(assistantMessage);
-      chat.updatedAt = new Date();
-      chat.workflowState = {}; // Reset workflow state
-      if (chat._id) {
-        await chatsCollection.updateOne(
-          { _id: chat._id },
-          {
-            $set: {
-              messages: chat.messages,
-              updatedAt: chat.updatedAt,
-              workflowState: chat.workflowState,
-            },
-            $inc: { __v: 1 },
-          }
-        );
-      } else {
-        const result = await chatsCollection.insertOne(chat);
-        chat._id = result.insertedId;
-      }
-      return res.json(chat);
-    }
-
-    // Fetch user data including mutual funds and orders
+    try {
+      // Fetch user data including mutual funds and orders
     const userData = await getUserData(customerId);
 
     // Prepare mutual funds data for the prompt
@@ -2713,6 +2680,10 @@ For non-financial queries, provide clear redirection to appropriate sources.
     console.error("Error in /api/chat:", error);
     return res.status(500).json({ error: "Internal server error" });
   }
+  } catch (error) {
+    console.error("Error in /api/chat:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 app.get("/api/debug/userdata", authenticateToken, async (req, res) => {
@@ -2773,6 +2744,11 @@ function checkIfTicketRequest(message, conversationContext, chat) {
     "orders",
     "my orders",
     "cancel",
+    "compare",
+    "nifty",
+    "comparison",
+    "compare it with",
+    "compare with",
   ];
 
   const hasTicketKeyword = ticketKeywords.some((keyword) =>
