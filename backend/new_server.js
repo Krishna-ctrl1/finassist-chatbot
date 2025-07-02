@@ -2747,7 +2747,10 @@ function checkIfTicketRequest(message, conversationContext, chat) {
     "compare",
     "nifty",
     "comparison",
+    "what is",
+    "find mutual fund",
     "compare it with",
+    "more",
     "compare with",
   ];
 
