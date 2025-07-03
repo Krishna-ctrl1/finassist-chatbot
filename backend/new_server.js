@@ -10,6 +10,7 @@ const jwt = require("jsonwebtoken");
 const { MongoClient, ObjectId } = require("mongodb");
 const OpenAI = require('openai');
 const textToSpeech = require('@google-cloud/text-to-speech');
+const axios = require('axios'); // Added for HTTP requests to webhook
 
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
@@ -19,6 +20,7 @@ const app = express();
 const MONGO_URI = process.env.MONGO_URI;
 const JWT_SECRET = process.env.JWT_SECRET;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
 const openai = new OpenAI({
   apiKey: OPENAI_API_KEY,
@@ -398,6 +400,7 @@ Your task is to classify the following user query into exactly ONE of these cate
    - Market analysis
 4. "NON-FINANCIAL" - Questions completely unrelated to finance
 5. "AFFIRMATIVE_RESPONSE" - Simple responses like "yes", "ok", "sure", "please", "yes please" that are answering a previous question
+6. "TICKET_REQUEST" - Phrases indicating a need to raise a ticket or report an issue, e.g., "I want to raise a ticket", "I am having issue", "need support"
 
 User query: "${message}"${contextInfo}
 
@@ -420,6 +423,7 @@ Respond with ONLY the category name. Do not include any explanation.`;
       "GENERAL-FINANCIAL",
       "NON-FINANCIAL",
       "AFFIRMATIVE_RESPONSE",
+      "TICKET_REQUEST",
     ];
     if (!validCategories.includes(classification)) {
       console.warn(
@@ -469,11 +473,61 @@ function fallbackClassifyQuery(message) {
   );
   const hasUserSpecific = lowerMessage.includes("my ");
 
+  if (lowerMessage.includes("raise a ticket") || lowerMessage.includes("having issue") || lowerMessage.includes("need support")) {
+    return "TICKET_REQUEST";
+  }
+
   if (!hasFinancialKeyword) {
     return "NON-FINANCIAL";
   }
 
   return hasUserSpecific ? "USER-SPECIFIC-FINANCIAL" : "GENERAL-FINANCIAL";
+}
+
+// Function to create a ticket via webhook
+async function createTicket(userData, ticketDetails) {
+  const ticketId = `TCK${Math.floor(1000000000 + Math.random() * 9000000000)}`;
+  const validCategories = [
+    "General Enquiry",
+    "KYC Related",
+    "Product Related",
+    "Orders Related",
+    "Payments/Bank Accounts",
+    "Account Related",
+    "Others",
+  ];
+  const category = validCategories.includes(ticketDetails.category)
+    ? ticketDetails.category
+    : "Others"; // Default to "Others" if invalid
+
+  const payload = {
+    ticket_id: ticketId,
+    customer_id: userData.customer.id,
+    customer_email: userData.customer.email,
+    issue_title: ticketDetails.issue_title || "User Reported Issue",
+    category: category,
+    description: ticketDetails.description || "",
+    status: "Open",
+    priority: "Medium", // Default priority since it's no longer user-provided
+  };
+
+  try {
+    const response = await axios.post(WEBHOOK_URL, payload, {
+      headers: { "Content-Type": "application/json" },
+    });
+    console.log(`Ticket ${ticketId} created successfully. Response:`, response.data);
+    return `Ticket ${ticketId} has been raised for your issue. Our team will contact you soon at ${userData.customer.email}.`;
+  } catch (error) {
+    console.error("Failed to create ticket:", {
+      error: error.message,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      url: WEBHOOK_URL,
+      payload: payload,
+    });
+    return "Failed to raise ticket. Please try again later or contact support directly.";
+  }
 }
 
 // Chat Route
@@ -544,19 +598,22 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
     switch (queryType) {
       case "GREETING":
       case "NON-FINANCIAL":
-        maxTokens = 250; // Slightly increased for richer casual responses
+        maxTokens = 250;
         break;
       case "USER-SPECIFIC-FINANCIAL":
-        maxTokens = processedMessage.includes("details") ? 1000 : 800; // More room for detailed financial data
+        maxTokens = processedMessage.includes("details") ? 1000 : 800;
         break;
       case "GENERAL-FINANCIAL":
-        maxTokens = processedMessage.includes("analysis") ? 1200 : 900; // Extra tokens for complex topics
+        maxTokens = processedMessage.includes("analysis") ? 1200 : 900;
         break;
       case "AFFIRMATIVE_RESPONSE":
-        maxTokens = 500; // Moderate for contextual follow-ups
+        maxTokens = 500;
+        break;
+      case "TICKET_REQUEST":
+        maxTokens = 300;
         break;
       default:
-        maxTokens = 600; // Balanced default
+        maxTokens = 600;
     }
 
     let systemPrompt;
@@ -705,6 +762,106 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       }
 
       return res.json(chat);
+    } else if (queryType === "TICKET_REQUEST") {
+      // First response: Ask for details if not already requested
+      if (!chat.messages.some(msg => msg.sender === "bot" && msg.content.includes("Please provide"))) {
+        const aiResponse = `I can help you raise a ticket. Please provide the following details:\n- Issue title\n- Category (choose from: General Enquiry, KYC Related, Product Related, Orders Related, Payments/Bank Accounts, Account Related, Others)\n- Description of the issue\nReply with the details in this format: "Title: [title], Category: [category], Description: [description]".`;
+
+        const assistantMessage = { sender: "bot", content: aiResponse, timestamp: new Date() };
+        chat.messages.push(assistantMessage);
+        chat.updatedAt = new Date();
+
+        if (chat._id) {
+          await chatsCollection.updateOne(
+            { _id: chat._id },
+            { $set: { messages: chat.messages, updatedAt: chat.updatedAt }, $inc: { __v: 1 } }
+          );
+        } else {
+          const result = await chatsCollection.insertOne(chat);
+          chat._id = result.insertedId;
+        }
+
+        return res.json(chat);
+      } else {
+        // Parse the user's response for details
+        const lastUserMessage = chat.messages.filter(msg => msg.sender === "user").pop();
+        if (lastUserMessage) {
+          const detailsMatch = lastUserMessage.content.match(/Title:\s*([^,]+),\s*Category:\s*([^,]+),\s*Description:\s*([^]+)/i);
+          if (detailsMatch) {
+            const [, issueTitle, category, description] = detailsMatch;
+            const validCategories = [
+              "General Enquiry",
+              "KYC Related",
+              "Product Related",
+              "Orders Related",
+              "Payments/Bank Accounts",
+              "Account Related",
+              "Others",
+            ];
+            const validatedCategory = validCategories.includes(category.trim())
+              ? category.trim()
+              : "Others";
+
+            if (!issueTitle.trim() || !description.trim()) {
+              const aiResponse = "Please provide both Title and Description. Use the format: 'Title: [title], Category: [category], Description: [description]'.";
+              const assistantMessage = { sender: "bot", content: aiResponse, timestamp: new Date() };
+              chat.messages.push(assistantMessage);
+              chat.updatedAt = new Date();
+
+              if (chat._id) {
+                await chatsCollection.updateOne(
+                  { _id: chat._id },
+                  { $set: { messages: chat.messages, updatedAt: chat.updatedAt }, $inc: { __v: 1 } }
+                );
+              } else {
+                const result = await chatsCollection.insertOne(chat);
+                chat._id = result.insertedId;
+              }
+
+              return res.json(chat);
+            }
+
+            const aiResponse = await createTicket(userData, {
+              issue_title: issueTitle.trim(),
+              category: validatedCategory,
+              description: description.trim(),
+            });
+
+            const assistantMessage = { sender: "bot", content: aiResponse, timestamp: new Date() };
+            chat.messages.push(assistantMessage);
+            chat.updatedAt = new Date();
+
+            if (chat._id) {
+              await chatsCollection.updateOne(
+                { _id: chat._id },
+                { $set: { messages: chat.messages, updatedAt: chat.updatedAt }, $inc: { __v: 1 } }
+              );
+            } else {
+              const result = await chatsCollection.insertOne(chat);
+              chat._id = result.insertedId;
+            }
+
+            return res.json(chat);
+          } else {
+            const aiResponse = "Invalid format. Please provide details in this format: 'Title: [title], Category: [category], Description: [description]'.";
+            const assistantMessage = { sender: "bot", content: aiResponse, timestamp: new Date() };
+            chat.messages.push(assistantMessage);
+            chat.updatedAt = new Date();
+
+            if (chat._id) {
+              await chatsCollection.updateOne(
+                { _id: chat._id },
+                { $set: { messages: chat.messages, updatedAt: chat.updatedAt }, $inc: { __v: 1 } }
+              );
+            } else {
+              const result = await chatsCollection.insertOne(chat);
+              chat._id = result.insertedId;
+            }
+
+            return res.json(chat);
+          }
+        }
+      }
     } else {
       let userDataString = `
 Customer: ${userData.customer?.name || "Unknown"} (ID: ${userData.customer?.id || "Unknown"}, RAYI ID: ${
@@ -927,18 +1084,17 @@ For non-financial queries, provide clear redirection to appropriate sources.
         model: "gpt-4.1",
         messages: [
           { role: "system", content: systemPrompt },
-          ...conversationMessages, // Full history for context
+          ...conversationMessages,
           { role: "user", content: processedMessage },
         ],
         max_tokens: maxTokens,
-        temperature: 0.65, // Slightly higher for natural variation
+        temperature: 0.65,
       });
 
       let aiResponse = completion.choices[0].message.content;
 
       aiResponse = stripHashtags(aiResponse);
 
-      // Ensure response isn’t too short for financial queries
       if (aiResponse.length < 100 && queryType !== "GREETING" && queryType !== "NON-FINANCIAL") {
         aiResponse += "\n\nAnything else you’d like to explore about your finances or investments?";
       }
@@ -976,31 +1132,6 @@ For non-financial queries, provide clear redirection to appropriate sources.
       error: "Failed to process message",
       details: error.message,
     });
-  }
-});
-
-app.get("/api/debug/userdata", authenticateToken, async (req, res) => {
-  try {
-    const customerId = req.user.customerId || req.user.id;
-    console.log("Debug: Getting user data for customerId:", customerId);
-
-    const userData = await getUserData(customerId);
-
-    res.json({
-      customerId: customerId,
-      userData: userData,
-      summary: {
-        customerFound: !!userData.customer,
-        ordersCount: userData.orders?.length || 0,
-        foliosCount: userData.folios?.length || 0,
-        orderDetailsCount: userData.orderDetails?.length || 0,
-      },
-    });
-  } catch (error) {
-    console.error("Debug endpoint error:", error);
-    res
-      .status(500)
-      .json({ error: "Failed to fetch debug data", details: error.message });
   }
 });
 
