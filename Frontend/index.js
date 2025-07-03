@@ -1035,14 +1035,6 @@ function appendMessage(sender, message, animate = true, skipScroll = false) {
   // Check for file upload trigger only for new bot messages
   if (sender === 'bot' && animate) {
     checkForFileUploadTrigger(message);
-    
-    // Speak bot messages if voice output is enabled
-    if (isVoiceOutputEnabled) {
-      // Add a small delay to let the message appear before speaking
-      setTimeout(() => {
-        speakText(message);
-      }, 500);
-    }
   }
 
   return messageDiv;
@@ -1440,6 +1432,9 @@ function toggleTheme() {
 // Initialize enhanced features
 document.addEventListener('DOMContentLoaded', function () {
   enhanceFocusManagement();
+
+  // Initialize voice functionality if supported
+  initializeVoiceFunctionality();
 
   // Add intersection observer for element animations
   if ('IntersectionObserver' in window) {
@@ -2379,99 +2374,18 @@ async function handleTicketCreation(button) {
   // Extract data from conversation
   for (const message of botMessages) {
     const content = message.textContent || message.innerText;
-    console.log('Bot message content:', content.substring(0, 200) + '...');
 
     const titleMatch = content.match(/Your issue title: ["']([^"']+)["']/);
     if (titleMatch) {
       issueTitle = titleMatch[1];
-      console.log('Found issue title:', issueTitle);
     }
 
     const categoryMatch = content.match(/Category selected: ([^\n\r]+)/);
     if (categoryMatch) {
       category = categoryMatch[1].trim();
-      console.log('Raw category match:', category);
       // Additional cleanup to remove any text after the category
-      const cleanCategory = category.split(/\n/)[0].split('Step')[0].split('Now please provide')[0].trim();
+      const cleanCategory = category.split('Now please provide')[0].trim();
       category = cleanCategory;
-      console.log('Cleaned category:', category);
-    }
-  }
-  
-  // Alternative extraction method if category not found from bot messages
-  if (!category) {
-    // Look through chat messages to find user's category selection
-    const chatMessages = Array.from(elements.chatMessages.querySelectorAll('.message'));
-    let foundStep2 = false;
-    
-    for (let i = 0; i < chatMessages.length; i++) {
-      const msg = chatMessages[i];
-      const content = msg.textContent || msg.innerText;
-      
-      // Find Step 2 message
-      if (content.includes('Step 2 of 4') && content.includes('Choose a category')) {
-        foundStep2 = true;
-        continue;
-      }
-      
-      // Get the next user message after Step 2
-      if (foundStep2 && msg.classList.contains('user')) {
-        const userResponse = content.toLowerCase().trim();
-        
-        // Map user response to category
-        const categoryMap = {
-          '1': 'General Enquiry',
-          '2': 'KYC Related',
-          '3': 'Products Related',
-          '4': 'Orders Related',
-          '5': 'Payment/Bank Accounts',
-          '6': 'Account Related',
-          '7': 'Others',
-          'general enquiry': 'General Enquiry',
-          'general': 'General Enquiry',
-          'kyc related': 'KYC Related',
-          'kyc': 'KYC Related',
-          'products related': 'Products Related',
-          'products': 'Products Related',
-          'orders related': 'Orders Related',
-          'orders': 'Orders Related',
-          'payment/bank accounts': 'Payment/Bank Accounts',
-          'payment': 'Payment/Bank Accounts',
-          'bank accounts': 'Payment/Bank Accounts',
-          'account related': 'Account Related',
-          'account': 'Account Related',
-          'others': 'Others',
-          'other': 'Others'
-        };
-        
-        category = categoryMap[userResponse] || categoryMap[content.trim().toLowerCase()];
-        if (category) {
-          console.log('Found category from user message:', category);
-          break;
-        }
-      }
-    }
-  }
-  
-  // Final fallback: extract from all messages containing "Category selected:"
-  if (!category) {
-    console.log('Trying final fallback for category extraction...');
-    const allMessages = Array.from(elements.chatMessages.querySelectorAll('.message'));
-    
-    for (const msg of allMessages) {
-      const content = msg.textContent || msg.innerText;
-      if (content.includes('Category selected:')) {
-        // Extract everything after "Category selected:" up to the next line or step
-        const match = content.match(/Category selected:\s*([^\n\r]+)/);
-        if (match) {
-          let extractedCategory = match[1].trim();
-          // Clean up any extra text
-          extractedCategory = extractedCategory.split('\n')[0].split('Step')[0].split('**')[0].trim();
-          console.log('Final fallback found category:', extractedCategory);
-          category = extractedCategory;
-          break;
-        }
-      }
     }
   }
 
@@ -2481,21 +2395,8 @@ async function handleTicketCreation(button) {
     description = userMessages[2].textContent || userMessages[2].innerText || '';
   }
 
-  // Debug log the extracted values
-  console.log('Extracted ticket data:', {
-    issueTitle: issueTitle,
-    category: category,
-    description: description ? description.substring(0, 100) + '...' : 'No description'
-  });
-
   if (!issueTitle || !category || !description) {
-    const missingFields = [];
-    if (!issueTitle) missingFields.push('issue title');
-    if (!category) missingFields.push('category');
-    if (!description) missingFields.push('description');
-    
-    console.error('Missing ticket fields:', missingFields);
-    showNotification(`Missing ticket information: ${missingFields.join(', ')}. Please ensure you have completed all steps.`, 'error');
+    showNotification('Missing ticket information. Please ensure you have completed all steps.', 'error');
     return;
   }
 
@@ -2526,15 +2427,6 @@ async function handleTicketCreation(button) {
     if (currentChatId) {
       formData.append('chatId', currentChatId);
     }
-    
-    console.log('FormData contents:');
-    for (let [key, value] of formData.entries()) {
-      if (value instanceof File) {
-        console.log(`${key}: File - ${value.name} (${value.size} bytes)`);
-      } else {
-        console.log(`${key}: ${value}`);
-      }
-    }
 
     const response = await fetch(`${API_BASE}/tickets/create`, {
       method: 'POST',
@@ -2552,11 +2444,32 @@ async function handleTicketCreation(button) {
     const result = await response.json();
     console.log('Ticket created successfully:', result);
 
+    // Show success message in chat immediately
+    const successMessage = `✅ **Ticket Created Successfully!**
+
+**Ticket ID:** ${result.ticket.ticket_id}
+**Title:** ${issueTitle}
+**Category:** ${category}
+**Status:** Open
+**Attachments:** ${selectedFiles.length} file(s)
+
+Your support ticket has been created and assigned to our team. You'll receive updates on the progress via email.
+
+**What's next?**
+- Our support team will review your ticket within 24 hours
+- You'll receive email notifications for any updates
+- You can reference your ticket using ID: ${result.ticket.ticket_id}
+
+Is there anything else I can help you with regarding your investments or account?`;
+
     // Clear the file upload interface
     const fileUploadContainer = document.querySelector('.file-upload-container');
     if (fileUploadContainer) {
       fileUploadContainer.remove();
     }
+
+    // Display success message in chat immediately
+    appendMessage('bot', successMessage);
 
     // Reset state
     selectedFiles = [];
@@ -2564,38 +2477,17 @@ async function handleTicketCreation(button) {
 
     showNotification(`Ticket ${result.ticket.ticket_id} created successfully!`, 'success');
     
-    // Reload the current chat to show the success message that was added by the backend
-    if (currentChatId) {
-      setTimeout(() => {
-        loadChat(currentChatId);
-      }, 500);
-    }
-    
-    // Also reload chat history to update sidebar
+    // Optional: Reload chat history to show the updated ticket in sidebar (but don't reload the current chat)
     setTimeout(() => {
       loadChatHistory();
     }, 1000);
 
   } catch (error) {
     console.error('Error creating ticket:', error);
-    
-    // Show more detailed error message to help with debugging
-    const errorMessage = error.message || 'Failed to create ticket. Please try again.';
-    console.error('Full error details:', {
-      error: error,
-      message: errorMessage,
-      stack: error.stack
-    });
-    
-    showNotification(errorMessage, 'error');
+    showNotification(error.message || 'Failed to create ticket. Please try again.', 'error');
 
-    // Add error message to chat with more details for debugging
-    const detailedErrorMessage = `I'm sorry, there was an error creating your ticket with attachments. 
-
-Error details: ${errorMessage}
-
-Please try again or contact our support team directly.`;
-    appendMessage('bot', detailedErrorMessage);
+    // Add error message to chat
+    appendMessage('bot', 'I\'m sorry, there was an error creating your ticket with attachments. Please try again or contact our support team directly.');
   } finally {
     // Reset button state
     button.disabled = false;
@@ -2931,42 +2823,6 @@ function stopVoiceInput() {
   updateVoiceInputUI(false);
 }
 
-// Toggle voice output function for waves button
-function toggleVoiceOutput() {
-  if (!elements.wavesBtn) return;
-  
-  // Initialize speech synthesis if not already done
-  if (!speechSynthesis) {
-    speechSynthesis = initializeSpeechSynthesis();
-    if (!speechSynthesis) {
-      showNotification('Voice output not supported in this browser', 'error');
-      return;
-    }
-  }
-  
-  const isActive = elements.wavesBtn.classList.contains('active');
-  
-  if (isActive) {
-    // Deactivate voice output
-    isVoiceOutputEnabled = false;
-    elements.wavesBtn.classList.remove('active');
-    // Stop any current speech
-    stopSpeech();
-    showNotification('Voice output disabled', 'info');
-  } else {
-    // Activate voice output
-    isVoiceOutputEnabled = true;
-    elements.wavesBtn.classList.add('active');
-    showNotification('Voice output enabled - bot responses will be spoken aloud', 'success');
-  }
-  
-  // Add visual feedback
-  elements.wavesBtn.style.transform = 'scale(0.95)';
-  setTimeout(() => {
-    elements.wavesBtn.style.transform = 'scale(1)';
-  }, 100);
-}
-
 // Update UI for voice input state
 function updateVoiceInputUI(isActive) {
   if (!elements.voiceBtn || !elements.sendBtn) return;
@@ -3100,66 +2956,6 @@ function setupSpeechRecognitionEvents() {
       }
     }
   };
-}
-
-// Initialize speech recognition and synthesis when DOM is loaded
-document.addEventListener('DOMContentLoaded', function() {
-  // Initialize speech recognition if supported
-  if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-    recognition = initializeSpeechRecognition();
-    if (recognition) {
-      setupSpeechRecognitionEvents();
-    }
-  } else {
-    // Hide voice button if not supported
-    if (elements.voiceBtn) {
-      elements.voiceBtn.style.display = 'none';
-    }
-  }
-  
-  // Initialize speech synthesis if supported
-  if ('speechSynthesis' in window) {
-    speechSynthesis = initializeSpeechSynthesis();
-  } else {
-    // Hide waves button if not supported
-    if (elements.wavesBtn) {
-      elements.wavesBtn.style.display = 'none';
-    }
-  }
-});
-
-// Override send button behavior when in voice input mode
-function handleSendButtonClick() {
-  if (isVoiceInputActive) {
-    // Accept voice input and populate text field with transcript
-    stopVoiceInput();
-    
-    // Apply the stored transcript to the input field
-    if (elements.messageInput && currentTranscript.trim()) {
-      // Combine original value with the voice transcript
-      const finalText = originalInputValue + (originalInputValue ? ' ' : '') + currentTranscript.trim();
-      elements.messageInput.value = finalText;
-      
-      // Auto-resize textarea
-      elements.messageInput.style.height = 'auto';
-      const newHeight = Math.min(elements.messageInput.scrollHeight, 120);
-      elements.messageInput.style.height = newHeight + 'px';
-      
-      // Update send button state
-      updateSendButtonState();
-      
-      showNotification('Voice input applied. You can edit the text before sending.', 'success');
-    } else {
-      showNotification('No voice input detected. Please try again.', 'warning');
-    }
-    
-    // Reset voice input variables
-    currentTranscript = '';
-    originalInputValue = '';
-  } else {
-    // Normal send message
-    sendMessage();
-  }
 }
 
 // Audio visualization functions
@@ -3361,6 +3157,103 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
     this.arcTo(x, y, x + radius, y, radius);
     this.closePath();
   };
+}
+
+// Override send button behavior when in voice input mode
+function handleSendButtonClick() {
+  if (isVoiceInputActive) {
+    // Accept voice input and populate text field with transcript
+    stopVoiceInput();
+    
+    // Apply the stored transcript to the input field
+    if (elements.messageInput && currentTranscript.trim()) {
+      // Combine original value with the voice transcript
+      const finalText = originalInputValue + (originalInputValue ? ' ' : '') + currentTranscript.trim();
+      elements.messageInput.value = finalText;
+      
+      // Auto-resize textarea
+      elements.messageInput.style.height = 'auto';
+      const newHeight = Math.min(elements.messageInput.scrollHeight, 120);
+      elements.messageInput.style.height = newHeight + 'px';
+      
+      // Update send button state
+      updateSendButtonState();
+      
+      showNotification('Voice input applied. You can edit the text before sending.', 'success');
+    } else {
+      showNotification('No voice input detected. Please try again.', 'warning');
+    }
+    
+    // Reset voice input variables
+    currentTranscript = '';
+    originalInputValue = '';
+  } else {
+    // Normal send message
+    sendMessage();
+  }
+}
+
+// Initialize voice functionality when DOM is loaded
+function initializeVoiceFunctionality() {
+  // Initialize speech recognition if supported
+  if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+    recognition = initializeSpeechRecognition();
+    if (recognition) {
+      setupSpeechRecognitionEvents();
+    }
+  } else {
+    // Hide voice button if not supported
+    if (elements.voiceBtn) {
+      elements.voiceBtn.style.display = 'none';
+    }
+  }
+  
+  // Initialize speech synthesis if supported
+  if ('speechSynthesis' in window) {
+    speechSynthesis = initializeSpeechSynthesis();
+    isVoiceOutputEnabled = false; // Start disabled
+  } else {
+    // Hide waves button if not supported
+    if (elements.wavesBtn) {
+      elements.wavesBtn.style.display = 'none';
+    }
+  }
+}
+
+// Toggle voice output function for waves button
+function toggleVoiceOutput() {
+  if (!elements.wavesBtn) return;
+  
+  // Initialize speech synthesis if not already done
+  if (!speechSynthesis) {
+    speechSynthesis = initializeSpeechSynthesis();
+    if (!speechSynthesis) {
+      showNotification('Voice output not supported in this browser', 'error');
+      return;
+    }
+  }
+  
+  const isActive = elements.wavesBtn.classList.contains('active');
+  
+  if (isActive) {
+    // Deactivate voice output
+    isVoiceOutputEnabled = false;
+    elements.wavesBtn.classList.remove('active');
+    // Stop any current speech
+    stopSpeech();
+    showNotification('Voice output disabled', 'info');
+  } else {
+    // Activate voice output
+    isVoiceOutputEnabled = true;
+    elements.wavesBtn.classList.add('active');
+    showNotification('Voice output enabled - bot responses will be spoken aloud', 'success');
+  }
+  
+  // Add visual feedback
+  elements.wavesBtn.style.transform = 'scale(0.95)';
+  setTimeout(() => {
+    elements.wavesBtn.style.transform = 'scale(1)';
+  }, 100);
 }
 function toggleChatView() {
   const chatScreen = document.getElementById("chatScreen");
