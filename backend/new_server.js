@@ -10,7 +10,7 @@ const jwt = require("jsonwebtoken");
 const { MongoClient, ObjectId } = require("mongodb");
 const OpenAI = require('openai');
 const textToSpeech = require('@google-cloud/text-to-speech');
-const axios = require('axios'); // Added for HTTP requests to webhook
+const axios = require('axios');
 
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
@@ -382,7 +382,7 @@ async function classifyQueryWithAI(message, conversationHistory = []) {
     const contextInfo =
       conversationHistory.length > 0
         ? `\n\nCONVERSATION CONTEXT:\nPrevious messages: ${conversationHistory
-            .slice(-5) // Increased to 5 for better context
+            .slice(-5)
             .map((msg) => `${msg.role}: ${msg.content}`)
             .join("\n")}`
         : "";
@@ -400,7 +400,7 @@ Your task is to classify the following user query into exactly ONE of these cate
    - Market analysis
 4. "NON-FINANCIAL" - Questions completely unrelated to finance
 5. "AFFIRMATIVE_RESPONSE" - Simple responses like "yes", "ok", "sure", "please", "yes please" that are answering a previous question
-6. "TICKET_REQUEST" - Phrases indicating a need to raise a ticket or report an issue, e.g., "I want to raise a ticket", "I am having issue", "need support"
+6. "TICKET_REQUEST" - Phrases indicating a need to raise a ticket or report an issue, e.g., "I want to raise a ticket", "I am having issue", "need support", or descriptions of issues like "my order fails"
 
 User query: "${message}"${contextInfo}
 
@@ -473,7 +473,11 @@ function fallbackClassifyQuery(message) {
   );
   const hasUserSpecific = lowerMessage.includes("my ");
 
-  if (lowerMessage.includes("raise a ticket") || lowerMessage.includes("having issue") || lowerMessage.includes("need support")) {
+  if (lowerMessage.includes("raise a ticket") || 
+      lowerMessage.includes("having issue") || 
+      lowerMessage.includes("need support") ||
+      lowerMessage.includes("fails") ||
+      lowerMessage.includes("issue")) {
     return "TICKET_REQUEST";
   }
 
@@ -482,6 +486,67 @@ function fallbackClassifyQuery(message) {
   }
 
   return hasUserSpecific ? "USER-SPECIFIC-FINANCIAL" : "GENERAL-FINANCIAL";
+}
+
+// Function to parse ticket details using OpenAI
+async function parseTicketDetails(message, conversationContext = []) {
+  try {
+    const validCategories = [
+      "General Enquiry",
+      "KYC Related",
+      "Product Related",
+      "Orders Related",
+      "Payments/Bank Accounts",
+      "Account Related",
+      "Others",
+    ];
+
+    const contextInfo = conversationContext.length > 0
+      ? `\n\nConversation Context:\n${conversationContext.slice(-3).map(msg => `${msg.role}: ${msg.content}`).join("\n")}`
+      : "";
+
+    const parsePrompt = `
+You are a financial advisor AI assistant tasked with extracting ticket details from a user's message. The user is trying to raise a support ticket, and their input may be in any format (e.g., structured, unstructured, natural language). Your job is to identify and extract the following fields:
+- Issue Title: A brief title summarizing the issue (max 50 characters).
+- Category: One of the following: ${validCategories.join(", ")}.
+- Description: A detailed description of the issue (max 500 characters).
+
+If any field is missing or unclear, provide sensible defaults based on the message content:
+- Issue Title: Summarize the issue or use "User Reported Issue"
+- Category: Infer from context (e.g., "payment" -> "Payments/Bank Accounts") or use "Others"
+- Description: Use the user's message or "No description provided"
+
+User message: "${message}"${contextInfo}
+
+Return a JSON object with the extracted fields:
+{
+  "issue_title": "<title>",
+  "category": "<category>",
+  "description": "<description>"
+}
+`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4.1",
+      messages: [{ role: "user", content: parsePrompt }],
+      max_tokens: 300,
+      temperature: 0.3,
+    });
+
+    const result = JSON.parse(completion.choices[0].message.content);
+    return {
+      issue_title: result.issue_title?.trim().substring(0, 50) || "User Reported Issue",
+      category: validCategories.includes(result.category?.trim()) ? result.category.trim() : "Others",
+      description: result.description?.trim().substring(0, 500) || "No description provided",
+    };
+  } catch (error) {
+    console.error("Error parsing ticket details:", error);
+    return {
+      issue_title: "User Reported Issue",
+      category: "Others",
+      description: "No description provided",
+    };
+  }
 }
 
 // Function to create a ticket via webhook
@@ -498,7 +563,7 @@ async function createTicket(userData, ticketDetails) {
   ];
   const category = validCategories.includes(ticketDetails.category)
     ? ticketDetails.category
-    : "Others"; // Default to "Others" if invalid
+    : "Others";
 
   const payload = {
     ticket_id: ticketId,
@@ -506,9 +571,9 @@ async function createTicket(userData, ticketDetails) {
     customer_email: userData.customer.email,
     issue_title: ticketDetails.issue_title || "User Reported Issue",
     category: category,
-    description: ticketDetails.description || "",
+    description: ticketDetails.description || "No description provided",
     status: "Open",
-    priority: "Medium", // Default priority since it's no longer user-provided
+    priority: "Medium",
   };
 
   try {
@@ -763,10 +828,16 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
       return res.json(chat);
     } else if (queryType === "TICKET_REQUEST") {
-      // First response: Ask for details if not already requested
-      if (!chat.messages.some(msg => msg.sender === "bot" && msg.content.includes("Please provide"))) {
-        const aiResponse = `I can help you raise a ticket. Please provide the following details:\n- Issue title\n- Category (choose from: General Enquiry, KYC Related, Product Related, Orders Related, Payments/Bank Accounts, Account Related, Others)\n- Description of the issue\nReply with the details in this format: "Title: [title], Category: [category], Description: [description]".`;
+      // Parse ticket details immediately
+      const ticketDetails = await parseTicketDetails(processedMessage, conversationContext);
+      
+      if (ticketDetails.issue_title === "User Reported Issue" || ticketDetails.description === "No description provided") {
+        const missingFields = [];
+        if (ticketDetails.issue_title === "User Reported Issue") missingFields.push("title");
+        if (ticketDetails.description === "No description provided") missingFields.push("description");
 
+        const aiResponse = `I need a bit more information to raise your ticket. Please provide the ${missingFields.join(" and ")} of your issue. For example, you could say: "I'm having trouble with my KYC verification, please help with document upload errors."`;
+        
         const assistantMessage = { sender: "bot", content: aiResponse, timestamp: new Date() };
         chat.messages.push(assistantMessage);
         chat.updatedAt = new Date();
@@ -782,86 +853,29 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
         }
 
         return res.json(chat);
-      } else {
-        // Parse the user's response for details
-        const lastUserMessage = chat.messages.filter(msg => msg.sender === "user").pop();
-        if (lastUserMessage) {
-          const detailsMatch = lastUserMessage.content.match(/Title:\s*([^,]+),\s*Category:\s*([^,]+),\s*Description:\s*([^]+)/i);
-          if (detailsMatch) {
-            const [, issueTitle, category, description] = detailsMatch;
-            const validCategories = [
-              "General Enquiry",
-              "KYC Related",
-              "Product Related",
-              "Orders Related",
-              "Payments/Bank Accounts",
-              "Account Related",
-              "Others",
-            ];
-            const validatedCategory = validCategories.includes(category.trim())
-              ? category.trim()
-              : "Others";
-
-            if (!issueTitle.trim() || !description.trim()) {
-              const aiResponse = "Please provide both Title and Description. Use the format: 'Title: [title], Category: [category], Description: [description]'.";
-              const assistantMessage = { sender: "bot", content: aiResponse, timestamp: new Date() };
-              chat.messages.push(assistantMessage);
-              chat.updatedAt = new Date();
-
-              if (chat._id) {
-                await chatsCollection.updateOne(
-                  { _id: chat._id },
-                  { $set: { messages: chat.messages, updatedAt: chat.updatedAt }, $inc: { __v: 1 } }
-                );
-              } else {
-                const result = await chatsCollection.insertOne(chat);
-                chat._id = result.insertedId;
-              }
-
-              return res.json(chat);
-            }
-
-            const aiResponse = await createTicket(userData, {
-              issue_title: issueTitle.trim(),
-              category: validatedCategory,
-              description: description.trim(),
-            });
-
-            const assistantMessage = { sender: "bot", content: aiResponse, timestamp: new Date() };
-            chat.messages.push(assistantMessage);
-            chat.updatedAt = new Date();
-
-            if (chat._id) {
-              await chatsCollection.updateOne(
-                { _id: chat._id },
-                { $set: { messages: chat.messages, updatedAt: chat.updatedAt }, $inc: { __v: 1 } }
-              );
-            } else {
-              const result = await chatsCollection.insertOne(chat);
-              chat._id = result.insertedId;
-            }
-
-            return res.json(chat);
-          } else {
-            const aiResponse = "Invalid format. Please provide details in this format: 'Title: [title], Category: [category], Description: [description]'.";
-            const assistantMessage = { sender: "bot", content: aiResponse, timestamp: new Date() };
-            chat.messages.push(assistantMessage);
-            chat.updatedAt = new Date();
-
-            if (chat._id) {
-              await chatsCollection.updateOne(
-                { _id: chat._id },
-                { $set: { messages: chat.messages, updatedAt: chat.updatedAt }, $inc: { __v: 1 } }
-              );
-            } else {
-              const result = await chatsCollection.insertOne(chat);
-              chat._id = result.insertedId;
-            }
-
-            return res.json(chat);
-          }
-        }
       }
+
+      const aiResponse = await createTicket(userData, ticketDetails);
+      
+      const assistantMessage = { 
+        sender: "bot", 
+        content: aiResponse, 
+        timestamp: new Date() 
+      };
+      chat.messages.push(assistantMessage);
+      chat.updatedAt = new Date();
+
+      if (chat._id) {
+        await chatsCollection.updateOne(
+          { _id: chat._id },
+          { $set: { messages: chat.messages, updatedAt: chat.updatedAt }, $inc: { __v: 1 } }
+        );
+      } else {
+        const result = await chatsCollection.insertOne(chat);
+        chat._id = result.insertedId;
+      }
+
+      return res.json(chat);
     } else {
       let userDataString = `
 Customer: ${userData.customer?.name || "Unknown"} (ID: ${userData.customer?.id || "Unknown"}, RAYI ID: ${
@@ -1656,7 +1670,7 @@ app.post('/api/chat/:chatId/message/:messageId/speech', authenticateToken, async
       });
     }
     
-    // Find the specific message by its _id (MongoDB automatically adds _id to array elements)
+    // Find the specific message by its _id
     const message = chat.messages.find(msg => 
       msg._id && msg._id.toString() === messageId
     );
@@ -1686,15 +1700,15 @@ app.post('/api/chat/:chatId/message/:messageId/speech', authenticateToken, async
       volumeGainDb: 0.0
     };
     
-    // Clean the text for text-to-speech (remove markdown, etc.)
+    // Clean the text for text-to-speech
     let cleanText = message.content
-      .replace(/\*\*(.*?)\*\*/g, '$1') // Remove bold markdown
-      .replace(/\*(.*?)\*/g, '$1')     // Remove italic markdown
-      .replace(/\[(.*?)\]\(.*?\)/g, '$1') // Remove links but keep text
-      .replace(/```[^`]*```/g, '')    // Remove code blocks
-      .replace(/`([^`]*)`/g, '$1')     // Remove inline code
-      .replace(/\n+/g, ' ')           // Replace multiple newlines with space
-      .replace(/\s+/g, ' ');          // Replace multiple spaces with single space
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/\*(.*?)\*/g, '$1')
+      .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+      .replace(/```[^`]*```/g, '')
+      .replace(/`([^`]*)`/g, '$1')
+      .replace(/\n+/g, ' ')
+      .replace(/\s+/g, ' ');
     
     // Configure the TTS request
     const request = {
