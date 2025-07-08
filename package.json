@@ -2,7 +2,7 @@
   "name": "finassist-chatbot",
   "version": "1.0.0",
   "scripts": {
-    "start": "nodemon backend/server.js"
+    "start": "nodemon backend/new_server.js"
   },
   "dependencies": {
     "@google-cloud/speech": "^7.1.0",
