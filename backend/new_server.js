@@ -8,9 +8,9 @@ const rateLimit = require("express-rate-limit");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { MongoClient, ObjectId } = require("mongodb");
-const OpenAI = require('openai');
-const textToSpeech = require('@google-cloud/text-to-speech');
-const axios = require('axios');
+const OpenAI = require("openai");
+const textToSpeech = require("@google-cloud/text-to-speech");
+const axios = require("axios");
 
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
@@ -473,11 +473,13 @@ function fallbackClassifyQuery(message) {
   );
   const hasUserSpecific = lowerMessage.includes("my ");
 
-  if (lowerMessage.includes("raise a ticket") || 
-      lowerMessage.includes("having issue") || 
-      lowerMessage.includes("need support") ||
-      lowerMessage.includes("fails") ||
-      lowerMessage.includes("issue")) {
+  if (
+    lowerMessage.includes("raise a ticket") ||
+    lowerMessage.includes("having issue") ||
+    lowerMessage.includes("need support") ||
+    lowerMessage.includes("fails") ||
+    lowerMessage.includes("issue")
+  ) {
     return "TICKET_REQUEST";
   }
 
@@ -501,9 +503,13 @@ async function parseTicketDetails(message, conversationContext = []) {
       "Others",
     ];
 
-    const contextInfo = conversationContext.length > 0
-      ? `\n\nConversation Context:\n${conversationContext.slice(-3).map(msg => `${msg.role}: ${msg.content}`).join("\n")}`
-      : "";
+    const contextInfo =
+      conversationContext.length > 0
+        ? `\n\nConversation Context:\n${conversationContext
+            .slice(-3)
+            .map((msg) => `${msg.role}: ${msg.content}`)
+            .join("\n")}`
+        : "";
 
     const parsePrompt = `
 You are a financial advisor AI assistant tasked with extracting ticket details from a user's message. The user is trying to raise a support ticket, and their input may be in any format (e.g., structured, unstructured, natural language). Your job is to identify and extract the following fields:
@@ -535,9 +541,14 @@ Return a JSON object with the extracted fields:
 
     const result = JSON.parse(completion.choices[0].message.content);
     return {
-      issue_title: result.issue_title?.trim().substring(0, 50) || "User Reported Issue",
-      category: validCategories.includes(result.category?.trim()) ? result.category.trim() : "Others",
-      description: result.description?.trim().substring(0, 500) || "No description provided",
+      issue_title:
+        result.issue_title?.trim().substring(0, 50) || "User Reported Issue",
+      category: validCategories.includes(result.category?.trim())
+        ? result.category.trim()
+        : "Others",
+      description:
+        result.description?.trim().substring(0, 500) ||
+        "No description provided",
     };
   } catch (error) {
     console.error("Error parsing ticket details:", error);
@@ -580,7 +591,10 @@ async function createTicket(userData, ticketDetails) {
     const response = await axios.post(WEBHOOK_URL, payload, {
       headers: { "Content-Type": "application/json" },
     });
-    console.log(`Ticket ${ticketId} created successfully. Response:`, response.data);
+    console.log(
+      `Ticket ${ticketId} created successfully. Response:`,
+      response.data
+    );
     return `Ticket ${ticketId} has been raised for your issue. Our team will contact you soon at ${userData.customer.email}.`;
   } catch (error) {
     console.error("Failed to create ticket:", {
@@ -696,10 +710,18 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       const previousGreeting = conversationContext
         .slice(0, -1)
         .reverse()
-        .find((msg) => msg.role === "assistant" && msg.content.toLowerCase().includes("hey"));
+        .find(
+          (msg) =>
+            msg.role === "assistant" &&
+            msg.content.toLowerCase().includes("hey")
+        );
       const aiResponse = previousGreeting
-        ? `Hey ${userData.customer?.name || "friend"}, great to catch up again! Ready to dive into your finances or got something new on your mind?`
-        : `Hi ${userData.customer?.name || "there"}! I’m your go-to financial buddy—excited to help with your money matters. What’s up?`;
+        ? `Hey ${
+            userData.customer?.name || "friend"
+          }, great to catch up again! Ready to dive into your finances or got something new on your mind?`
+        : `Hi ${
+            userData.customer?.name || "there"
+          }! I’m your go-to financial buddy—excited to help with your money matters. What’s up?`;
 
       const assistantMessage = {
         sender: "bot",
@@ -733,34 +755,100 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
         .reverse()
         .find((msg) => msg.role === "assistant");
 
-      let contextualResponse;
-      if (
-        lastBotMessage &&
-        lastBotMessage.content.toLowerCase().includes("would you like")
-      ) {
-        if (
-          lastBotMessage.content.toLowerCase().includes("portfolio") ||
-          lastBotMessage.content.toLowerCase().includes("orders")
+      let contextualResponse = "Got it! Let's dive deeper. ";
+
+      if (lastBotMessage) {
+        const lowerLastBotMessage = lastBotMessage.content.toLowerCase();
+
+        // Handle follow-up question about cancelled/paused orders
+        if (lowerLastBotMessage.includes("cancelled/paused orders")) {
+          const cancelledOrPausedOrders = userData.orders.filter(
+            (order) =>
+              order.payment_status.toLowerCase() === "cancelled" ||
+              order.payment_status.toLowerCase() === "paused"
+          );
+
+          if (cancelledOrPausedOrders.length > 0) {
+            contextualResponse += `Here are your cancelled or paused orders:\n`;
+            contextualResponse += cancelledOrPausedOrders
+              .map(
+                (order) =>
+                  `- Order ID: ${order.id}, Amount: ₹${parseFloat(
+                    order.amount
+                  ).toLocaleString("en-IN")}, Status: ${
+                    order.payment_status
+                  }, Date: ${new Date(
+                    order.created_at || order.date
+                  ).toLocaleDateString("en-IN")}`
+              )
+              .join("\n");
+            contextualResponse += `\n\nWould you like to know more about restarting any of these orders?`;
+          } else {
+            contextualResponse += `You currently have no cancelled or paused orders.\n\nWould you like to explore your active investments or start a new one?`;
+          }
+        }
+        // Handle follow-up question about specific investment details
+        else if (
+          lowerLastBotMessage.includes("details of specific investments")
         ) {
-          contextualResponse =
-            userData.orders && userData.orders.length > 0
-              ? `Awesome, let’s check out your portfolio. You’ve got ${
-                  userData.orders.length
-                } orders worth a total of ₹${userData.orders
-                  .reduce((sum, order) => sum + (parseFloat(order.amount) || 0), 0)
-                  .toLocaleString("en-IN")}. For instance, Order ID ${
-                  userData.orders[0].id
-                } is ₹${parseFloat(userData.orders[0].amount).toLocaleString(
-                  "en-IN"
-                )} and marked as ${userData.orders[0].payment_status}. Want to dig into a specific order or see how they’re performing overall?`
-              : `Looks like you don’t have any orders yet, but no worries! Want to explore some investment options, like the mutual funds we discussed before, or start fresh with something new?`;
+          const investmentIds = [
+            ...new Set(userData.orders.map((order) => order.investment_id)),
+          ];
+          if (investmentIds.length > 0) {
+            const investmentDetails = userData.orderDetails.filter((detail) =>
+              investmentIds.includes(detail.investment_id)
+            );
+            contextualResponse += `Here are details of your investments:\n`;
+            investmentDetails.forEach((detail) => {
+              const order = userData.orders.find(
+                (o) => o.investment_id === detail.investment_id
+              );
+              contextualResponse += `- Investment ID: ${
+                detail.investment_id
+              }, Order ID: ${order?.id || "N/A"}, Amount: ₹${parseFloat(
+                order?.amount || 0
+              ).toLocaleString("en-IN")}, Status: ${
+                order?.payment_status || "N/A"
+              }\n`;
+            });
+            contextualResponse += `\nWould you like performance details for any specific investment?`;
+          } else {
+            contextualResponse += `No specific investment details found.\n\nWould you like to check your portfolio performance or explore new investment options?`;
+          }
+        }
+        // Fallback for generic affirmative response
+        else if (lowerLastBotMessage.includes("would you like")) {
+          if (
+            lowerLastBotMessage.includes("portfolio") ||
+            lowerLastBotMessage.includes("orders")
+          ) {
+            contextualResponse +=
+              userData.orders && userData.orders.length > 0
+                ? `Awesome, let’s check out your portfolio. You’ve got ${
+                    userData.orders.length
+                  } orders worth a total of ₹${userData.orders
+                    .reduce(
+                      (sum, order) => sum + (parseFloat(order.amount) || 0),
+                      0
+                    )
+                    .toLocaleString("en-IN")}. For instance, Order ID ${
+                    userData.orders[0].id
+                  } is ₹${parseFloat(userData.orders[0].amount).toLocaleString(
+                    "en-IN"
+                  )} and marked as ${
+                    userData.orders[0].payment_status
+                  }. Want to dig into a specific order or see how they’re performing overall?`
+                : `Looks like you don’t have any orders yet, but no worries! Want to explore some investment options, like the mutual funds we discussed before, or start fresh with something new?`;
+          } else {
+            contextualResponse += `Since we were chatting about “${lastBotMessage.content
+              .slice(0, 50)
+              .toLowerCase()}…”, what’s next? Maybe a peek at your investments or some financial tips?`;
+          }
         } else {
-          contextualResponse = `Got it! Since we were chatting about “${lastBotMessage.content
-            .slice(0, 50)
-            .toLowerCase()}…”, what’s next? Maybe a peek at your investments or some financial tips?`;
+          contextualResponse += `What’s the next thing you want to talk about—your portfolio, investment ideas, or maybe something like tax planning?`;
         }
       } else {
-        contextualResponse = `Sweet, you’re on board! What’s the next thing you want to talk about—your portfolio, investment ideas, or maybe something like tax planning?`;
+        contextualResponse += `What’s the next thing you want to talk about—your portfolio, investment ideas, or maybe something like tax planning?`;
       }
 
       const assistantMessage = {
@@ -793,13 +881,19 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       const previousNonFinancial = conversationContext
         .slice(0, -1)
         .reverse()
-        .find((msg) => msg.role === "user" && !msg.content.toLowerCase().includes("portfolio"));
+        .find(
+          (msg) =>
+            msg.role === "user" &&
+            !msg.content.toLowerCase().includes("portfolio")
+        );
       const aiResponse = previousNonFinancial
         ? `Haha, going off-topic again with “${previousNonFinancial.content.slice(
             0,
             30
           )}…”? I’m all about the money stuff, so how about we swing back to your finances? Maybe check your orders or talk about investment goals?`
-        : `Hey ${userData.customer?.name || "there"}, that’s a bit outside my financial wheelhouse! Want to talk about your portfolio or maybe some money-saving strategies instead?`;
+        : `Hey ${
+            userData.customer?.name || "there"
+          }, that’s a bit outside my financial wheelhouse! Want to talk about your portfolio or maybe some money-saving strategies instead?`;
 
       const assistantMessage = {
         sender: "bot",
@@ -829,23 +923,40 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       return res.json(chat);
     } else if (queryType === "TICKET_REQUEST") {
       // Parse ticket details immediately
-      const ticketDetails = await parseTicketDetails(processedMessage, conversationContext);
-      
-      if (ticketDetails.issue_title === "User Reported Issue" || ticketDetails.description === "No description provided") {
-        const missingFields = [];
-        if (ticketDetails.issue_title === "User Reported Issue") missingFields.push("title");
-        if (ticketDetails.description === "No description provided") missingFields.push("description");
+      const ticketDetails = await parseTicketDetails(
+        processedMessage,
+        conversationContext
+      );
 
-        const aiResponse = `I need a bit more information to raise your ticket. Please provide the ${missingFields.join(" and ")} of your issue. For example, you could say: "I'm having trouble with my KYC verification, please help with document upload errors."`;
-        
-        const assistantMessage = { sender: "bot", content: aiResponse, timestamp: new Date() };
+      if (
+        ticketDetails.issue_title === "User Reported Issue" ||
+        ticketDetails.description === "No description provided"
+      ) {
+        const missingFields = [];
+        if (ticketDetails.issue_title === "User Reported Issue")
+          missingFields.push("title");
+        if (ticketDetails.description === "No description provided")
+          missingFields.push("description");
+
+        const aiResponse = `I need a bit more information to raise your ticket. Please provide the ${missingFields.join(
+          " and "
+        )} of your issue. For example, you could say: "I'm having trouble with my KYC verification, please help with document upload errors."`;
+
+        const assistantMessage = {
+          sender: "bot",
+          content: aiResponse,
+          timestamp: new Date(),
+        };
         chat.messages.push(assistantMessage);
         chat.updatedAt = new Date();
 
         if (chat._id) {
           await chatsCollection.updateOne(
             { _id: chat._id },
-            { $set: { messages: chat.messages, updatedAt: chat.updatedAt }, $inc: { __v: 1 } }
+            {
+              $set: { messages: chat.messages, updatedAt: chat.updatedAt },
+              $inc: { __v: 1 },
+            }
           );
         } else {
           const result = await chatsCollection.insertOne(chat);
@@ -856,11 +967,11 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       }
 
       const aiResponse = await createTicket(userData, ticketDetails);
-      
-      const assistantMessage = { 
-        sender: "bot", 
-        content: aiResponse, 
-        timestamp: new Date() 
+
+      const assistantMessage = {
+        sender: "bot",
+        content: aiResponse,
+        timestamp: new Date(),
       };
       chat.messages.push(assistantMessage);
       chat.updatedAt = new Date();
@@ -868,7 +979,10 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       if (chat._id) {
         await chatsCollection.updateOne(
           { _id: chat._id },
-          { $set: { messages: chat.messages, updatedAt: chat.updatedAt }, $inc: { __v: 1 } }
+          {
+            $set: { messages: chat.messages, updatedAt: chat.updatedAt },
+            $inc: { __v: 1 },
+          }
         );
       } else {
         const result = await chatsCollection.insertOne(chat);
@@ -878,9 +992,9 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       return res.json(chat);
     } else {
       let userDataString = `
-Customer: ${userData.customer?.name || "Unknown"} (ID: ${userData.customer?.id || "Unknown"}, RAYI ID: ${
-        userData.customer?.rayi_customer_id || "Unknown"
-      })
+Customer: ${userData.customer?.name || "Unknown"} (ID: ${
+        userData.customer?.id || "Unknown"
+      }, RAYI ID: ${userData.customer?.rayi_customer_id || "Unknown"})
 Email: ${userData.customer?.email || "unknown@email.com"}
 Orders: ${userData.orders?.length || 0} orders
 ${
@@ -890,9 +1004,11 @@ ${
           (order) =>
             `- Order ID: ${order.id}, Amount: ₹${parseFloat(
               order.amount
-            ).toLocaleString("en-IN")}, Status: ${order.payment_status}, Type: ${
-              order.investment_type || "General"
-            }, Date: ${new Date(order.created_at || order.date).toLocaleDateString("en-IN")}`
+            ).toLocaleString("en-IN")}, Status: ${
+              order.payment_status
+            }, Type: ${order.investment_type || "General"}, Date: ${new Date(
+              order.created_at || order.date
+            ).toLocaleDateString("en-IN")}`
         )
         .join("\n")
     : "No orders available yet."
@@ -960,28 +1076,54 @@ You are authorized to discuss:
 - Mutual Funds Invested: ${userData.mutualFundsInvested?.length || 0}
 
 **CRITICAL ORDER INFORMATION:**
-${userData.orders && userData.orders.length > 0
-  ? `The user has ${userData.orders.length} order(s). Details:
-${userData.orders.map(order => `- Order ID: ${order.id}
+${
+  userData.orders && userData.orders.length > 0
+    ? `The user has ${userData.orders.length} order(s). Details:
+${userData.orders
+  .map(
+    (order) => `- Order ID: ${order.id}
   - Amount: ₹${order.amount}
   - Payment Status: ${order.payment_status}
   - Investment ID: ${order.investment_id}
-`).join("")}
+`
+  )
+  .join("")}
 Order Details Count: ${userData.orderDetails?.length || 0}`
-  : "The user currently has no orders in the system."
+    : "The user currently has no orders in the system."
 }
 
 **Detailed Financial Data (from getUserData):**
-- Customer Detail: ${userData.customerDetail ? JSON.stringify(userData.customerDetail) : "No customer details available"}
-- Folios: ${userData.folios?.length || 0} folios (${JSON.stringify(userData.folios) || "No folios"})
-- Performance Summary: ${userData.performanceSummary ? JSON.stringify(userData.performanceSummary) : "No performance summary"}
-- Investment Performance: ${userData.investmentPerformance?.length || 0} records (${JSON.stringify(userData.investmentPerformance) || "No performance data"})
-- Investment Returns: ${userData.investmentReturns?.length || 0} records (${JSON.stringify(userData.investmentReturns) || "No returns data"})
-- Mutual Funds: ${userData.mutualFunds?.length || 0} funds (${JSON.stringify(userData.mutualFunds) || "No mutual funds"})
+- Customer Detail: ${
+        userData.customerDetail
+          ? JSON.stringify(userData.customerDetail)
+          : "No customer details available"
+      }
+- Folios: ${userData.folios?.length || 0} folios (${
+        JSON.stringify(userData.folios) || "No folios"
+      })
+- Performance Summary: ${
+        userData.performanceSummary
+          ? JSON.stringify(userData.performanceSummary)
+          : "No performance summary"
+      }
+- Investment Performance: ${
+        userData.investmentPerformance?.length || 0
+      } records (${
+        JSON.stringify(userData.investmentPerformance) || "No performance data"
+      })
+- Investment Returns: ${userData.investmentReturns?.length || 0} records (${
+        JSON.stringify(userData.investmentReturns) || "No returns data"
+      })
+- Mutual Funds: ${userData.mutualFunds?.length || 0} funds (${
+        JSON.stringify(userData.mutualFunds) || "No mutual funds"
+      })
 - Bank Accounts: ${JSON.stringify(userData.bankAccounts) || "No bank accounts"}
 - UPI Accounts: ${JSON.stringify(userData.upiAccounts) || "No UPI accounts"}
 - Cards: ${JSON.stringify(userData.cards) || "No cards"}
-- Mutual Funds Invested: ${JSON.stringify(userData.mutualFundsInvested) || "No mutual funds invested"}
+- Mutual Funds Invested: ${
+        JSON.stringify(userData.mutualFundsInvested) ||
+        "No mutual funds invested"
+      }
 
 **ENTITY MAPPING:**
 - sbi: State Bank of India
@@ -1109,8 +1251,13 @@ For non-financial queries, provide clear redirection to appropriate sources.
 
       aiResponse = stripHashtags(aiResponse);
 
-      if (aiResponse.length < 100 && queryType !== "GREETING" && queryType !== "NON-FINANCIAL") {
-        aiResponse += "\n\nAnything else you’d like to explore about your finances or investments?";
+      if (
+        aiResponse.length < 100 &&
+        queryType !== "GREETING" &&
+        queryType !== "NON-FINANCIAL"
+      ) {
+        aiResponse +=
+          "\n\nAnything else you’d like to explore about your finances or investments?";
       }
 
       const assistantMessage = {
@@ -1451,33 +1598,33 @@ app.get("/", (req, res) => {
 });
 
 // Text-to-Speech API endpoint
-app.post('/api/text-to-speech', authenticateToken, async (req, res) => {
+app.post("/api/text-to-speech", authenticateToken, async (req, res) => {
   try {
-    const { 
-      text, 
-      voice = 'en-US-Neural2-F', 
-      languageCode = 'en-US',
-      ssmlGender = 'FEMALE',
+    const {
+      text,
+      voice = "en-US-Neural2-F",
+      languageCode = "en-US",
+      ssmlGender = "FEMALE",
       speakingRate = 1.0,
       pitch = 0.0,
       volumeGainDb = 0.0,
-      effectsProfileId = []
+      effectsProfileId = [],
     } = req.body;
 
     if (!text) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Text is required for text-to-speech conversion' 
+      return res.status(400).json({
+        success: false,
+        message: "Text is required for text-to-speech conversion",
       });
     }
 
-    console.log('TTS Request:', {
-      text: text.substring(0, 50) + '...',
+    console.log("TTS Request:", {
+      text: text.substring(0, 50) + "...",
       voice,
       languageCode,
       ssmlGender,
       speakingRate,
-      pitch
+      pitch,
     });
 
     // Configure the request
@@ -1486,15 +1633,15 @@ app.post('/api/text-to-speech', authenticateToken, async (req, res) => {
       voice: {
         name: voice,
         languageCode,
-        ssmlGender
+        ssmlGender,
       },
       audioConfig: {
-        audioEncoding: 'MP3',
+        audioEncoding: "MP3",
         speakingRate,
         pitch,
         volumeGainDb,
-        effectsProfileId
-      }
+        effectsProfileId,
+      },
     };
 
     // Call the Text-to-Speech API
@@ -1502,257 +1649,270 @@ app.post('/api/text-to-speech', authenticateToken, async (req, res) => {
 
     // Send the audio content as a Buffer
     res.set({
-      'Content-Type': 'audio/mpeg',
-      'Content-Length': response.audioContent.length
+      "Content-Type": "audio/mpeg",
+      "Content-Length": response.audioContent.length,
     });
     res.send(response.audioContent);
-
   } catch (error) {
-    console.error('Text-to-speech error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error generating speech', 
-      error: error.message 
+    console.error("Text-to-speech error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error generating speech",
+      error: error.message,
     });
   }
 });
 
 // Get available voices endpoint
-app.get('/api/text-to-speech/voices', authenticateToken, async (req, res) => {
+app.get("/api/text-to-speech/voices", authenticateToken, async (req, res) => {
   try {
     const [result] = await ttsClient.listVoices({});
-    const voices = result.voices.map(voice => ({
+    const voices = result.voices.map((voice) => ({
       name: voice.name,
       languageCode: voice.languageCodes[0],
       ssmlGender: voice.ssmlGender,
-      naturalSampleRateHertz: voice.naturalSampleRateHertz
+      naturalSampleRateHertz: voice.naturalSampleRateHertz,
     }));
-    
+
     res.json({
       success: true,
-      voices
+      voices,
     });
   } catch (error) {
-    console.error('Error listing voices:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error fetching available voices', 
-      error: error.message 
+    console.error("Error listing voices:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching available voices",
+      error: error.message,
     });
   }
 });
 
 // Save user voice preferences
-app.post('/api/text-to-speech/preferences', authenticateToken, async (req, res) => {
-  try {
-    const { 
-      voice, 
-      languageCode, 
-      ssmlGender, 
-      speakingRate, 
-      pitch, 
-      volumeGainDb 
-    } = req.body;
-    
-    const userId = req.user._id;
-    
-    const db = mongoClient.db('financeai');
-    const preferencesCollection = db.collection('tts_preferences');
-    
-    // Upsert the preferences (create or update)
-    await preferencesCollection.updateOne(
-      { userId: new ObjectId(userId) },
-      { 
-        $set: { 
-          userId: new ObjectId(userId),
-          voice,
-          languageCode,
-          ssmlGender,
-          speakingRate: parseFloat(speakingRate),
-          pitch: parseFloat(pitch),
-          volumeGainDb: parseFloat(volumeGainDb),
-          updatedAt: new Date()
+app.post(
+  "/api/text-to-speech/preferences",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const {
+        voice,
+        languageCode,
+        ssmlGender,
+        speakingRate,
+        pitch,
+        volumeGainDb,
+      } = req.body;
+
+      const userId = req.user._id;
+
+      const db = mongoClient.db("financeai");
+      const preferencesCollection = db.collection("tts_preferences");
+
+      // Upsert the preferences (create or update)
+      await preferencesCollection.updateOne(
+        { userId: new ObjectId(userId) },
+        {
+          $set: {
+            userId: new ObjectId(userId),
+            voice,
+            languageCode,
+            ssmlGender,
+            speakingRate: parseFloat(speakingRate),
+            pitch: parseFloat(pitch),
+            volumeGainDb: parseFloat(volumeGainDb),
+            updatedAt: new Date(),
+          },
+          $setOnInsert: { createdAt: new Date() },
         },
-        $setOnInsert: { createdAt: new Date() }
-      },
-      { upsert: true }
-    );
-    
-    res.json({
-      success: true,
-      message: 'Voice preferences saved successfully'
-    });
-    
-  } catch (error) {
-    console.error('Error saving voice preferences:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error saving voice preferences', 
-      error: error.message 
-    });
+        { upsert: true }
+      );
+
+      res.json({
+        success: true,
+        message: "Voice preferences saved successfully",
+      });
+    } catch (error) {
+      console.error("Error saving voice preferences:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error saving voice preferences",
+        error: error.message,
+      });
+    }
   }
-});
+);
 
 // Get user voice preferences
-app.get('/api/text-to-speech/preferences', authenticateToken, async (req, res) => {
-  try {
-    const userId = req.user._id;
-    
-    const db = mongoClient.db('financeai');
-    const preferencesCollection = db.collection('tts_preferences');
-    
-    const preferences = await preferencesCollection.findOne({ userId: new ObjectId(userId) });
-    
-    if (preferences) {
-      res.json({
-        success: true,
-        preferences: {
-          voice: preferences.voice,
-          languageCode: preferences.languageCode,
-          ssmlGender: preferences.ssmlGender,
-          speakingRate: preferences.speakingRate,
-          pitch: preferences.pitch,
-          volumeGainDb: preferences.volumeGainDb
-        }
+app.get(
+  "/api/text-to-speech/preferences",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const userId = req.user._id;
+
+      const db = mongoClient.db("financeai");
+      const preferencesCollection = db.collection("tts_preferences");
+
+      const preferences = await preferencesCollection.findOne({
+        userId: new ObjectId(userId),
       });
-    } else {
-      // Return default preferences if none are saved
-      res.json({
-        success: true,
-        preferences: {
-          voice: 'en-US-Neural2-F',
-          languageCode: 'en-US',
-          ssmlGender: 'FEMALE',
-          speakingRate: 1.0,
-          pitch: 0.0,
-          volumeGainDb: 0.0
-        }
+
+      if (preferences) {
+        res.json({
+          success: true,
+          preferences: {
+            voice: preferences.voice,
+            languageCode: preferences.languageCode,
+            ssmlGender: preferences.ssmlGender,
+            speakingRate: preferences.speakingRate,
+            pitch: preferences.pitch,
+            volumeGainDb: preferences.volumeGainDb,
+          },
+        });
+      } else {
+        // Return default preferences if none are saved
+        res.json({
+          success: true,
+          preferences: {
+            voice: "en-US-Neural2-F",
+            languageCode: "en-US",
+            ssmlGender: "FEMALE",
+            speakingRate: 1.0,
+            pitch: 0.0,
+            volumeGainDb: 0.0,
+          },
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching voice preferences:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error fetching voice preferences",
+        error: error.message,
       });
     }
-    
-  } catch (error) {
-    console.error('Error fetching voice preferences:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error fetching voice preferences', 
-      error: error.message 
-    });
   }
-});
+);
 
 // Convert bot response to speech
-app.post('/api/chat/:chatId/message/:messageId/speech', authenticateToken, async (req, res) => {
-  try {
-    const { chatId, messageId } = req.params;
-    const userId = req.user._id;
-    
-    if (!ObjectId.isValid(chatId) || !ObjectId.isValid(messageId)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Invalid chat or message ID format' 
+app.post(
+  "/api/chat/:chatId/message/:messageId/speech",
+  authenticateToken,
+  async (req, res) => {
+    try {
+      const { chatId, messageId } = req.params;
+      const userId = req.user._id;
+
+      if (!ObjectId.isValid(chatId) || !ObjectId.isValid(messageId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid chat or message ID format",
+        });
+      }
+
+      // Get user's voice preferences
+      const db = mongoClient.db("financeai");
+      const preferencesCollection = db.collection("tts_preferences");
+      const chatsCollection = db.collection("chats");
+
+      // Fetch the message text
+      const chat = await chatsCollection.findOne({
+        _id: new ObjectId(chatId),
+        userId: new ObjectId(userId),
       });
-    }
-    
-    // Get user's voice preferences
-    const db = mongoClient.db('financeai');
-    const preferencesCollection = db.collection('tts_preferences');
-    const chatsCollection = db.collection('chats');
-    
-    // Fetch the message text
-    const chat = await chatsCollection.findOne(
-      { _id: new ObjectId(chatId), userId: new ObjectId(userId) }
-    );
-    
-    if (!chat) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Chat not found' 
-      });
-    }
-    
-    // Find the specific message by its _id
-    const message = chat.messages.find(msg => 
-      msg._id && msg._id.toString() === messageId
-    );
-    
-    if (!message) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Message not found in chat' 
-      });
-    }
-    
-    // Only bot messages can be converted to speech
-    if (message.sender !== 'bot') {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Only bot messages can be converted to speech' 
-      });
-    }
-    
-    // Get user's voice preferences or use defaults
-    const preferences = await preferencesCollection.findOne({ userId: new ObjectId(userId) }) || {
-      voice: 'en-US-Neural2-F',
-      languageCode: 'en-US',
-      ssmlGender: 'FEMALE',
-      speakingRate: 1.0,
-      pitch: 0.0,
-      volumeGainDb: 0.0
-    };
-    
-    // Clean the text for text-to-speech
-    let cleanText = message.content
-      .replace(/\*\*(.*?)\*\*/g, '$1')
-      .replace(/\*(.*?)\*/g, '$1')
-      .replace(/\[(.*?)\]\(.*?\)/g, '$1')
-      .replace(/```[^`]*```/g, '')
-      .replace(/`([^`]*)`/g, '$1')
-      .replace(/\n+/g, ' ')
-      .replace(/\s+/g, ' ');
-    
-    // Configure the TTS request
-    const request = {
-      input: { text: cleanText },
-      voice: {
-        name: preferences.voice,
-        languageCode: preferences.languageCode,
-        ssmlGender: preferences.ssmlGender
-      },
-      audioConfig: {
-        audioEncoding: 'MP3',
+
+      if (!chat) {
+        return res.status(404).json({
+          success: false,
+          message: "Chat not found",
+        });
+      }
+
+      // Find the specific message by its _id
+      const message = chat.messages.find(
+        (msg) => msg._id && msg._id.toString() === messageId
+      );
+
+      if (!message) {
+        return res.status(404).json({
+          success: false,
+          message: "Message not found in chat",
+        });
+      }
+
+      // Only bot messages can be converted to speech
+      if (message.sender !== "bot") {
+        return res.status(400).json({
+          success: false,
+          message: "Only bot messages can be converted to speech",
+        });
+      }
+
+      // Get user's voice preferences or use defaults
+      const preferences = (await preferencesCollection.findOne({
+        userId: new ObjectId(userId),
+      })) || {
+        voice: "en-US-Neural2-F",
+        languageCode: "en-US",
+        ssmlGender: "FEMALE",
+        speakingRate: 1.0,
+        pitch: 0.0,
+        volumeGainDb: 0.0,
+      };
+
+      // Clean the text for text-to-speech
+      let cleanText = message.content
+        .replace(/\*\*(.*?)\*\*/g, "$1")
+        .replace(/\*(.*?)\*/g, "$1")
+        .replace(/\[(.*?)\]\(.*?\)/g, "$1")
+        .replace(/```[^`]*```/g, "")
+        .replace(/`([^`]*)`/g, "$1")
+        .replace(/\n+/g, " ")
+        .replace(/\s+/g, " ");
+
+      // Configure the TTS request
+      const request = {
+        input: { text: cleanText },
+        voice: {
+          name: preferences.voice,
+          languageCode: preferences.languageCode,
+          ssmlGender: preferences.ssmlGender,
+        },
+        audioConfig: {
+          audioEncoding: "MP3",
+          speakingRate: preferences.speakingRate,
+          pitch: preferences.pitch,
+          volumeGainDb: preferences.volumeGainDb,
+        },
+      };
+
+      console.log("Converting to speech:", {
+        messageId,
+        textLength: cleanText.length,
+        voice: preferences.voice,
         speakingRate: preferences.speakingRate,
         pitch: preferences.pitch,
-        volumeGainDb: preferences.volumeGainDb
-      }
-    };
-    
-    console.log('Converting to speech:', {
-      messageId,
-      textLength: cleanText.length,
-      voice: preferences.voice,
-      speakingRate: preferences.speakingRate,
-      pitch: preferences.pitch
-    });
-    
-    // Call the Text-to-Speech API
-    const [response] = await ttsClient.synthesizeSpeech(request);
-    
-    // Send the audio content as a Buffer
-    res.set({
-      'Content-Type': 'audio/mpeg',
-      'Content-Length': response.audioContent.length
-    });
-    res.send(response.audioContent);
-    
-  } catch (error) {
-    console.error('Error converting message to speech:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Error converting message to speech', 
-      error: error.message 
-    });
+      });
+
+      // Call the Text-to-Speech API
+      const [response] = await ttsClient.synthesizeSpeech(request);
+
+      // Send the audio content as a Buffer
+      res.set({
+        "Content-Type": "audio/mpeg",
+        "Content-Length": response.audioContent.length,
+      });
+      res.send(response.audioContent);
+    } catch (error) {
+      console.error("Error converting message to speech:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error converting message to speech",
+        error: error.message,
+      });
+    }
   }
-});
+);
 
 app.use("/api", apiRoutes);
 
