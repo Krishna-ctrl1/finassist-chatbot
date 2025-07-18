@@ -760,95 +760,117 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       if (lastBotMessage) {
         const lowerLastBotMessage = lastBotMessage.content.toLowerCase();
 
-        // Handle follow-up question about cancelled/paused orders
-        if (lowerLastBotMessage.includes("cancelled/paused orders")) {
+        // Handle historical performance follow-up
+        if (
+          lowerLastBotMessage.includes("historical performance") ||
+          lowerLastBotMessage.includes("performance analysis")
+        ) {
+          if (userData.investmentPerformance?.length > 0) {
+            contextualResponse = `Your portfolio’s historical performance:\n`;
+            userData.investmentPerformance.slice(0, 3).forEach((perf) => {
+              const fund =
+                userData.mutualFunds.find((f) => f.id === perf.mf_id) || {};
+              contextualResponse += `- ${
+                fund.name || perf.mf_id || "Fund"
+              }: ₹${(perf.current_value || 0).toLocaleString("en-IN")}, ${
+                perf.cagr || 0
+              }% CAGR (as of ${new Date(
+                perf.date || new Date()
+              ).toLocaleDateString("en-IN")})\n`;
+            });
+            contextualResponse += `**Disclaimer**: Past performance does not guarantee future results.\nWhich fund would you like more details on?`;
+          } else {
+            contextualResponse = `No historical performance data found.\nWould you like to explore current holdings or investment options?`;
+          }
+        }
+        // Handle diversification follow-up
+        else if (
+          lowerLastBotMessage.includes("diversification") ||
+          lowerLastBotMessage.includes("diversify")
+        ) {
+          const assetTypes = [
+            ...new Set(
+              userData.orders.map((order) => order.investment_type || "General")
+            ),
+          ];
+          const mutualFundCategories = [
+            ...new Set(
+              userData.mutualFunds.map((fund) => fund.category || "Unknown")
+            ),
+          ];
+          contextualResponse = `Your portfolio spans ${
+            assetTypes.length
+          } asset types: ${assetTypes.join(", ")}.\n`;
+          if (mutualFundCategories.length > 0) {
+            contextualResponse += `Fund categories: ${mutualFundCategories.join(
+              ", "
+            )}.\n`;
+          }
+          contextualResponse +=
+            assetTypes.length < 3
+              ? `Consider adding ${
+                  !mutualFundCategories.includes("Equity")
+                    ? "equity funds, "
+                    : ""
+                }${
+                  !mutualFundCategories.includes("Debt") ? "debt funds, " : ""
+                }or FDs for better diversification.\n`
+              : `Your portfolio is well-diversified.\n`;
+          contextualResponse += `**Disclaimer**: Diversification reduces risk but consult an advisor for tailored advice.\nWant fund recommendations?`;
+        }
+        // Handle cancelled/paused orders
+        else if (lowerLastBotMessage.includes("cancelled/paused orders")) {
           const cancelledOrPausedOrders = userData.orders.filter(
             (order) =>
               order.payment_status.toLowerCase() === "cancelled" ||
               order.payment_status.toLowerCase() === "paused"
           );
-
           if (cancelledOrPausedOrders.length > 0) {
-            contextualResponse += `Here are your cancelled or paused orders:\n`;
-            contextualResponse += cancelledOrPausedOrders
+            contextualResponse += `Cancelled/Paused orders:\n${cancelledOrPausedOrders
               .map(
                 (order) =>
-                  `- Order ID: ${order.id}, Amount: ₹${parseFloat(
+                  `- ID: ${order.id}, ₹${parseFloat(
                     order.amount
-                  ).toLocaleString("en-IN")}, Status: ${
+                  ).toLocaleString("en-IN")}, ${
                     order.payment_status
-                  }, Date: ${new Date(
+                  } (${new Date(
                     order.created_at || order.date
-                  ).toLocaleDateString("en-IN")}`
+                  ).toLocaleDateString("en-IN")})`
               )
-              .join("\n");
-            contextualResponse += `\n\nWould you like to know more about restarting any of these orders?`;
+              .join("\n")}\nWant to restart any?`;
           } else {
-            contextualResponse += `You currently have no cancelled or paused orders.\n\nWould you like to explore your active investments or start a new one?`;
+            contextualResponse += `No cancelled or paused orders.\nExplore active investments?`;
           }
         }
-        // Handle follow-up question about specific investment details
+        // Handle portfolio/orders follow-up
         else if (
-          lowerLastBotMessage.includes("details of specific investments")
+          lowerLastBotMessage.includes("portfolio") ||
+          lowerLastBotMessage.includes("orders")
         ) {
-          const investmentIds = [
-            ...new Set(userData.orders.map((order) => order.investment_id)),
-          ];
-          if (investmentIds.length > 0) {
-            const investmentDetails = userData.orderDetails.filter((detail) =>
-              investmentIds.includes(detail.investment_id)
-            );
-            contextualResponse += `Here are details of your investments:\n`;
-            investmentDetails.forEach((detail) => {
-              const order = userData.orders.find(
-                (o) => o.investment_id === detail.investment_id
-              );
-              contextualResponse += `- Investment ID: ${
-                detail.investment_id
-              }, Order ID: ${order?.id || "N/A"}, Amount: ₹${parseFloat(
-                order?.amount || 0
-              ).toLocaleString("en-IN")}, Status: ${
-                order?.payment_status || "N/A"
-              }\n`;
-            });
-            contextualResponse += `\nWould you like performance details for any specific investment?`;
-          } else {
-            contextualResponse += `No specific investment details found.\n\nWould you like to check your portfolio performance or explore new investment options?`;
-          }
+          contextualResponse +=
+            userData.orders?.length > 0
+              ? `Your portfolio: ${
+                  userData.orders.length
+                } orders, total ₹${userData.orders
+                  .reduce(
+                    (sum, order) => sum + (parseFloat(order.amount) || 0),
+                    0
+                  )
+                  .toLocaleString("en-IN")}. Example: Order ID ${
+                  userData.orders[0].id
+                }, ₹${parseFloat(userData.orders[0].amount).toLocaleString(
+                  "en-IN"
+                )}, ${
+                  userData.orders[0].payment_status
+                }.\nDig into a specific order?`
+              : `No orders yet.\nExplore investment options?`;
         }
-        // Fallback for generic affirmative response
-        else if (lowerLastBotMessage.includes("would you like")) {
-          if (
-            lowerLastBotMessage.includes("portfolio") ||
-            lowerLastBotMessage.includes("orders")
-          ) {
-            contextualResponse +=
-              userData.orders && userData.orders.length > 0
-                ? `Awesome, let’s check out your portfolio. You’ve got ${
-                    userData.orders.length
-                  } orders worth a total of ₹${userData.orders
-                    .reduce(
-                      (sum, order) => sum + (parseFloat(order.amount) || 0),
-                      0
-                    )
-                    .toLocaleString("en-IN")}. For instance, Order ID ${
-                    userData.orders[0].id
-                  } is ₹${parseFloat(userData.orders[0].amount).toLocaleString(
-                    "en-IN"
-                  )} and marked as ${
-                    userData.orders[0].payment_status
-                  }. Want to dig into a specific order or see how they’re performing overall?`
-                : `Looks like you don’t have any orders yet, but no worries! Want to explore some investment options, like the mutual funds we discussed before, or start fresh with something new?`;
-          } else {
-            contextualResponse += `Since we were chatting about “${lastBotMessage.content
-              .slice(0, 50)
-              .toLowerCase()}…”, what’s next? Maybe a peek at your investments or some financial tips?`;
-          }
-        } else {
-          contextualResponse += `What’s the next thing you want to talk about—your portfolio, investment ideas, or maybe something like tax planning?`;
+        // Generic fallback
+        else {
+          contextualResponse += `What’s next—portfolio details, investment ideas, or tax planning?`;
         }
       } else {
-        contextualResponse += `What’s the next thing you want to talk about—your portfolio, investment ideas, or maybe something like tax planning?`;
+        contextualResponse += `What’s next—portfolio details, investment ideas, or tax planning?`;
       }
 
       const assistantMessage = {
@@ -864,54 +886,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
         await chatsCollection.updateOne(
           { _id: chat._id },
           {
-            $set: {
-              messages: chat.messages,
-              updatedAt: chat.updatedAt,
-            },
-            $inc: { __v: 1 },
-          }
-        );
-      } else {
-        const result = await chatsCollection.insertOne(chat);
-        chat._id = result.insertedId;
-      }
-
-      return res.json(chat);
-    } else if (queryType === "NON-FINANCIAL") {
-      const previousNonFinancial = conversationContext
-        .slice(0, -1)
-        .reverse()
-        .find(
-          (msg) =>
-            msg.role === "user" &&
-            !msg.content.toLowerCase().includes("portfolio")
-        );
-      const aiResponse = previousNonFinancial
-        ? `Haha, going off-topic again with “${previousNonFinancial.content.slice(
-            0,
-            30
-          )}…”? I’m all about the money stuff, so how about we swing back to your finances? Maybe check your orders or talk about investment goals?`
-        : `Hey ${
-            userData.customer?.name || "there"
-          }, that’s a bit outside my financial wheelhouse! Want to talk about your portfolio or maybe some money-saving strategies instead?`;
-
-      const assistantMessage = {
-        sender: "bot",
-        content: aiResponse,
-        timestamp: new Date(),
-      };
-
-      chat.messages.push(assistantMessage);
-      chat.updatedAt = new Date();
-
-      if (chat._id) {
-        await chatsCollection.updateOne(
-          { _id: chat._id },
-          {
-            $set: {
-              messages: chat.messages,
-              updatedAt: chat.updatedAt,
-            },
+            $set: { messages: chat.messages, updatedAt: chat.updatedAt },
             $inc: { __v: 1 },
           }
         );
