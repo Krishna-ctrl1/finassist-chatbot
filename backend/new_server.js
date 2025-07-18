@@ -10,7 +10,6 @@ const jwt = require("jsonwebtoken");
 const { MongoClient, ObjectId } = require("mongodb");
 const OpenAI = require("openai");
 const textToSpeech = require("@google-cloud/text-to-speech");
-const axios = require("axios");
 
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
@@ -20,7 +19,6 @@ const app = express();
 const MONGO_URI = process.env.MONGO_URI;
 const JWT_SECRET = process.env.JWT_SECRET;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
 const openai = new OpenAI({
   apiKey: OPENAI_API_KEY,
@@ -490,122 +488,369 @@ function fallbackClassifyQuery(message) {
   return hasUserSpecific ? "USER-SPECIFIC-FINANCIAL" : "GENERAL-FINANCIAL";
 }
 
-// Function to parse ticket details using OpenAI
-async function parseTicketDetails(message, conversationContext = []) {
-  try {
-    const validCategories = [
-      "General Enquiry",
-      "KYC Related",
-      "Product Related",
-      "Orders Related",
-      "Payments/Bank Accounts",
-      "Account Related",
-      "Others",
-    ];
+// =============================================================================
+// COMPREHENSIVE TICKET MANAGEMENT FUNCTIONS (from server.js)
+// =============================================================================
 
-    const contextInfo =
-      conversationContext.length > 0
-        ? `\n\nConversation Context:\n${conversationContext
-            .slice(-3)
-            .map((msg) => `${msg.role}: ${msg.content}`)
-            .join("\n")}`
-        : "";
+// Function to handle ticket creation flow
+async function handleTicketCreationFlow(message, chat, customerId) {
+  // Check which step we're in based on previous messages
+  const ticketCreationMessages = chat.messages.filter(
+    (msg) =>
+      msg.content.includes("Step 1 of 4") ||
+      msg.content.includes("Step 2 of 4") ||
+      msg.content.includes("Step 3 of 4") ||
+      msg.content.includes("Step 4 of 4")
+  );
 
-    const parsePrompt = `
-You are a financial advisor AI assistant tasked with extracting ticket details from a user's message. The user is trying to raise a support ticket, and their input may be in any format (e.g., structured, unstructured, natural language). Your job is to identify and extract the following fields:
-- Issue Title: A brief title summarizing the issue (max 50 characters).
-- Category: One of the following: ${validCategories.join(", ")}.
-- Description: A detailed description of the issue (max 500 characters).
+  if (ticketCreationMessages.length === 0) {
+    // First time creating ticket - start directly
+    return `I understand you need assistance! I can help you raise a support ticket.
 
-If any field is missing or unclear, provide sensible defaults based on the message content:
-- Issue Title: Summarize the issue or use "User Reported Issue"
-- Category: Infer from context (e.g., "payment" -> "Payments/Bank Accounts") or use "Others"
-- Description: Use the user's message or "No description provided"
+To create your ticket, I'll need:
+1. Issue Title - Brief description of your problem
+2. Category - Choose from: General Enquiry, KYC Related, Products Related, Orders Related, Payments/Bank Accounts, Account Related, Others
+3. Description - Detailed explanation of your issue
 
-User message: "${message}"${contextInfo}
-
-Return a JSON object with the extracted fields:
-{
-  "issue_title": "<title>",
-  "category": "<category>",
-  "description": "<description>"
-}
-`;
-
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4.1",
-      messages: [{ role: "user", content: parsePrompt }],
-      max_tokens: 300,
-      temperature: 0.3,
-    });
-
-    const result = JSON.parse(completion.choices[0].message.content);
-    return {
-      issue_title:
-        result.issue_title?.trim().substring(0, 50) || "User Reported Issue",
-      category: validCategories.includes(result.category?.trim())
-        ? result.category.trim()
-        : "Others",
-      description:
-        result.description?.trim().substring(0, 500) ||
-        "No description provided",
-    };
-  } catch (error) {
-    console.error("Error parsing ticket details:", error);
-    return {
-      issue_title: "User Reported Issue",
-      category: "Others",
-      description: "No description provided",
-    };
+Step 1 of 4: Issue Title
+Please provide a brief title for your issue (e.g., "Unable to complete payment", "Account verification problem", etc.)`;
   }
+
+  const latestStep = ticketCreationMessages[ticketCreationMessages.length - 1];
+
+  if (latestStep.content.includes("Step 1 of 4")) {
+    // User provided issue title, ask for category
+    const issueTitle = message.trim();
+
+    // Store the title temporarily in chat context
+    return `**Step 2 of 4: Category**
+Thank you! Your issue title: "${issueTitle}"
+
+Now please select a category for your ticket:
+1. General Enquiry
+2. KYC Related
+3. Products Related
+4. Orders Related
+5. Payments/Bank Accounts
+6. Account Related
+7. Others
+
+Please respond with the number (1-7) or the category name.`;
+  }
+
+  if (latestStep.content.includes("Step 2 of 4")) {
+    // User provided category, ask for description
+    const categoryInput = message.trim().toLowerCase();
+    let selectedCategory = "";
+
+    // Map user input to category
+    if (categoryInput.includes("1") || categoryInput.includes("general")) {
+      selectedCategory = "General Enquiry";
+    } else if (categoryInput.includes("2") || categoryInput.includes("kyc")) {
+      selectedCategory = "KYC Related";
+    } else if (
+      categoryInput.includes("3") ||
+      categoryInput.includes("product")
+    ) {
+      selectedCategory = "Products Related";
+    } else if (categoryInput.includes("4") || categoryInput.includes("order")) {
+      selectedCategory = "Orders Related";
+    } else if (
+      categoryInput.includes("5") ||
+      categoryInput.includes("payment") ||
+      categoryInput.includes("bank")
+    ) {
+      selectedCategory = "Payments/Bank Accounts";
+    } else if (
+      categoryInput.includes("6") ||
+      categoryInput.includes("account")
+    ) {
+      selectedCategory = "Account Related";
+    } else if (categoryInput.includes("7") || categoryInput.includes("other")) {
+      selectedCategory = "Others";
+    } else {
+      return `Please select a valid category. Choose from:
+1. General Enquiry
+2. KYC Related
+3. Products Related
+4. Orders Related
+5. Payments/Bank Accounts
+6. Account Related
+7. Others
+
+Respond with the number (1-7) or category name.`;
+    }
+
+    return `**Step 3 of 4: Description**
+Category selected: ${selectedCategory}
+
+Now please provide a detailed description of your issue. Include any relevant information that would help our support team assist you better.`;
+  }
+
+  if (latestStep.content.includes("Step 3 of 4")) {
+    // User provided description, now show completion option
+    const description = message.trim();
+
+    return `**Step 4 of 4: Review and Create**
+Thank you for the description.
+
+Your ticket is ready to be created. Would you like to:
+- **"create"** or **"yes"** - Create the ticket now
+- **"review"** - Review the details before creating
+
+What would you like to do?`;
+  }
+
+  if (latestStep.content.includes("Step 4 of 4")) {
+    // Handle final confirmation
+    const userResponse = message.trim().toLowerCase();
+
+    if (userResponse.includes("review")) {
+      // Extract and show ticket details for review
+      const step1Message = chat.messages.find((msg) =>
+        msg.content.includes("Your issue title:")
+      );
+      const step2Message = chat.messages.find((msg) =>
+        msg.content.includes("Category selected:")
+      );
+      const step3Message = chat.messages.find((msg) =>
+        msg.content.includes("Step 3 of 4")
+      );
+
+      if (!step1Message || !step2Message || !step3Message) {
+        return `I'm sorry, there was an issue retrieving your ticket information. Let's start over. Would you like to create a support ticket?`;
+      }
+
+      const issueTitleMatch = step1Message.content.match(
+        /Your issue title: "([^"]+)"/
+      );
+      const categoryMatch = step2Message.content.match(
+        /Category selected: ([^\n\r]+)/
+      );
+
+      // Find the description from the user's message after Step 3
+      const step3Index = chat.messages.findIndex((msg) =>
+        msg.content.includes("Step 3 of 4")
+      );
+      const descriptionMessage = chat.messages[step3Index + 1];
+      const description = descriptionMessage?.content?.trim();
+
+      return `**Ticket Review**
+
+**Title:** ${issueTitleMatch?.[1] || "Not found"}
+**Category:** ${categoryMatch?.[1]?.trim() || "Not found"}
+**Description:** ${description || "Not found"}
+
+Does this look correct? Respond with:
+- **"create"** or **"yes"** - Create the ticket
+- **"edit"** - Start over with corrections`;
+    } else if (
+      userResponse.includes("create") ||
+      userResponse.includes("yes")
+    ) {
+      // User wants to create the ticket
+      // Extract issue title, category, and description from previous messages
+      const step1Message = chat.messages.find((msg) =>
+        msg.content.includes("Your issue title:")
+      );
+      const step2Message = chat.messages.find((msg) =>
+        msg.content.includes("Category selected:")
+      );
+      const step3Message = chat.messages.find((msg) =>
+        msg.content.includes("Step 3 of 4")
+      );
+
+      if (!step1Message || !step2Message || !step3Message) {
+        return `I'm sorry, there was an issue retrieving your ticket information. Let's start over. Would you like to create a support ticket?`;
+      }
+
+      const issueTitleMatch = step1Message.content.match(
+        /Your issue title: "([^"]+)"/
+      );
+      const categoryMatch = step2Message.content.match(
+        /Category selected: ([^\n\r]+)/
+      );
+
+      // Find the description from the user's message after Step 3
+      const step3Index = chat.messages.findIndex((msg) =>
+        msg.content.includes("Step 3 of 4")
+      );
+      const descriptionMessage = chat.messages[step3Index + 1];
+      const description = descriptionMessage?.content?.trim();
+
+      if (!issueTitleMatch || !categoryMatch || !description) {
+        return `I'm sorry, there was an issue processing your ticket information. Let's start over. Would you like to create a support ticket?`;
+      }
+
+      const issueTitle = issueTitleMatch[1];
+      let category = categoryMatch[1].trim();
+
+      // Clean up category - remove any text after known triggers
+      const cleanupPatterns = [/Now please provide.*$/i, /\n.*$/, /\r.*$/];
+
+      for (const pattern of cleanupPatterns) {
+        category = category.replace(pattern, "").trim();
+      }
+
+      // Validate that the category is one of the allowed values
+      const validCategories = [
+        "General Enquiry",
+        "KYC Related",
+        "Products Related",
+        "Orders Related",
+        "Payments/Bank Accounts",
+        "Account Related",
+        "Others",
+      ];
+
+      if (!validCategories.includes(category)) {
+        console.error("Invalid category extracted:", category);
+        return `I'm sorry, there was an issue with the category selection. Let's start over. Would you like to create a support ticket?`;
+      }
+
+      try {
+        // Validate input data
+        if (!issueTitle || !category || !description) {
+          return `I'm sorry, but I need all the required information to create your ticket. Please provide:
+- Issue title
+- Category
+- Description
+
+Let's start over. Would you like to create a support ticket?`;
+        }
+
+        // Validate customerId
+        if (!customerId) {
+          console.error("No customerId available for ticket creation");
+          return `I'm sorry, there was an issue with your customer identification. Please try logging in again or contact support directly.`;
+        }
+
+        // Get customer email from user data
+        const userData = await getUserData(customerId);
+        const customerEmail = userData.customer?.email || "unknown@email.com";
+
+        console.log("Creating ticket with data:", {
+          customer_id: customerId,
+          customer_email: customerEmail,
+          issue_title: issueTitle,
+          category: category,
+          description: description,
+        });
+
+        // Create the ticket
+        const ticket = await createTicket({
+          customer_id: customerId,
+          customer_email: customerEmail,
+          issue_title: issueTitle,
+          category: category,
+          description: description,
+          chatId: chat._id, // Link ticket to chat
+        });
+
+        return `✅ **Ticket Created Successfully!**
+
+**Ticket ID:** ${ticket.ticket_id}
+**Title:** ${issueTitle}
+**Category:** ${category}
+**Status:** Open
+
+Your support ticket has been created and assigned to our team. You'll receive updates on the progress via email.
+
+**What's next?**
+- Our support team will review your ticket within 24 hours
+- You'll receive email notifications for any updates
+- You can reference your ticket using ID: ${ticket.ticket_id}
+
+Is there anything else I can help you with regarding your investments or account?`;
+      } catch (error) {
+        console.error("Error creating ticket:", error);
+        console.error("Error details:", {
+          message: error.message,
+          stack: error.stack,
+          name: error.name,
+          ticketData: {
+            customer_id: customerId,
+            issue_title: issueTitle,
+            category: category,
+            description: description,
+          },
+        });
+
+        return `I'm sorry, there was an error creating your ticket. Please try again later or contact our support team directly. 
+
+In the meantime, is there anything else I can help you with regarding your investments?`;
+      }
+    } else if (userResponse.includes("edit")) {
+      // User wants to start over
+      return `Let's start over with your ticket creation.
+
+**Step 1 of 4: Issue Title**
+Please provide a brief title for your issue.`;
+    } else {
+      // User gave an unclear response
+      return `Please respond with:
+- **"create"** or **"yes"** to create the ticket
+- **"review"** to see the details before creating
+- **"edit"** to start over with corrections
+
+What would you like to do?`;
+    }
+  }
+
+  // Fallback
+  return `I'm here to help you create a support ticket. Let's start:
+
+**Step 1 of 4: Issue Title**
+Please provide a brief title for your issue.`;
 }
 
-// Function to create a ticket via webhook
-async function createTicket(userData, ticketDetails) {
-  const ticketId = `TCK${Math.floor(1000000000 + Math.random() * 9000000000)}`;
-  const validCategories = [
-    "General Enquiry",
-    "KYC Related",
-    "Product Related",
-    "Orders Related",
-    "Payments/Bank Accounts",
-    "Account Related",
-    "Others",
-  ];
-  const category = validCategories.includes(ticketDetails.category)
-    ? ticketDetails.category
-    : "Others";
-
-  const payload = {
-    ticket_id: ticketId,
-    customer_id: userData.customer.id,
-    customer_email: userData.customer.email,
-    issue_title: ticketDetails.issue_title || "User Reported Issue",
-    category: category,
-    description: ticketDetails.description || "No description provided",
-    status: "Open",
-    priority: "Medium",
-  };
-
+// Function to create a ticket (enhanced version)
+async function createTicket(ticketData) {
   try {
-    const response = await axios.post(WEBHOOK_URL, payload, {
-      headers: { "Content-Type": "application/json" },
-    });
-    console.log(
-      `Ticket ${ticketId} created successfully. Response:`,
-      response.data
-    );
-    return `Ticket ${ticketId} has been raised for your issue. Our team will contact you soon at ${userData.customer.email}.`;
+    // Generate unique ticket ID
+    const ticketId = `TCK${Date.now()}${Math.floor(Math.random() * 1000)}`;
+
+    // Create payload for database
+    const payload = {
+      ticket_id: ticketId,
+      customer_id: ticketData.customer_id,
+      customer_email: ticketData.customer_email,
+      issue_title: ticketData.issue_title,
+      category: ticketData.category,
+      description: ticketData.description,
+      status: "Open",
+      priority: "Medium",
+      chatId: ticketData.chatId, // Include chat ID if provided
+      created_at: new Date(),
+      updated_at: new Date(),
+    };
+
+    // Save ticket to MongoDB tickets collection
+    try {
+      const db = mongoClient.db("financeai");
+      const ticketsCollection = db.collection("tickets");
+      
+      const mongoTicket = {
+        ...payload,
+        _id: undefined, // Let MongoDB generate the _id
+      };
+      
+      const result = await ticketsCollection.insertOne(mongoTicket);
+      console.log(`Ticket ${ticketId} saved to MongoDB with _id: ${result.insertedId}`);
+      
+      // Add the MongoDB _id to the payload
+      payload.mongo_id = result.insertedId;
+    } catch (mongoError) {
+      console.error(`Failed to save ticket ${ticketId} to MongoDB:`, mongoError.message);
+      throw mongoError; // Re-throw the error since we only have MongoDB now
+    }
+
+
+    console.log(`Ticket created successfully: ${ticketId} (MongoDB)`);
+    return { ticket_id: ticketId, ...payload };
   } catch (error) {
-    console.error("Failed to create ticket:", {
-      error: error.message,
-      status: error.response?.status,
-      statusText: error.response?.statusText,
-      data: error.response?.data,
-      url: WEBHOOK_URL,
-      payload: payload,
-    });
-    return "Failed to raise ticket. Please try again later or contact support directly.";
+    console.error("Error in createTicket function:", error);
+    throw error;
   }
 }
 
@@ -750,11 +995,58 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
       return res.json(chat);
     } else if (queryType === "AFFIRMATIVE_RESPONSE") {
+      // Check if we're in an active workflow before handling generic affirmative responses
       const lastBotMessage = conversationContext
         .slice(0, -1)
         .reverse()
         .find((msg) => msg.role === "assistant");
 
+      // Check if we're in ticket workflow
+      const isInTicketWorkflow = lastBotMessage &&
+        (lastBotMessage.content.includes("Step 1 of 4") ||
+         lastBotMessage.content.includes("Step 2 of 4") ||
+         lastBotMessage.content.includes("Step 3 of 4") ||
+         lastBotMessage.content.includes("Step 4 of 4") ||
+         lastBotMessage.content.includes("Would you like to proceed with creating a support ticket?"));
+
+      // If in ticket workflow, process through ticket handler
+      if (isInTicketWorkflow) {
+        console.log('Affirmative response in ticket workflow, processing through ticket handler');
+        const ticketResponse = await handleTicketCreationFlow(
+          message,
+          chat,
+          userData.customer?.id
+        );
+
+        const assistantMessage = {
+          sender: "bot",
+          content: ticketResponse,
+          timestamp: new Date(),
+        };
+
+        chat.messages.push(assistantMessage);
+        chat.updatedAt = new Date();
+
+        if (chat._id) {
+          await chatsCollection.updateOne(
+            { _id: chat._id },
+            {
+              $set: {
+                messages: chat.messages,
+                updatedAt: chat.updatedAt,
+              },
+              $inc: { __v: 1 },
+            }
+          );
+        } else {
+          const result = await chatsCollection.insertOne(chat);
+          chat._id = result.insertedId;
+        }
+
+        return res.json(chat);
+      }
+
+      // Only handle generic affirmative responses if NOT in any workflow
       let contextualResponse = "Got it! Let's dive deeper. ";
 
       if (lastBotMessage) {
@@ -766,7 +1058,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
           lowerLastBotMessage.includes("performance analysis")
         ) {
           if (userData.investmentPerformance?.length > 0) {
-            contextualResponse = `Your portfolio’s historical performance:\n`;
+            contextualResponse = `Your portfolio's historical performance:\n`;
             userData.investmentPerformance.slice(0, 3).forEach((perf) => {
               const fund =
                 userData.mutualFunds.find((f) => f.id === perf.mf_id) || {};
@@ -867,10 +1159,10 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
         }
         // Generic fallback
         else {
-          contextualResponse += `What’s next—portfolio details, investment ideas, or tax planning?`;
+          contextualResponse += `What's next—portfolio details, investment ideas, or tax planning?`;
         }
       } else {
-        contextualResponse += `What’s next—portfolio details, investment ideas, or tax planning?`;
+        contextualResponse += `What's next—portfolio details, investment ideas, or tax planning?`;
       }
 
       const assistantMessage = {
@@ -897,31 +1189,36 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
       return res.json(chat);
     } else if (queryType === "TICKET_REQUEST") {
-      // Parse ticket details immediately
-      const ticketDetails = await parseTicketDetails(
-        processedMessage,
-        conversationContext
-      );
+      // Handle ticket-related queries using the comprehensive flow
+      const lastBotMessage = conversationContext
+        .slice(0, -1)
+        .reverse()
+        .find((msg) => msg.role === "assistant");
 
+      // Check if we're in the middle of ticket creation process
       if (
-        ticketDetails.issue_title === "User Reported Issue" ||
-        ticketDetails.description === "No description provided"
+        lastBotMessage &&
+        (lastBotMessage.content.includes("Step 1 of 4") ||
+          lastBotMessage.content.includes("Step 2 of 4") ||
+          lastBotMessage.content.includes("Step 3 of 4") ||
+          lastBotMessage.content.includes("Step 4 of 4") ||
+          lastBotMessage.content.includes(
+            "Would you like to proceed with creating a support ticket?"
+          ))
       ) {
-        const missingFields = [];
-        if (ticketDetails.issue_title === "User Reported Issue")
-          missingFields.push("title");
-        if (ticketDetails.description === "No description provided")
-          missingFields.push("description");
-
-        const aiResponse = `I need a bit more information to raise your ticket. Please provide the ${missingFields.join(
-          " and "
-        )} of your issue. For example, you could say: "I'm having trouble with my KYC verification, please help with document upload errors."`;
+        // User is providing ticket details - use comprehensive flow
+        const ticketResponse = await handleTicketCreationFlow(
+          message,
+          chat,
+          userData.customer?.id
+        );
 
         const assistantMessage = {
           sender: "bot",
-          content: aiResponse,
+          content: ticketResponse,
           timestamp: new Date(),
         };
+
         chat.messages.push(assistantMessage);
         chat.updatedAt = new Date();
 
@@ -929,7 +1226,48 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
           await chatsCollection.updateOne(
             { _id: chat._id },
             {
-              $set: { messages: chat.messages, updatedAt: chat.updatedAt },
+              $set: {
+                messages: chat.messages,
+                updatedAt: chat.updatedAt,
+              },
+              $inc: { __v: 1 },
+            }
+          );
+        } else {
+          const result = await chatsCollection.insertOne(chat);
+          chat._id = result.insertedId;
+        }
+
+        return res.json(chat);
+      } else {
+        // Initial ticket request - start comprehensive flow
+        const aiResponse = `I understand you need assistance! I can help you raise a support ticket.
+
+To create your ticket, I'll need:
+1. Issue Title - Brief description of your problem
+2. Category - Choose from: General Enquiry, KYC Related, Products Related, Orders Related, Payments/Bank Accounts, Account Related, Others
+3. Description - Detailed explanation of your issue
+
+Step 1 of 4: Issue Title
+Please provide a brief title for your issue (e.g., "Unable to complete payment", "Account verification problem", etc.)`;
+
+        const assistantMessage = {
+          sender: "bot",
+          content: aiResponse,
+          timestamp: new Date(),
+        };
+
+        chat.messages.push(assistantMessage);
+        chat.updatedAt = new Date();
+
+        if (chat._id) {
+          await chatsCollection.updateOne(
+            { _id: chat._id },
+            {
+              $set: {
+                messages: chat.messages,
+                updatedAt: chat.updatedAt,
+              },
               $inc: { __v: 1 },
             }
           );
@@ -940,31 +1278,6 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
         return res.json(chat);
       }
-
-      const aiResponse = await createTicket(userData, ticketDetails);
-
-      const assistantMessage = {
-        sender: "bot",
-        content: aiResponse,
-        timestamp: new Date(),
-      };
-      chat.messages.push(assistantMessage);
-      chat.updatedAt = new Date();
-
-      if (chat._id) {
-        await chatsCollection.updateOne(
-          { _id: chat._id },
-          {
-            $set: { messages: chat.messages, updatedAt: chat.updatedAt },
-            $inc: { __v: 1 },
-          }
-        );
-      } else {
-        const result = await chatsCollection.insertOne(chat);
-        chat._id = result.insertedId;
-      }
-
-      return res.json(chat);
     } else {
       let userDataString = `
 Customer: ${userData.customer?.name || "Unknown"} (ID: ${
