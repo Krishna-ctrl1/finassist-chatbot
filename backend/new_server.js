@@ -7,7 +7,8 @@ const apiRoutes = require("./routes/api");
 const rateLimit = require("express-rate-limit");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const { MongoClient, ObjectId } = require("mongodb");
+const { MongoClient, ObjectId, GridFSBucket } = require("mongodb");
+const multer = require("multer");
 const OpenAI = require("openai");
 const textToSpeech = require("@google-cloud/text-to-speech");
 
@@ -28,6 +29,7 @@ const openai = new OpenAI({
 const ttsClient = new textToSpeech.TextToSpeechClient();
 
 let mongoClient;
+let gridFSBucket;
 
 // Initialize MongoDB connection
 async function initMongoDB() {
@@ -45,6 +47,12 @@ async function initMongoDB() {
     // Test database connection
     await db.admin().ping();
     console.log("MongoDB ping successful");
+
+    // Initialize GridFS bucket for file uploads
+    gridFSBucket = new GridFSBucket(db, {
+      bucketName: "ticket_documents"
+    });
+    console.log("GridFS bucket initialized for ticket documents");
 
     try {
       await db.collection("chats").createIndex({ userId: 1, updatedAt: -1 });
@@ -588,17 +596,40 @@ Now please provide a detailed description of your issue. Include any relevant in
   }
 
   if (latestStep.content.includes("Step 3 of 4")) {
-    // User provided description, now show completion option
+    // User provided description, now show document upload option
     const description = message.trim();
 
-    return `**Step 4 of 4: Review and Create**
+    return {
+      type: "document_upload_modal",
+      content: `**Step 4 of 4: Document Upload**
 Thank you for the description.
 
-Your ticket is ready to be created. Would you like to:
-- **"create"** or **"yes"** - Create the ticket now
-- **"review"** - Review the details before creating
+📎 **Optional Document Upload**
+You can attach supporting documents to help our support team better understand your issue.
 
-What would you like to do?`;
+Please choose one of the following options:`,
+      modalConfig: {
+        title: "Upload Supporting Documents",
+        description: "Attach files that can help our support team better understand your issue",
+        maxFiles: 5,
+        maxFileSize: "10MB",
+        allowedTypes: [".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".png", ".txt"],
+        buttons: [
+          {
+            id: "continue_with_documents",
+            text: "Continue with Documents",
+            type: "primary",
+            action: "open_upload"
+          },
+          {
+            id: "continue_without_documents", 
+            text: "Continue without Documents",
+            type: "secondary",
+            action: "skip_upload"
+          }
+        ]
+      }
+    };
   }
 
   if (latestStep.content.includes("Step 4 of 4")) {
@@ -1213,11 +1244,24 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
           userData.customer?.id
         );
 
-        const assistantMessage = {
-          sender: "bot",
-          content: ticketResponse,
-          timestamp: new Date(),
-        };
+        let assistantMessage;
+        if (typeof ticketResponse === 'object' && ticketResponse.type === 'document_upload_modal') {
+          // Handle special modal response
+          assistantMessage = {
+            sender: "bot",
+            content: ticketResponse.content,
+            timestamp: new Date(),
+            modalConfig: ticketResponse.modalConfig,
+            type: ticketResponse.type
+          };
+        } else {
+          // Handle regular text response
+          assistantMessage = {
+            sender: "bot",
+            content: ticketResponse,
+            timestamp: new Date(),
+          };
+        }
 
         chat.messages.push(assistantMessage);
         chat.updatedAt = new Date();

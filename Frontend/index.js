@@ -1176,7 +1176,21 @@ async function sendMessage() {
 
     if (lastAiResponse) {
       setTimeout(() => {
-        appendMessage("bot", lastAiResponse.content);
+        // Check if the response is a structured object for document upload modal
+        if (typeof lastAiResponse.content === 'object' && lastAiResponse.content.type === 'document_upload_modal') {
+          // Show the modal description as a regular message first
+          const modalConfig = lastAiResponse.content.modalConfig;
+          const displayMessage = `${modalConfig.description}\n\nYou can upload up to ${modalConfig.maxFiles} files (max ${modalConfig.maxFileSizeMB}MB each).\nSupported formats: ${modalConfig.allowedTypes.join(', ')}`;
+          appendMessage("bot", displayMessage);
+          
+          // Then trigger the file upload interface
+          setTimeout(() => {
+            showFileUploadInterface();
+          }, 500);
+        } else {
+          // Handle regular text messages
+          appendMessage("bot", lastAiResponse.content);
+        }
       }, 800); // Slightly longer delay for better UX
     }
 
