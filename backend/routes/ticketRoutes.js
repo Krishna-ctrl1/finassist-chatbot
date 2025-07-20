@@ -102,13 +102,14 @@ router.post("/create", authenticateToken, upload.array('attachments', 3), async 
       console.log(`Processing ${files.length} file(s)...`);
       
       // Get MongoDB connection from app
-      const mongoClient = req.app.get('mongoClient');
+      const getMongoClient = req.app.get('mongoClient');
       
-      if (!mongoClient) {
+      if (!getMongoClient) {
         console.error("MongoDB client not available");
         return res.status(500).json({ message: "Database connection error" });
       }
 
+      const mongoClient = getMongoClient();
       const db = mongoClient.db("financeai");
       const bucket = new GridFSBucket(db, { bucketName: 'ticket_attachments' });
 
@@ -175,8 +176,9 @@ router.post("/create", authenticateToken, upload.array('attachments', 3), async 
     if (chatId) {
       try {
         const { ObjectId } = require("mongodb");
-        const mongoClient = req.app.get('mongoClient');
-        if (mongoClient) {
+        const getMongoClient = req.app.get('mongoClient');
+        if (getMongoClient) {
+          const mongoClient = getMongoClient();
           const db = mongoClient.db("financeai");
           const chatsCollection = db.collection("chats");
           

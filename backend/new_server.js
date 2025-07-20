@@ -1246,13 +1246,11 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
         let assistantMessage;
         if (typeof ticketResponse === 'object' && ticketResponse.type === 'document_upload_modal') {
-          // Handle special modal response
+      // Handle special modal response
           assistantMessage = {
             sender: "bot",
-            content: ticketResponse.content,
+            content: ticketResponse,
             timestamp: new Date(),
-            modalConfig: ticketResponse.modalConfig,
-            type: ticketResponse.type
           };
         } else {
           // Handle regular text response
@@ -2245,6 +2243,11 @@ app.post(
     }
   }
 );
+
+// Add ticket routes
+const ticketRoutes = require('./routes/ticketRoutes');
+app.set('mongoClient', () => mongoClient); // Make mongoClient available to routes
+app.use("/api/tickets", ticketRoutes);
 
 app.use("/api", apiRoutes);
 

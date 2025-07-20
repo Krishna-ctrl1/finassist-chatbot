@@ -1180,7 +1180,7 @@ async function sendMessage() {
         if (typeof lastAiResponse.content === 'object' && lastAiResponse.content.type === 'document_upload_modal') {
           // Show the modal description as a regular message first
           const modalConfig = lastAiResponse.content.modalConfig;
-          const displayMessage = `${modalConfig.description}\n\nYou can upload up to ${modalConfig.maxFiles} files (max ${modalConfig.maxFileSizeMB}MB each).\nSupported formats: ${modalConfig.allowedTypes.join(', ')}`;
+          const displayMessage = `${modalConfig.description}\n\nYou can upload up to ${modalConfig.maxFiles} files (max ${modalConfig.maxFileSize} each).\nSupported formats: ${modalConfig.allowedTypes.join(', ')}`;
           appendMessage("bot", displayMessage);
           
           // Then trigger the file upload interface
@@ -1189,7 +1189,8 @@ async function sendMessage() {
           }, 500);
         } else {
           // Handle regular text messages
-          appendMessage("bot", lastAiResponse.content);
+          const messageContent = typeof lastAiResponse.content === 'string' ? lastAiResponse.content : JSON.stringify(lastAiResponse.content);
+          appendMessage("bot", messageContent);
         }
       }, 800); // Slightly longer delay for better UX
     }
