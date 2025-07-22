@@ -502,13 +502,30 @@ function fallbackClassifyQuery(message) {
 
 // Function to handle ticket creation flow
 async function handleTicketCreationFlow(message, chat, customerId) {
+  // Helper function to safely convert content to string
+  const getContentAsString = (content) => {
+    if (typeof content === 'string') {
+      return content;
+    } else if (typeof content === 'object' && content !== null) {
+      if (content.type === 'document_upload_modal' && content.content) {
+        return content.content;
+      } else {
+        return JSON.stringify(content);
+      }
+    } else {
+      return String(content || '');
+    }
+  };
+
   // Check which step we're in based on previous messages
   const ticketCreationMessages = chat.messages.filter(
-    (msg) =>
-      msg.content.includes("Step 1 of 4") ||
-      msg.content.includes("Step 2 of 4") ||
-      msg.content.includes("Step 3 of 4") ||
-      msg.content.includes("Step 4 of 4")
+    (msg) => {
+      const contentStr = getContentAsString(msg.content);
+      return contentStr.includes("Step 1 of 4") ||
+             contentStr.includes("Step 2 of 4") ||
+             contentStr.includes("Step 3 of 4") ||
+             contentStr.includes("Step 4 of 4");
+    }
   );
 
   if (ticketCreationMessages.length === 0) {
@@ -526,7 +543,7 @@ Please provide a brief title for your issue (e.g., "Unable to complete payment",
 
   const latestStep = ticketCreationMessages[ticketCreationMessages.length - 1];
 
-  if (latestStep.content.includes("Step 1 of 4")) {
+  if (getContentAsString(latestStep.content).includes("Step 1 of 4")) {
     // User provided issue title, ask for category
     const issueTitle = message.trim();
 
@@ -546,7 +563,7 @@ Now please select a category for your ticket:
 Please respond with the number (1-7) or the category name.`;
   }
 
-  if (latestStep.content.includes("Step 2 of 4")) {
+  if (getContentAsString(latestStep.content).includes("Step 2 of 4")) {
     // User provided category, ask for description
     const categoryInput = message.trim().toLowerCase();
     let selectedCategory = "";
@@ -595,7 +612,7 @@ Category selected: ${selectedCategory}
 Now please provide a detailed description of your issue. Include any relevant information that would help our support team assist you better.`;
   }
 
-  if (latestStep.content.includes("Step 3 of 4")) {
+  if (getContentAsString(latestStep.content).includes("Step 3 of 4")) {
     // User provided description, now show document upload option
     const description = message.trim();
 
@@ -632,7 +649,7 @@ Please choose one of the following options:`,
     };
   }
 
-  if (latestStep.content.includes("Step 4 of 4")) {
+  if (getContentAsString(latestStep.content).includes("Step 4 of 4")) {
     // Handle final confirmation
     const userResponse = message.trim().toLowerCase();
 
@@ -682,29 +699,29 @@ Does this look correct? Respond with:
       // User wants to create the ticket
       // Extract issue title, category, and description from previous messages
       const step1Message = chat.messages.find((msg) =>
-        msg.content.includes("Your issue title:")
+        getContentAsString(msg.content).includes("Your issue title:")
       );
       const step2Message = chat.messages.find((msg) =>
-        msg.content.includes("Category selected:")
+        getContentAsString(msg.content).includes("Category selected:")
       );
       const step3Message = chat.messages.find((msg) =>
-        msg.content.includes("Step 3 of 4")
+        getContentAsString(msg.content).includes("Step 3 of 4")
       );
 
       if (!step1Message || !step2Message || !step3Message) {
         return `I'm sorry, there was an issue retrieving your ticket information. Let's start over. Would you like to create a support ticket?`;
       }
 
-      const issueTitleMatch = step1Message.content.match(
+      const issueTitleMatch = getContentAsString(step1Message.content).match(
         /Your issue title: "([^"]+)"/
       );
-      const categoryMatch = step2Message.content.match(
+      const categoryMatch = getContentAsString(step2Message.content).match(
         /Category selected: ([^\n\r]+)/
       );
 
       // Find the description from the user's message after Step 3
       const step3Index = chat.messages.findIndex((msg) =>
-        msg.content.includes("Step 3 of 4")
+        getContentAsString(msg.content).includes("Step 3 of 4")
       );
       const descriptionMessage = chat.messages[step3Index + 1];
       const description = descriptionMessage?.content?.trim();
@@ -944,10 +961,29 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
     console.log("Original message:", message);
     console.log("Processed message:", processedMessage);
 
-    const conversationMessages = chat.messages.map((msg) => ({
-      role: msg.sender === "user" ? "user" : "assistant",
-      content: msg.processedContent || msg.content,
-    }));
+    const conversationMessages = chat.messages.map((msg) => {
+      const content = msg.processedContent || msg.content;
+      
+      // Ensure content is always a string
+      let processedContent;
+      if (typeof content === 'string') {
+        processedContent = content;
+      } else if (typeof content === 'object' && content !== null) {
+        // If content is an object, stringify it or extract meaningful text
+        if (content.type === 'document_upload_modal' && content.content) {
+          processedContent = content.content;
+        } else {
+          processedContent = JSON.stringify(content);
+        }
+      } else {
+        processedContent = String(content || '');
+      }
+      
+      return {
+        role: msg.sender === "user" ? "user" : "assistant",
+        content: processedContent,
+      };
+    });
 
     let maxTokens;
     switch (queryType) {
@@ -1033,12 +1069,27 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
         .find((msg) => msg.role === "assistant");
 
       // Check if we're in ticket workflow
+      const getContentAsString = (content) => {
+        if (typeof content === 'string') {
+          return content;
+        } else if (typeof content === 'object' && content !== null) {
+          if (content.type === 'document_upload_modal' && content.content) {
+            return content.content;
+          } else {
+            return JSON.stringify(content);
+          }
+        } else {
+          return String(content || '');
+        }
+      };
+      
+      const lastBotMessageContent = lastBotMessage ? getContentAsString(lastBotMessage.content) : '';
       const isInTicketWorkflow = lastBotMessage &&
-        (lastBotMessage.content.includes("Step 1 of 4") ||
-         lastBotMessage.content.includes("Step 2 of 4") ||
-         lastBotMessage.content.includes("Step 3 of 4") ||
-         lastBotMessage.content.includes("Step 4 of 4") ||
-         lastBotMessage.content.includes("Would you like to proceed with creating a support ticket?"));
+        (lastBotMessageContent.includes("Step 1 of 4") ||
+         lastBotMessageContent.includes("Step 2 of 4") ||
+         lastBotMessageContent.includes("Step 3 of 4") ||
+         lastBotMessageContent.includes("Step 4 of 4") ||
+         lastBotMessageContent.includes("Would you like to proceed with creating a support ticket?"));
 
       // If in ticket workflow, process through ticket handler
       if (isInTicketWorkflow) {
@@ -1081,7 +1132,8 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       let contextualResponse = "Got it! Let's dive deeper. ";
 
       if (lastBotMessage) {
-        const lowerLastBotMessage = lastBotMessage.content.toLowerCase();
+        const lastBotMessageContentStr = getContentAsString(lastBotMessage.content);
+        const lowerLastBotMessage = lastBotMessageContentStr.toLowerCase();
 
         // Handle historical performance follow-up
         if (
@@ -1227,13 +1279,28 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
         .find((msg) => msg.role === "assistant");
 
       // Check if we're in the middle of ticket creation process
+      const getContentAsString2 = (content) => {
+        if (typeof content === 'string') {
+          return content;
+        } else if (typeof content === 'object' && content !== null) {
+          if (content.type === 'document_upload_modal' && content.content) {
+            return content.content;
+          } else {
+            return JSON.stringify(content);
+          }
+        } else {
+          return String(content || '');
+        }
+      };
+      
+      const lastBotMessageContent2 = lastBotMessage ? getContentAsString2(lastBotMessage.content) : '';
       if (
         lastBotMessage &&
-        (lastBotMessage.content.includes("Step 1 of 4") ||
-          lastBotMessage.content.includes("Step 2 of 4") ||
-          lastBotMessage.content.includes("Step 3 of 4") ||
-          lastBotMessage.content.includes("Step 4 of 4") ||
-          lastBotMessage.content.includes(
+        (lastBotMessageContent2.includes("Step 1 of 4") ||
+          lastBotMessageContent2.includes("Step 2 of 4") ||
+          lastBotMessageContent2.includes("Step 3 of 4") ||
+          lastBotMessageContent2.includes("Step 4 of 4") ||
+          lastBotMessageContent2.includes(
             "Would you like to proceed with creating a support ticket?"
           ))
       ) {
