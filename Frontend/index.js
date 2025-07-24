@@ -108,6 +108,35 @@ function setupEventListeners() {
     }
   });
 
+  // Additional event delegation to handle dynamically created buttons
+  document.addEventListener('click', function (e) {
+    console.log('🎯 Document click detected:', {
+      target: e.target.tagName,
+      targetClass: e.target.className,
+      targetText: e.target.textContent?.trim(),
+    });
+    
+    // Check if clicked element or its parents have the skip-upload-btn class
+    const skipButton = e.target.closest('.skip-upload-btn');
+    if (skipButton) {
+      console.log('🎯 Skip button clicked via event delegation!');
+      e.preventDefault();
+      e.stopPropagation();
+      skipFileUpload();
+      return;
+    }
+    
+    // Check if clicked element or its parents have the create-ticket-btn class
+    const createButton = e.target.closest('.create-ticket-btn');
+    if (createButton) {
+      console.log('🎯 Create button clicked via event delegation!');
+      e.preventDefault();
+      e.stopPropagation();
+      handleTicketCreation(createButton);
+      return;
+    }
+  });
+
   // Form submissions
   if (elements.loginForm) {
     elements.loginForm.addEventListener("submit", handleLogin);
@@ -2358,11 +2387,130 @@ function removeFile(index) {
   showNotification('File removed.', 'info');
 }
 
-function skipFileUpload() {
-  // Create ticket without attachments by sending "no" message
-  if (elements.messageInput) {
-    elements.messageInput.value = 'no';
-    sendMessage();
+async function skipFileUpload() {
+  console.log('🎫 skipFileUpload() called!');
+  
+  // Create ticket without attachments by directly calling the ticket creation API
+  const skipButton = document.querySelector('.skip-upload-btn');
+  console.log('🎫 Skip button found:', !!skipButton);
+  
+  if (!elements.chatMessages) {
+    showNotification('Unable to find ticket information. Please start over.', 'error');
+    return;
+  }
+
+  const messages = Array.from(elements.chatMessages.querySelectorAll('.message'));
+  const botMessages = messages.filter(msg => msg.classList.contains('bot'));
+
+  // Find step messages
+  let issueTitle = '';
+  let category = '';
+  let description = '';
+
+  // Extract data from conversation
+  for (const message of botMessages) {
+    const content = message.textContent || message.innerText;
+
+    const titleMatch = content.match(/Your issue title: ["']([^"']+)["']/);
+    if (titleMatch) {
+      issueTitle = titleMatch[1];
+    }
+
+    const categoryMatch = content.match(/Category selected: ([^\n\r]+)/);
+    if (categoryMatch) {
+      category = categoryMatch[1].trim();
+      // Additional cleanup to remove any text after the category
+      const cleanCategory = category.split('Now please provide')[0].trim();
+      category = cleanCategory;
+    }
+  }
+
+  // Find description from user messages (after Step 3)
+  const userMessages = messages.filter(msg => msg.classList.contains('user'));
+  if (userMessages.length >= 3) {
+    description = userMessages[2].textContent || userMessages[2].innerText || '';
+  }
+
+  if (!issueTitle || !category || !description) {
+    showNotification('Missing ticket information. Please ensure you have completed all steps.', 'error');
+    return;
+  }
+
+  // Disable button and show loading state
+  if (skipButton) {
+    skipButton.disabled = true;
+    skipButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating Ticket...';
+  }
+
+  try {
+    // Create FormData with ticket information (no files)
+    const formData = new FormData();
+    formData.append('issue_title', issueTitle);
+    formData.append('category', category);
+    formData.append('description', description);
+
+    console.log('Creating ticket without attachments...', {
+      issueTitle,
+      category,
+      description: description.substring(0, 100) + '...'
+    });
+
+    // Add chatId to the form data
+    if (currentChatId) {
+      formData.append('chatId', currentChatId);
+    }
+
+    const response = await fetch(`${API_BASE}/tickets/create`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${authToken}`
+      },
+      body: formData
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.message || 'Failed to create ticket');
+    }
+
+    const result = await response.json();
+    console.log('Ticket created successfully (no attachments):', result);
+
+    // Show success message in chat immediately
+    const successMessage = `✅ **Ticket Created Successfully!**\n\n**Ticket ID:** ${result.ticket.ticket_id}\n**Title:** ${issueTitle}\n**Category:** ${category}\n**Status:** Open\n**Attachments:** None\n\nYour support ticket has been created and assigned to our team. You'll receive updates on the progress via email.\n\n**What's next?**\n- Our support team will review your ticket within 24 hours\n- You'll receive email notifications for any updates\n- You can reference your ticket using ID: ${result.ticket.ticket_id}\n\nIs there anything else I can help you with regarding your investments or account?`;
+
+    // Clear the file upload interface
+    const fileUploadContainer = document.querySelector('.file-upload-container');
+    if (fileUploadContainer) {
+      fileUploadContainer.remove();
+    }
+
+    // Display success message in chat immediately
+    appendMessage('bot', successMessage);
+
+    // Reset state
+    selectedFiles = [];
+    ticketData = {};
+
+    showNotification(`Ticket ${result.ticket.ticket_id} created successfully!`, 'success');
+    
+    // Optional: Reload chat history to show the updated ticket in sidebar (but don't reload the current chat)
+    setTimeout(() => {
+      loadChatHistory();
+    }, 1000);
+
+  } catch (error) {
+    console.error('Error creating ticket:', error);
+    showNotification(error.message || 'Failed to create ticket. Please try again.', 'error');
+
+    // Add error message to chat
+    appendMessage('bot', 'I\'m sorry, there was an error creating your ticket. Please try again or contact our support team directly.');
+  } finally {
+    // Reset button state
+    if (skipButton) {
+      skipButton.disabled = false;
+      skipButton.innerHTML = '<i class="fas fa-skip-forward"></i> Skip Upload';
+    }
   }
 }
 
