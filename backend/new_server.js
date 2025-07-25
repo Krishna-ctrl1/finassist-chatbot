@@ -11,6 +11,8 @@ const { MongoClient, ObjectId, GridFSBucket } = require("mongodb");
 const multer = require("multer");
 const OpenAI = require("openai");
 const textToSpeech = require("@google-cloud/text-to-speech");
+const fs = require("fs");
+const faqData = JSON.parse(fs.readFileSync(path.join(__dirname, "../data", "faq.json"), "utf8"));
 
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
@@ -382,6 +384,23 @@ function stripHashtags(response) {
   return response.replace(/#[^\s]+/g, "");
 }
 
+// FAQ endpoint
+app.get("/api/faqs", (req, res) => {
+  try {
+    res.json({
+      success: true,
+      data: faqData,
+    });
+  } catch (error) {
+    console.error("Error fetching FAQs:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch FAQs",
+      error: error.message,
+    });
+  }
+});
+
 // Function to classify the query with conversation context
 async function classifyQueryWithAI(message, conversationHistory = []) {
   try {
@@ -407,6 +426,7 @@ Your task is to classify the following user query into exactly ONE of these cate
 4. "NON-FINANCIAL" - Questions completely unrelated to finance
 5. "AFFIRMATIVE_RESPONSE" - Simple responses like "yes", "ok", "sure", "please", "yes please" that are answering a previous question
 6. "TICKET_REQUEST" - Phrases indicating a need to raise a ticket or report an issue, e.g., "I want to raise a ticket", "I am having issue", "need support", or descriptions of issues like "my order fails"
+7. "FAQ" - Questions that match or are similar to questions in the FAQ dataset, e.g., "What is a mutual fund?", "How do mutual funds work?"
 
 User query: "${message}"${contextInfo}
 
@@ -430,6 +450,7 @@ Respond with ONLY the category name. Do not include any explanation.`;
       "NON-FINANCIAL",
       "AFFIRMATIVE_RESPONSE",
       "TICKET_REQUEST",
+      "FAQ",
     ];
     if (!validCategories.includes(classification)) {
       console.warn(
@@ -474,10 +495,21 @@ function fallbackClassifyQuery(message) {
     "investment",
   ];
 
+  const faqKeywords = [
+    "what is a mutual fund",
+    "how does a mutual fund work",
+    "mutual fund faq",
+    "faq",
+    "frequently asked questions",
+  ];
+
   const hasFinancialKeyword = financialKeywords.some((keyword) =>
     lowerMessage.includes(keyword)
   );
   const hasUserSpecific = lowerMessage.includes("my ");
+  const hasFAQKeyword = faqKeywords.some((keyword) =>
+    lowerMessage.includes(keyword)
+  );
 
   if (
     lowerMessage.includes("raise a ticket") ||
@@ -489,6 +521,10 @@ function fallbackClassifyQuery(message) {
     return "TICKET_REQUEST";
   }
 
+  if (hasFAQKeyword) {
+    return "FAQ";
+  }
+
   if (!hasFinancialKeyword) {
     return "NON-FINANCIAL";
   }
@@ -496,9 +532,24 @@ function fallbackClassifyQuery(message) {
   return hasUserSpecific ? "USER-SPECIFIC-FINANCIAL" : "GENERAL-FINANCIAL";
 }
 
-// =============================================================================
-// COMPREHENSIVE TICKET MANAGEMENT FUNCTIONS (from server.js)
-// =============================================================================
+// Function to search FAQs for a matching question
+function searchFAQs(query) {
+  const lowerQuery = query.toLowerCase().trim();
+  const matchedFAQ = faqData.find((faq) =>
+    faq.Question.toLowerCase().includes(lowerQuery) ||
+    lowerQuery.includes(faq.Question.toLowerCase()) ||
+    lowerQuery.includes("faq") ||
+    lowerQuery.includes("frequently asked questions")
+  );
+
+  return matchedFAQ
+    ? {
+        question: matchedFAQ.Question,
+        answer: matchedFAQ.Answer,
+        category: matchedFAQ["Category "] || "General",
+      }
+    : null;
+}
 
 // Function to handle ticket creation flow
 async function handleTicketCreationFlow(message, chat, customerId) {
@@ -969,7 +1020,6 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       if (typeof content === 'string') {
         processedContent = content;
       } else if (typeof content === 'object' && content !== null) {
-        // If content is an object, stringify it or extract meaningful text
         if (content.type === 'document_upload_modal' && content.content) {
           processedContent = content.content;
         } else {
@@ -989,6 +1039,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
     switch (queryType) {
       case "GREETING":
       case "NON-FINANCIAL":
+      case "FAQ":
         maxTokens = 250;
         break;
       case "USER-SPECIFIC-FINANCIAL":
@@ -1062,13 +1113,11 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
       return res.json(chat);
     } else if (queryType === "AFFIRMATIVE_RESPONSE") {
-      // Check if we're in an active workflow before handling generic affirmative responses
       const lastBotMessage = conversationContext
         .slice(0, -1)
         .reverse()
         .find((msg) => msg.role === "assistant");
 
-      // Check if we're in ticket workflow
       const getContentAsString = (content) => {
         if (typeof content === 'string') {
           return content;
@@ -1091,7 +1140,6 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
          lastBotMessageContent.includes("Step 4 of 4") ||
          lastBotMessageContent.includes("Would you like to proceed with creating a support ticket?"));
 
-      // If in ticket workflow, process through ticket handler
       if (isInTicketWorkflow) {
         console.log('Affirmative response in ticket workflow, processing through ticket handler');
         const ticketResponse = await handleTicketCreationFlow(
@@ -1128,14 +1176,12 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
         return res.json(chat);
       }
 
-      // Only handle generic affirmative responses if NOT in any workflow
       let contextualResponse = "Got it! Let's dive deeper. ";
 
       if (lastBotMessage) {
         const lastBotMessageContentStr = getContentAsString(lastBotMessage.content);
         const lowerLastBotMessage = lastBotMessageContentStr.toLowerCase();
 
-        // Handle historical performance follow-up
         if (
           lowerLastBotMessage.includes("historical performance") ||
           lowerLastBotMessage.includes("performance analysis")
@@ -1157,9 +1203,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
           } else {
             contextualResponse = `No historical performance data found.\nWould you like to explore current holdings or investment options?`;
           }
-        }
-        // Handle diversification follow-up
-        else if (
+        } else if (
           lowerLastBotMessage.includes("diversification") ||
           lowerLastBotMessage.includes("diversify")
         ) {
@@ -1192,9 +1236,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
                 }or FDs for better diversification.\n`
               : `Your portfolio is well-diversified.\n`;
           contextualResponse += `**Disclaimer**: Diversification reduces risk but consult an advisor for tailored advice.\nWant fund recommendations?`;
-        }
-        // Handle cancelled/paused orders
-        else if (lowerLastBotMessage.includes("cancelled/paused orders")) {
+        } else if (lowerLastBotMessage.includes("cancelled/paused orders")) {
           const cancelledOrPausedOrders = userData.orders.filter(
             (order) =>
               order.payment_status.toLowerCase() === "cancelled" ||
@@ -1216,9 +1258,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
           } else {
             contextualResponse += `No cancelled or paused orders.\nExplore active investments?`;
           }
-        }
-        // Handle portfolio/orders follow-up
-        else if (
+        } else if (
           lowerLastBotMessage.includes("portfolio") ||
           lowerLastBotMessage.includes("orders")
         ) {
@@ -1239,9 +1279,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
                   userData.orders[0].payment_status
                 }.\nDig into a specific order?`
               : `No orders yet.\nExplore investment options?`;
-        }
-        // Generic fallback
-        else {
+        } else {
           contextualResponse += `What's next—portfolio details, investment ideas, or tax planning?`;
         }
       } else {
@@ -1272,13 +1310,11 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
       return res.json(chat);
     } else if (queryType === "TICKET_REQUEST") {
-      // Handle ticket-related queries using the comprehensive flow
       const lastBotMessage = conversationContext
         .slice(0, -1)
         .reverse()
         .find((msg) => msg.role === "assistant");
 
-      // Check if we're in the middle of ticket creation process
       const getContentAsString2 = (content) => {
         if (typeof content === 'string') {
           return content;
@@ -1304,7 +1340,6 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
             "Would you like to proceed with creating a support ticket?"
           ))
       ) {
-        // User is providing ticket details - use comprehensive flow
         const ticketResponse = await handleTicketCreationFlow(
           message,
           chat,
@@ -1313,14 +1348,12 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
         let assistantMessage;
         if (typeof ticketResponse === 'object' && ticketResponse.type === 'document_upload_modal') {
-      // Handle special modal response
           assistantMessage = {
             sender: "bot",
             content: ticketResponse,
             timestamp: new Date(),
           };
         } else {
-          // Handle regular text response
           assistantMessage = {
             sender: "bot",
             content: ticketResponse,
@@ -1349,7 +1382,6 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
         return res.json(chat);
       } else {
-        // Initial ticket request - start comprehensive flow
         const aiResponse = `I understand you need assistance! I can help you raise a support ticket.
 
 To create your ticket, I'll need:
@@ -1387,6 +1419,48 @@ Please provide a brief title for your issue (e.g., "Unable to complete payment",
 
         return res.json(chat);
       }
+    } else if (queryType === "FAQ") {
+      const faqResult = searchFAQs(processedMessage);
+      let faqResponse;
+      if (processedMessage.toLowerCase().includes("view all faqs")) {
+        faqResponse = `**Frequently Asked Questions**\n\n${faqData
+          .map(
+            (faqItem, index) =>
+              `${index + 1}. **${faqItem.Question}** (${faqItem["Category "] || "General"})\n${faqItem.Answer}\n`
+          )
+          .join("\n")}\n\nAnything else you'd like to know about our services or your investments?`;
+      } else if (faqResult) {
+        faqResponse = `**${faqResult.question}**\n${faqResult.answer}\n\nAnything else you'd like to know about our services or your investments?`;
+      } else {
+        faqResponse = `I couldn't find an exact match for your question in our FAQs. Here are some common topics:\n- What is a Mutual Fund?\n- How does a Mutual Fund work?\n\nPlease ask a more specific question or type "view all FAQs" to see the full list.`;
+      }
+
+      const faqAssistantMessage = {
+        sender: "bot",
+        content: faqResponse,
+        timestamp: new Date(),
+      };
+
+      chat.messages.push(faqAssistantMessage);
+      chat.updatedAt = new Date();
+
+      if (chat._id) {
+        await chatsCollection.updateOne(
+          { _id: chat._id },
+          {
+            $set: {
+              messages: chat.messages,
+              updatedAt: chat.updatedAt,
+            },
+            $inc: { __v: 1 },
+          }
+        );
+      } else {
+        const result = await chatsCollection.insertOne(chat);
+        chat._id = result.insertedId;
+      }
+
+      return res.json(chat);
     } else {
       let userDataString = `
 Customer: ${userData.customer?.name || "Unknown"} (ID: ${
@@ -1431,7 +1505,7 @@ ${
       systemPrompt = `
 **System Prompt for Financial Advisor AI Assistant**
 
-You are a specialized financial advisor AI assistant powered by Grok 3, built by xAI. Provide DIRECT, COMPACT (under 170 words), and ACTIONABLE responses, leveraging user data from the getUserData function and adhering to the following rules.
+You are a specialized financial advisor AI assistant powered by Grok 3, built by xAI. Provide DIRECT, COMPACT (under 170 words), and ACTIONABLE responses, leveraging user data from the getUserData function and adhering to the following rules. Before giving answers to any general questions, search the FAQs.
 
 **CRITICAL RESPONSE RULES:**
 - Answer ONLY the user's question without additional unsolicited information.
@@ -1440,7 +1514,6 @@ You are a specialized financial advisor AI assistant powered by Grok 3, built by
 - Keep responses concise but complete, avoiding fluff.
 - Show complete calculations with clear methodology when applicable.
 - Include professional disclaimers in the specified format.
-- Ask one strategic follow-up question related to the user's portfolio or financial goals.
 - Do not use tables in responses; use bullet points or plain text for data presentation.
 
 **AUTHORIZATION SCOPE:**
@@ -1522,6 +1595,12 @@ Order Details Count: ${userData.orderDetails?.length || 0}`
         "No mutual funds invested"
       }
 
+**FAQ DATA ACCESS:**
+- You have access to a set of Frequently Asked Questions (FAQs) stored in faqData.
+- For queries classified as "FAQ", directly return the relevant FAQ answer if a match is found.
+- If no exact match is found, suggest relevant FAQ topics or prompt the user to view all FAQs.
+- Example FAQ: "What is a Mutual Fund?" -> "A mutual fund is an investment option that pools money from multiple investors to invest in diversified assets like stocks, bonds, or other securities. The returns generated are distributed among investors in proportion to their investments, represented in the form of units."
+
 **ENTITY MAPPING:**
 - sbi: State Bank of India
 - apple: Apple Inc.
@@ -1600,7 +1679,6 @@ Current: ₹[Amount]
 2. Data (if applicable): Relevant figures from getUserData or assumptions with clear notation.
 3. Calculation (not on every answer wherever is asked or needed): Step-by-step breakdown of calculations, showing precise methodology.
 4. Disclaimer (if relevant): Brief risk warnings, e.g., "Historical returns do not guarantee future results" or "Mutual fund investments are subject to market risks."
-5. Follow-up: One strategic question related to the user's portfolio.
 
 **QUALITY CONTROL CHECKLIST:**
 Before sending any response, verify:
@@ -1609,7 +1687,6 @@ Before sending any response, verify:
 - Data sourced from getUserData or clearly stated assumptions.
 - Professional formatting with clear structure.
 - Appropriate disclaimers included.
-- One strategic follow-up question asked.
 
 **ERROR PREVENTION:**
 - Never use "approximately," "around," or "roughly" - provide exact figures.
@@ -1629,8 +1706,8 @@ Before sending any response, verify:
 For non-financial queries, provide clear redirection to appropriate sources.
 
 *NON-FINANCIAL QUERIES:*
-•⁠  ⁠If the query does not contain financial-related terms (e.g., "mutual fund," "stock," "portfolio," "investment," "order," "folio," "bank," "return," "NAV"), respond: "This query is outside my financial advisory scope. Please provide a finance-related question."
-•⁠  ⁠Do not attempt to answer non-financial queries under any circumstances
+• If the query does not contain financial-related terms (e.g., "mutual fund," "stock," "portfolio," "investment," "order," "folio," "bank," "return," "NAV"), respond: "This query is outside my financial advisory scope. Please provide a finance-related question."
+• Do not attempt to answer non-financial queries under any circumstances
 `;
 
       const completion = await openai.chat.completions.create({
@@ -1651,7 +1728,8 @@ For non-financial queries, provide clear redirection to appropriate sources.
       if (
         aiResponse.length < 100 &&
         queryType !== "GREETING" &&
-        queryType !== "NON-FINANCIAL"
+        queryType !== "NON-FINANCIAL" &&
+        queryType !== "FAQ"
       ) {
         aiResponse +=
           "\n\nAnything else you’d like to explore about your finances or investments?";
