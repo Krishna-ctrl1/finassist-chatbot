@@ -17,7 +17,6 @@ dotenv.config({ path: path.join(__dirname, "../.env") });
 
 const app = express();
 
-// Load FAQ data
 let faqData = [];
 try {
   const faqFilePath = path.join(__dirname, "../data/faq.json");
@@ -69,6 +68,8 @@ async function initMongoDB() {
     try {
       await db.collection("chats").createIndex({ userId: 1, updatedAt: -1 });
       console.log("Chat collection indexes created");
+      await db.collection("sips").createIndex({ customer_id: 1, updated_at: -1 });
+      console.log("SIPs collection indexes created");
     } catch (indexError) {
       console.log("Index may already exist:", indexError.message);
     }
@@ -219,6 +220,7 @@ async function getUserData(customerId) {
       investmentPerformance,
       investmentReturns,
       orders,
+      sips,
     ] = await Promise.all([
       db
         .collection("customer")
@@ -273,6 +275,14 @@ async function getUserData(customerId) {
           console.error("Error fetching orders:", err);
           return [];
         }),
+      db
+        .collection("sips")
+        .find({ customer_id: numericCustomerId })
+        .toArray()
+        .catch((err) => {
+          console.error("Error fetching SIPs:", err);
+          return [];
+        }),
     ]);
 
     let orderDetails = [];
@@ -298,6 +308,7 @@ async function getUserData(customerId) {
       ...new Set([
         ...(folios || []).map((f) => f?.mf_id),
         ...(investmentReturns || []).map((r) => r?.mf_id),
+        ...(sips || []).map((s) => s?.mf_id),
       ]),
     ].filter((id) => id);
 
@@ -320,6 +331,7 @@ async function getUserData(customerId) {
       customerName: customer?.name,
       ordersCount: orders?.length || 0,
       foliosCount: folios?.length || 0,
+      sipsCount: sips?.length || 0,
       orderDetailsCount: orderDetails?.length || 0,
     });
 
@@ -344,6 +356,7 @@ async function getUserData(customerId) {
       orders: orders || [],
       orderDetails: orderDetails || [],
       mutualFunds: mutualFunds || [],
+      sips: sips || [],
     };
   } catch (error) {
     console.error("Error fetching user data:", error);
@@ -358,6 +371,7 @@ async function getUserData(customerId) {
       orders: [],
       orderDetails: [],
       mutualFunds: [],
+      sips: [],
     };
   }
 }
@@ -394,6 +408,23 @@ function stripHashtags(response) {
   return response.replace(/#[^\s]+/g, "");
 }
 
+// FAQ endpoint
+app.get("/api/faqs", (req, res) => {
+  try {
+    res.json({
+      success: true,
+      data: faqData,
+    });
+  } catch (error) {
+    console.error("Error fetching FAQs:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch FAQs",
+      error: error.message,
+    });
+  }
+});
+
 // Function to classify the query with conversation context
 async function classifyQueryWithAI(message, conversationHistory = []) {
   try {
@@ -410,15 +441,17 @@ async function classifyQueryWithAI(message, conversationHistory = []) {
 Your task is to classify the following user query into exactly ONE of these categories:
 
 1. "GREETING" - Simple greetings like "hi", "hello", "hey", "thanks", "thank you"
-2. "USER-SPECIFIC-FINANCIAL" - Questions about the user's EXISTING personal financial data like "my portfolio", "my orders", "my balance", "show my portfolio", "check my orders", "view my holdings"
+2. "USER-SPECIFIC-FINANCIAL" - Questions about the user's EXISTING personal financial data like "my portfolio", "my orders", "my balance", "show my portfolio", "check my orders", "view my holdings", "my sips", "check my sip"
 3. "GENERAL-FINANCIAL" - Any finance-related questions including:
    - Financial planning
    - Financial education
    - Tax implications
    - Market analysis
+   - Mutual fund searches (e.g., "find a mutual fund with 5% Nvidia", "mutual funds with tech exposure")
 4. "NON-FINANCIAL" - Questions completely unrelated to finance
 5. "AFFIRMATIVE_RESPONSE" - Simple responses like "yes", "ok", "sure", "please", "yes please" that are answering a previous question
 6. "TICKET_REQUEST" - Phrases indicating a need to raise a ticket or report an issue, e.g., "I want to raise a ticket", "I am having issue", "need support", or descriptions of issues like "my order fails"
+7. "FAQ" - Questions that match or are similar to questions in the FAQ dataset, e.g., "What is a mutual fund?", "How do mutual funds work?"
 
 User query: "${message}"${contextInfo}
 
@@ -442,6 +475,7 @@ Respond with ONLY the category name. Do not include any explanation.`;
       "NON-FINANCIAL",
       "AFFIRMATIVE_RESPONSE",
       "TICKET_REQUEST",
+      "FAQ",
     ];
     if (!validCategories.includes(classification)) {
       console.warn(
@@ -484,12 +518,26 @@ function fallbackClassifyQuery(message) {
     "mutual fund",
     "tax",
     "investment",
+    "sip",
+    "my sips",
+    "check my sip",
+  ];
+
+  const faqKeywords = [
+    "what is a mutual fund",
+    "how does a mutual fund work",
+    "mutual fund faq",
+    "faq",
+    "frequently asked questions",
   ];
 
   const hasFinancialKeyword = financialKeywords.some((keyword) =>
     lowerMessage.includes(keyword)
   );
-  const hasUserSpecific = lowerMessage.includes("my ");
+  const hasUserSpecific = lowerMessage.includes("my ") || lowerMessage.includes("check my sip");
+  const hasFAQKeyword = faqKeywords.some((keyword) =>
+    lowerMessage.includes(keyword)
+  );
 
   if (
     lowerMessage.includes("raise a ticket") ||
@@ -501,6 +549,10 @@ function fallbackClassifyQuery(message) {
     return "TICKET_REQUEST";
   }
 
+  if (hasFAQKeyword) {
+    return "FAQ";
+  }
+
   if (!hasFinancialKeyword) {
     return "NON-FINANCIAL";
   }
@@ -508,9 +560,24 @@ function fallbackClassifyQuery(message) {
   return hasUserSpecific ? "USER-SPECIFIC-FINANCIAL" : "GENERAL-FINANCIAL";
 }
 
-// =============================================================================
-// COMPREHENSIVE TICKET MANAGEMENT FUNCTIONS (from server.js)
-// =============================================================================
+// Function to search FAQs for a matching question
+function searchFAQs(query) {
+  const lowerQuery = query.toLowerCase().trim();
+  const matchedFAQ = faqData.find((faq) =>
+    faq.Question.toLowerCase().includes(lowerQuery) ||
+    lowerQuery.includes(faq.Question.toLowerCase()) ||
+    lowerQuery.includes("faq") ||
+    lowerQuery.includes("frequently asked questions")
+  );
+
+  return matchedFAQ
+    ? {
+        question: matchedFAQ.Question,
+        answer: matchedFAQ.Answer,
+        category: matchedFAQ["Category "] || "General",
+      }
+    : null;
+}
 
 // Function to handle ticket creation flow
 async function handleTicketCreationFlow(message, chat, customerId) {
@@ -905,7 +972,6 @@ async function createTicket(ticketData) {
       throw mongoError; // Re-throw the error since we only have MongoDB now
     }
 
-
     console.log(`Ticket created successfully: ${ticketId} (MongoDB)`);
     return { ticket_id: ticketId, ...payload };
   } catch (error) {
@@ -981,7 +1047,6 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       if (typeof content === 'string') {
         processedContent = content;
       } else if (typeof content === 'object' && content !== null) {
-        // If content is an object, stringify it or extract meaningful text
         if (content.type === 'document_upload_modal' && content.content) {
           processedContent = content.content;
         } else {
@@ -1001,10 +1066,11 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
     switch (queryType) {
       case "GREETING":
       case "NON-FINANCIAL":
+      case "FAQ":
         maxTokens = 250;
         break;
       case "USER-SPECIFIC-FINANCIAL":
-        maxTokens = processedMessage.includes("details") ? 1000 : 800;
+        maxTokens = processedMessage.includes("details") || processedMessage.includes("sip") ? 1000 : 800;
         break;
       case "GENERAL-FINANCIAL":
         maxTokens = processedMessage.includes("analysis") ? 1200 : 900;
@@ -1026,7 +1092,9 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
     userData = await getUserData(customerId);
     console.log(
       "User data fetched. Orders found:",
-      userData.orders?.length || 0
+      userData.orders?.length || 0,
+      "SIPs found:",
+      userData.sips?.length || 0
     );
     console.log("=== END USER DATA FETCH ===");
 
@@ -1042,10 +1110,10 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       const aiResponse = previousGreeting
         ? `Hey ${
             userData.customer?.name || "friend"
-          }, great to catch up again! Ready to dive into your finances or got something new on your mind?`
+          }, great to catch up again! Ready to dive into your finances, SIPs, or got something new on your mind?`
         : `Hi ${
             userData.customer?.name || "there"
-          }! I’m your go-to financial buddy—excited to help with your money matters. What’s up?`;
+          }! I’m your go-to financial buddy—excited to help with your money matters or SIPs. What’s up?`;
 
       const assistantMessage = {
         sender: "bot",
@@ -1074,13 +1142,11 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
       return res.json(chat);
     } else if (queryType === "AFFIRMATIVE_RESPONSE") {
-      // Check if we're in an active workflow before handling generic affirmative responses
       const lastBotMessage = conversationContext
         .slice(0, -1)
         .reverse()
         .find((msg) => msg.role === "assistant");
 
-      // Check if we're in ticket workflow
       const getContentAsString = (content) => {
         if (typeof content === 'string') {
           return content;
@@ -1103,7 +1169,6 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
          lastBotMessageContent.includes("Step 4 of 4") ||
          lastBotMessageContent.includes("Would you like to proceed with creating a support ticket?"));
 
-      // If in ticket workflow, process through ticket handler
       if (isInTicketWorkflow) {
         console.log('Affirmative response in ticket workflow, processing through ticket handler');
         const ticketResponse = await handleTicketCreationFlow(
@@ -1140,14 +1205,12 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
         return res.json(chat);
       }
 
-      // Only handle generic affirmative responses if NOT in any workflow
       let contextualResponse = "Got it! Let's dive deeper. ";
 
       if (lastBotMessage) {
         const lastBotMessageContentStr = getContentAsString(lastBotMessage.content);
         const lowerLastBotMessage = lastBotMessageContentStr.toLowerCase();
 
-        // Handle historical performance follow-up
         if (
           lowerLastBotMessage.includes("historical performance") ||
           lowerLastBotMessage.includes("performance analysis")
@@ -1169,9 +1232,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
           } else {
             contextualResponse = `No historical performance data found.\nWould you like to explore current holdings or investment options?`;
           }
-        }
-        // Handle diversification follow-up
-        else if (
+        } else if (
           lowerLastBotMessage.includes("diversification") ||
           lowerLastBotMessage.includes("diversify")
         ) {
@@ -1204,9 +1265,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
                 }or FDs for better diversification.\n`
               : `Your portfolio is well-diversified.\n`;
           contextualResponse += `**Disclaimer**: Diversification reduces risk but consult an advisor for tailored advice.\nWant fund recommendations?`;
-        }
-        // Handle cancelled/paused orders
-        else if (lowerLastBotMessage.includes("cancelled/paused orders")) {
+        } else if (lowerLastBotMessage.includes("cancelled/paused orders")) {
           const cancelledOrPausedOrders = userData.orders.filter(
             (order) =>
               order.payment_status.toLowerCase() === "cancelled" ||
@@ -1228,9 +1287,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
           } else {
             contextualResponse += `No cancelled or paused orders.\nExplore active investments?`;
           }
-        }
-        // Handle portfolio/orders follow-up
-        else if (
+        } else if (
           lowerLastBotMessage.includes("portfolio") ||
           lowerLastBotMessage.includes("orders")
         ) {
@@ -1252,12 +1309,37 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
                 }.\nDig into a specific order?`
               : `No orders yet.\nExplore investment options?`;
         }
+        // Handle SIPs follow-up
+        else if (
+          lowerLastBotMessage.includes("sip") ||
+          lowerLastBotMessage.includes("sips")
+        ) {
+          if (userData.sips?.length > 0) {
+            contextualResponse += `Your active SIPs:\n`;
+            userData.sips.slice(0, 3).forEach((sip) => {
+              const fund =
+                userData.mutualFunds.find((f) => f.id === sip.mf_id) || {};
+              contextualResponse += `- SIP ID: ${
+                sip.sip_id
+              }, Fund: ${fund.name || sip.mf_id || "Unknown"}, ₹${parseFloat(
+                sip.amount
+              ).toLocaleString("en-IN")} (${
+                sip.frequency
+              }, Started: ${new Date(sip.start_date).toLocaleDateString(
+                "en-IN"
+              )})\n`;
+            });
+            contextualResponse += `Want more details on a specific SIP?`;
+          } else {
+            contextualResponse += `No active SIPs found.\nInterested in starting a new SIP?`;
+          }
+        }
         // Generic fallback
         else {
-          contextualResponse += `What's next—portfolio details, investment ideas, or tax planning?`;
+          contextualResponse += `What's next—portfolio details, SIPs, investment ideas, or tax planning?`;
         }
       } else {
-        contextualResponse += `What's next—portfolio details, investment ideas, or tax planning?`;
+        contextualResponse += `What's next—portfolio details, SIPs, investment ideas, or tax planning?`;
       }
 
       const assistantMessage = {
@@ -1284,13 +1366,11 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
       return res.json(chat);
     } else if (queryType === "TICKET_REQUEST") {
-      // Handle ticket-related queries using the comprehensive flow
       const lastBotMessage = conversationContext
         .slice(0, -1)
         .reverse()
         .find((msg) => msg.role === "assistant");
 
-      // Check if we're in the middle of ticket creation process
       const getContentAsString2 = (content) => {
         if (typeof content === 'string') {
           return content;
@@ -1316,7 +1396,6 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
             "Would you like to proceed with creating a support ticket?"
           ))
       ) {
-        // User is providing ticket details - use comprehensive flow
         const ticketResponse = await handleTicketCreationFlow(
           message,
           chat,
@@ -1325,14 +1404,12 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
         let assistantMessage;
         if (typeof ticketResponse === 'object' && ticketResponse.type === 'document_upload_modal') {
-      // Handle special modal response
           assistantMessage = {
             sender: "bot",
             content: ticketResponse,
             timestamp: new Date(),
           };
         } else {
-          // Handle regular text response
           assistantMessage = {
             sender: "bot",
             content: ticketResponse,
@@ -1361,7 +1438,6 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
         return res.json(chat);
       } else {
-        // Initial ticket request - start comprehensive flow
         const aiResponse = `I understand you need assistance! I can help you raise a support ticket.
 
 To create your ticket, I'll need:
@@ -1400,7 +1476,6 @@ Please provide a brief title for your issue (e.g., "Unable to complete payment",
         return res.json(chat);
       }
     } else {
-      // Format FAQ data for inclusion in the prompt
       const faqContent = faqData
         .map(
           (faq) =>
@@ -1437,6 +1512,23 @@ ${
         .join("\n")
     : "No folios available yet."
 }
+SIPs: ${userData.sips?.length || 0} SIPs
+${
+  userData.sips?.length > 0
+    ? userData.sips
+        .map(
+          (sip) =>
+            `- SIP ID: ${sip.sip_id}, Fund ID: ${sip.mf_id}, Amount: ₹${parseFloat(
+              sip.amount
+            ).toLocaleString("en-IN")}, Frequency: ${sip.frequency}, Status: ${
+              sip.status
+            }, Start Date: ${new Date(sip.start_date).toLocaleDateString(
+              "en-IN"
+            )}${sip.end_date ? `, End Date: ${new Date(sip.end_date).toLocaleDateString("en-IN")}` : ""}`
+        )
+        .join("\n")
+    : "No SIPs available yet."
+}
 Mutual Funds: ${userData.mutualFunds?.length || 0} funds
 ${
   userData.mutualFunds?.length > 0
@@ -1459,8 +1551,10 @@ You are a specialized financial advisor AI assistant powered by Grok 3, built by
 - Keep responses concise but complete, avoiding fluff.
 - Show complete calculations with clear methodology when applicable.
 - Include professional disclaimers in the specified format.
-- Ask one strategic follow-up question related to the user's portfolio or financial goals.
+- Ask one strategic follow-up question related to the user's portfolio, SIPs, or financial goals.
 - Do not use tables in responses; use bullet points or plain text for data presentation.
+- Don't ask any follow up questions.
+
 
 **FAQ DATA:**
 Below is the FAQ data to reference for general financial queries:
@@ -1471,6 +1565,7 @@ You are authorized to discuss:
 - Portfolio analysis and performance (including historical estimates).
 - Investment holdings and allocations.
 - Order history and transaction details.
+- Systematic Investment Plans (SIPs) details and performance.
 - Mutual fund information and performance.
 - Stock prices and market data (using available data or assumptions with disclaimers).
 - Financial planning recommendations.
@@ -1482,6 +1577,7 @@ You are authorized to discuss:
 - Market analysis and trends.
 - Investment product recommendations and onboarding.
 - Historical performance analysis and projections.
+- Mutual fund searches (e.g., finding funds with specific holdings like "5% Nvidia").
 
 **USER DATA ACCESS (from getUserData function):**
 - Customer Name: ${userData.customer?.name || "Unknown"}
@@ -1490,6 +1586,7 @@ You are authorized to discuss:
 - Email: ${userData.customer?.email || "unknown@email.com"}
 - Total Orders: ${userData.orders?.length || 0}
 - Total Folios: ${userData.folios?.length || 0}
+- Total SIPs: ${userData.sips?.length || 0}
 - Bank Accounts: ${userData.bankAccounts?.length || 0}
 - UPI Accounts: ${userData.upiAccounts?.length || 0}
 - Cards: ${userData.cards?.length || 0}
@@ -1512,6 +1609,26 @@ Order Details Count: ${userData.orderDetails?.length || 0}`
     : "The user currently has no orders in the system."
 }
 
+**CRITICAL SIP INFORMATION:**
+${
+  userData.sips && userData.sips.length > 0
+    ? `The user has ${userData.sips.length} SIP(s). Details:
+${userData.sips
+  .map(
+    (sip) => `- SIP ID: ${sip.sip_id}
+  - Fund ID: ${sip.mf_id}
+  - Amount: ₹${sip.amount}
+  - Frequency: ${sip.frequency}
+  - Status: ${sip.status}
+  - Start Date: ${new Date(sip.start_date).toLocaleDateString("en-IN")}
+  - End Date: ${sip.end_date ? new Date(sip.end_date).toLocaleDateString("en-IN") : "Ongoing"}
+  - Folio Number: ${sip.folio_number}
+`
+  )
+  .join("")}`
+    : "The user currently has no SIPs in the system."
+}
+
 **Detailed Financial Data (from getUserData):**
 - Customer Detail: ${
         userData.customerDetail
@@ -1520,6 +1637,9 @@ Order Details Count: ${userData.orderDetails?.length || 0}`
       }
 - Folios: ${userData.folios?.length || 0} folios (${
         JSON.stringify(userData.folios) || "No folios"
+      })
+- SIPs: ${userData.sips?.length || 0} SIPs (${
+        JSON.stringify(userData.sips) || "No SIPs"
       })
 - Performance Summary: ${
         userData.performanceSummary
@@ -1544,6 +1664,12 @@ Order Details Count: ${userData.orderDetails?.length || 0}`
         JSON.stringify(userData.mutualFundsInvested) ||
         "No mutual funds invested"
       }
+
+**FAQ DATA ACCESS:**
+- You have access to a set of Frequently Asked Questions (FAQs) stored in faqData.
+- For queries classified as "FAQ", directly return the relevant FAQ answer if a match is found.
+- If no exact match is found, answer like you answer to a general financial question.
+- Example FAQ: "What is a Mutual Fund?" -> "A mutual fund is an investment option that pools money from multiple investors to invest in diversified assets like stocks, bonds, or other securities. The returns generated are distributed among investors in proportion to their investments, represented in the form of units."
 
 **ENTITY MAPPING:**
 - sbi: State Bank of India
@@ -1585,15 +1711,16 @@ Expense Ratio: [X]%
 2. [Company] - [X]%
 [List top 5 holdings if available]
 
-**Historical Calculations:**
-For "What if I invested X years ago" questions:
-STEP 1: Initial Investment = ₹[Amount]
+**SIP Calculations (when requested):**
+For "What if I continued my SIP for X years" or similar questions:
+STEP 1: Monthly Investment = ₹[Amount]
 STEP 2: Time Period = [Years] years
-STEP 3: Assumed CAGR = [X]% (based on user data or historical averages)
-STEP 4: Final Value = ₹[Amount] × (1 + 0.[X])^[Years]
-STEP 5: Final Value = ₹[Exact calculated amount]
-STEP 6: Total Gain = ₹[Final Value] - ₹[Initial Investment] = ₹[Gain]
-STEP 7: Total Return = [Percentage]%
+STEP 3: Assumed Annual Return = [X]% (based on user data or historical averages)
+STEP 4: Number of Investments = [Years] × [12 for Monthly, 4 for Quarterly]
+STEP 5: Future Value = ₹[Amount] × ((1 + [X]/100/12)^[Number of Investments] - 1) / ([X]/100/12)
+STEP 6: Total Invested = ₹[Amount] × [Number of Investments]
+STEP 7: Total Gain = ₹[Future Value] - ₹[Total Invested]
+STEP 8: Total Return = [Percentage]%
 
 **RESPONSE FORMATTING STANDARDS:**
 
@@ -1611,11 +1738,23 @@ Year 2: ₹[Amount]
 [Continue for each year]
 Current: ₹[Amount]
 
+**SIP Details (when requested):**
+**SIP Details for [SIP ID]**
+SIP ID: [SIP ID]
+Fund: [Fund Name or MF ID]
+Amount: ₹[Amount] per [Frequency]
+Start Date: [Date]
+End Date: [Date or Ongoing]
+Status: [Status]
+Folio Number: [Folio Number]
+Total Invested: ₹[Calculated Total]
+**Disclaimer**: SIP returns are subject to market risks. Past performance does not guarantee future results.
+
 **Professional Disclaimers:**
 - Data based on user records or assumptions - Market prices change constantly.
 - Historical returns: Past performance doesn't guarantee future results.
 - Calculations based on [specific methodology/assumptions].
-- Mutual fund investments are subject to market risks. Read all scheme-related documents carefully.
+- Mutual fund investments and SIPs are subject to market risks. Read all scheme-related documents carefully.
 - For investments above ₹1 lakh, consider consulting a certified financial advisor.
 
 **RESPONSE STRUCTURE:**
@@ -1623,7 +1762,6 @@ Current: ₹[Amount]
 2. Data (if applicable): Relevant figures from getUserData or assumptions with clear notation.
 3. Calculation (not on every answer wherever is asked or needed): Step-by-step breakdown of calculations, showing precise methodology.
 4. Disclaimer (if relevant): Brief risk warnings, e.g., "Historical returns do not guarantee future results" or "Mutual fund investments are subject to market risks."
-5. Follow-up: One strategic question related to the user's portfolio.
 
 **QUALITY CONTROL CHECKLIST:**
 Before sending any response, verify:
@@ -1632,7 +1770,6 @@ Before sending any response, verify:
 - Data sourced from getUserData or clearly stated assumptions.
 - Professional formatting with clear structure.
 - Appropriate disclaimers included.
-- One strategic follow-up question asked.
 
 **ERROR PREVENTION:**
 - Never use "approximately," "around," or "roughly" - provide exact figures.
@@ -1652,7 +1789,7 @@ Before sending any response, verify:
 For non-financial queries, provide clear redirection to appropriate sources.
 
 *NON-FINANCIAL QUERIES:*
-•⁠  ⁠If the query does not contain financial-related terms (e.g., "mutual fund," "stock," "portfolio," "investment," "order," "folio," "bank," "return," "NAV"), respond: "This query is outside my financial advisory scope. Please provide a finance-related question."
+•⁠  ⁠If the query does not contain financial-related terms (e.g., "mutual fund," "stock," "portfolio," "investment," "order," "folio," "bank," "return," "NAV", "sip"), respond: "This query is outside my financial advisory scope. Please provide a finance-related question."
 •⁠  ⁠Do not attempt to answer non-financial queries under any circumstances
 `;
 
@@ -1674,10 +1811,10 @@ For non-financial queries, provide clear redirection to appropriate sources.
       if (
         aiResponse.length < 100 &&
         queryType !== "GREETING" &&
-        queryType !== "NON-FINANCIAL"
+        queryType !== "NON-FINANCIAL" 
       ) {
         aiResponse +=
-          "\n\nAnything else you’d like to explore about your finances or investments?";
+          "\n\nAnything else you’d like to explore about your finances, SIPs, or investments?";
       }
 
       const assistantMessage = {
@@ -1765,27 +1902,44 @@ app.get("/api/dashboard/data", authenticateToken, async (req, res) => {
       assets: [],
     };
 
-    // Calculate from orders data
+    // Calculate from orders and SIPs data
+    let totalInvested = 0;
     if (userData.orders && userData.orders.length > 0) {
-      const totalInvested = userData.orders
+      totalInvested += userData.orders
         .filter(
           (order) =>
             order.payment_status === "Paid" ||
             order.payment_status === "completed"
         )
         .reduce((sum, order) => sum + (parseFloat(order.amount) || 0), 0);
+    }
+    if (userData.sips && userData.sips.length > 0) {
+      totalInvested += userData.sips
+        .filter((sip) => sip.status === "Active")
+        .reduce((sum, sip) => {
+          const months = sip.frequency === "Monthly" ? 12 : 4;
+          const duration = Math.max(
+            1,
+            Math.floor(
+              (new Date() - new Date(sip.start_date)) / (1000 * 60 * 60 * 24 * 30)
+            )
+          );
+          return sum + (parseFloat(sip.amount) || 0) * duration;
+        }, 0);
+    }
 
-      portfolioData.totalInvested = totalInvested;
-      portfolioData.totalValue = totalInvested * 1.125; // Assuming 12.5% returns
-      portfolioData.totalReturns =
-        portfolioData.totalValue - portfolioData.totalInvested;
-      portfolioData.returnPercentage =
-        totalInvested > 0
-          ? (portfolioData.totalReturns / totalInvested) * 100
-          : 0;
+    portfolioData.totalInvested = totalInvested;
+    portfolioData.totalValue = totalInvested * 1.125; // Assuming 12.5% returns
+    portfolioData.totalReturns =
+      portfolioData.totalValue - portfolioData.totalInvested;
+    portfolioData.returnPercentage =
+      totalInvested > 0
+        ? (portfolioData.totalReturns / totalInvested) * 100
+        : 0;
 
-      // Group by investment type
-      const assetGroups = {};
+    // Group by investment type
+    const assetGroups = {};
+    if (userData.orders) {
       userData.orders.forEach((order) => {
         const type = order.investment_type || "General";
         if (!assetGroups[type]) {
@@ -1798,14 +1952,30 @@ app.get("/api/dashboard/data", authenticateToken, async (req, res) => {
           assetGroups[type] += parseFloat(order.amount) || 0;
         }
       });
-
-      portfolioData.assets = Object.entries(assetGroups).map(
-        ([name, value]) => ({
-          name,
-          value: value * 1.125,
-        })
-      );
     }
+    if (userData.sips) {
+      userData.sips.forEach((sip) => {
+        const type = "SIP";
+        if (!assetGroups[type]) {
+          assetGroups[type] = 0;
+        }
+        if (sip.status === "Active") {
+          const months = sip.frequency === "Monthly" ? 12 : 4;
+          const duration = Math.max(
+            1,
+            Math.floor(
+              (new Date() - new Date(sip.start_date)) / (1000 * 60 * 60 * 24 * 30)
+            )
+          );
+          assetGroups[type] += (parseFloat(sip.amount) || 0) * duration;
+        }
+      });
+    }
+
+    portfolioData.assets = Object.entries(assetGroups).map(([name, value]) => ({
+      name,
+      value: value * 1.125,
+    }));
 
     // Transactions
     const transactions = [];
@@ -1823,6 +1993,17 @@ app.get("/api/dashboard/data", authenticateToken, async (req, res) => {
           amount: parseFloat(order.amount) || 0,
           date: order.created_at || order.date || new Date(),
           status: order.payment_status || "pending",
+          isCredit: false,
+        });
+      });
+    }
+    if (userData.sips && userData.sips.length > 0) {
+      userData.sips.slice(0, 5).forEach((sip) => {
+        transactions.push({
+          type: `SIP - ${sip.sip_id}`,
+          amount: parseFloat(sip.amount) || 0,
+          date: sip.start_date,
+          status: sip.status,
           isCredit: false,
         });
       });
@@ -1875,6 +2056,7 @@ app.get("/api/dashboard/data", authenticateToken, async (req, res) => {
       summary: {
         ordersCount: userData.orders?.length || 0,
         foliosCount: userData.folios?.length || 0,
+        sipsCount: userData.sips?.length || 0,
         totalInvestments: portfolioData.totalValue,
       },
     };
