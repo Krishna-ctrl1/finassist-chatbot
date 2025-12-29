@@ -17,6 +17,8 @@ dotenv.config({ path: path.join(__dirname, "../.env") });
 
 const app = express();
 
+
+
 let faqData = [];
 try {
   const faqFilePath = path.join(__dirname, "../data/faq.json");
@@ -27,14 +29,115 @@ try {
   faqData = [];
 }
 
-// Configuration
-const MONGO_URI = process.env.MONGO_URI;
-const JWT_SECRET = process.env.JWT_SECRET;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY; 
 const openai = new OpenAI({
   apiKey: OPENAI_API_KEY,
 });
+
+// ==========================================
+// START: RAG & EMBEDDING LOGIC (ADD THIS)
+// ==========================================
+
+let faqEmbeddings = [];
+
+// Helper: Calculate Cosine Similarity
+function cosineSimilarity(vecA, vecB) {
+  let dotProduct = 0.0;
+  let normA = 0.0;
+  let normB = 0.0;
+  for (let i = 0; i < vecA.length; i++) {
+    dotProduct += vecA[i] * vecB[i];
+    normA += vecA[i] * vecA[i];
+    normB += vecB[i] * vecB[i];
+  }
+  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+// 1. Generate Embeddings on Server Startup
+async function generateFAQEmbeddings() {
+  // Check if API key exists
+  if (!process.env.OPENAI_API_KEY) {
+    console.log("⚠️  Skipping Embeddings: No OPENAI_API_KEY found.");
+    return;
+  }
+  
+  // Check if FAQ data exists
+  if (!faqData || faqData.length === 0) {
+    console.log("⚠️  Skipping Embeddings: No FAQ data loaded.");
+    return;
+  }
+
+  console.log("🔄 Generating Embeddings for FAQs... This may take a moment.");
+  
+  // Prepare input text: Combined Category + Question + Answer
+  const inputs = faqData.map(item => 
+    `Category: ${item["Category "] || item.Category || 'General'}. Question: ${item.Question}. Answer: ${item.Answer}`
+  );
+
+  try {
+    const batchSize = 20; // OpenAI batch limit
+    for (let i = 0; i < inputs.length; i += batchSize) {
+      const batch = inputs.slice(i, i + batchSize);
+      const response = await openai.embeddings.create({
+        model: "text-embedding-3-small", // Fast & efficient model
+        input: batch,
+      });
+
+      response.data.forEach((embeddingObj, index) => {
+        const originalIndex = i + index;
+        faqEmbeddings.push({
+          index: originalIndex,
+          embedding: embeddingObj.embedding,
+          content: faqData[originalIndex]
+        });
+      });
+      console.log(`   Embedded ${Math.min(i + batchSize, inputs.length)}/${inputs.length} FAQs`);
+    }
+    console.log("✅ FAQ Embeddings generated successfully!");
+  } catch (error) {
+    console.error("❌ Error generating embeddings:", error.message);
+  }
+}
+
+// Start the embedding process immediately
+generateFAQEmbeddings();
+
+// 2. Retrieval Function (Finds relevant FAQs)
+async function retrieveRelevantFAQs(query, topK = 3) {
+  if (faqEmbeddings.length === 0) return [];
+
+  try {
+    // Embed the user's query
+    const response = await openai.embeddings.create({
+      model: "text-embedding-3-small",
+      input: query,
+    });
+    const queryEmbedding = response.data[0].embedding;
+
+    // Calculate similarity scores
+    const scoredFAQs = faqEmbeddings.map(item => ({
+      ...item,
+      score: cosineSimilarity(queryEmbedding, item.embedding)
+    }));
+
+    // Filter by relevance threshold (0.3) and get top K
+    return scoredFAQs
+      .filter(item => item.score > 0.3) 
+      .sort((a, b) => b.score - a.score)
+      .slice(0, topK)
+      .map(item => item.content);
+  } catch (error) {
+    console.error("Error retrieving FAQs:", error);
+    return [];
+  }
+}
+// ==========================================
+// END: RAG LOGIC
+// ==========================================
+
+// Configuration
+const MONGO_URI = process.env.MONGO_URI;
+const JWT_SECRET = process.env.JWT_SECRET;
 
 // Initialize Google Cloud Text-to-Speech client
 const ttsClient = new textToSpeech.TextToSpeechClient();
@@ -980,6 +1083,19 @@ async function createTicket(ticketData) {
   }
 }
 
+// RAG Test Route
+app.get("/api/test-rag", async (req, res) => {
+  const { query } = req.query;
+  if (!query) return res.status(400).json({ error: "Query parameter required" });
+  
+  try {
+    const results = await retrieveRelevantFAQs(query, 5);
+    res.json({ query, results });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Chat Route
 app.post("/api/chat", authenticateToken, async (req, res) => {
   try {
@@ -1476,12 +1592,15 @@ Please provide a brief title for your issue (e.g., "Unable to complete payment",
         return res.json(chat);
       }
     } else {
-      const faqContent = faqData
-        .map(
-          (faq) =>
-            `Q${faq["s.no"]}: ${faq.Question}\nA: ${faq.Answer}\nCategory: ${faq["Category "]}\n`
-        )
-        .join("\n");
+      // 1. Retrieve ONLY relevant FAQs (Top 4) using the new RAG function
+      const relevantFAQs = await retrieveRelevantFAQs(processedMessage, 4);
+      console.log("🔹 RAG Retrieved", relevantFAQs.length, "relevant FAQs for query:", processedMessage);
+      
+      // 2. Format them for the AI Prompt
+      const ragContent = relevantFAQs.length > 0 
+        ? relevantFAQs.map(faq => `Q: ${faq.Question}\nA: ${faq.Answer}`).join("\n\n")
+        : "No specific FAQ matched. Answer based on general financial knowledge.";
+
       let userDataString = `
 Customer: ${userData.customer?.name || "Unknown"} (ID: ${
         userData.customer?.id || "Unknown"
@@ -1555,9 +1674,9 @@ You are a specialized financial advisor AI assistant powered by Grok 3, built by
 - Don't ask any follow up questions.
 
 
-**FAQ DATA:**
-Below is the FAQ data to reference for general financial queries:
-${faqContent}
+**RELEVANT KNOWLEDGE BASE (RAG Context):**
+The following FAQs are most relevant to the user's current query. Use this information as the PRIMARY source if it answers the question.
+${ragContent}
 
 **AUTHORIZATION SCOPE:**
 You are authorized to discuss:
@@ -1788,8 +1907,8 @@ Before sending any response, verify:
 For non-financial queries, provide clear redirection to appropriate sources.
 
 *NON-FINANCIAL QUERIES:*
-•⁠  ⁠If the query does not contain financial-related terms (e.g., "mutual fund," "stock," "portfolio," "investment," "order," "folio," "bank," "return," "NAV", "sip"), respond: "This query is outside my financial advisory scope. Please provide a finance-related question."
-•⁠  ⁠Do not attempt to answer non-financial queries under any circumstances
+•⁠  ⁠If the query does not contain financial-related terms (e.g., "mutual fund," "stock," "portfolio," "investment," "order," "folio," "bank," "return," "NAV", "sip"), respond: "This query is outside my financial advisory scope. Please provide a finance-related question."
+•⁠  ⁠Do not attempt to answer non-financial queries under any circumstances
 `;
 
       const completion = await openai.chat.completions.create({
