@@ -2,7 +2,7 @@
 console.log('🚀 JavaScript file is loading...');
 window.WARP_JS_LOADED = true;
 
-const API_BASE = "http://localhost:3000/api";
+const API_BASE = "http://localhost:5000/api";
 const THEME_KEY = 'theme-preference';
 let authToken = null; // Don't use localStorage initially
 let currentUser = null;

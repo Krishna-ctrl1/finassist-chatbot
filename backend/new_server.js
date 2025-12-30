@@ -12,6 +12,8 @@ const multer = require("multer");
 const OpenAI = require("openai");
 const textToSpeech = require("@google-cloud/text-to-speech");
 const fs = require("fs");
+const { Client } = require("@modelcontextprotocol/sdk/client/index.js");
+const { SSEClientTransport } = require("@modelcontextprotocol/sdk/client/sse.js");
 
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
@@ -34,6 +36,35 @@ const openai = new OpenAI({
   apiKey: OPENAI_API_KEY,
 });
 
+let mcpClient = null;
+let mcpTools = [];
+
+async function connectToMCPServer() {
+    try {
+        // This URL must match where your Python server runs (default 3000)
+        const transport = new SSEClientTransport(new URL("http://localhost:3000/sse"));
+        mcpClient = new Client({ name: "FinAssist-App", version: "1.0" }, { capabilities: { tools: {} } });
+
+        await mcpClient.connect(transport);
+        const result = await mcpClient.listTools();
+
+        // Format tools for OpenAI
+        mcpTools = result.tools.map(tool => ({
+            type: "function",
+            function: {
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.inputSchema
+            }
+        }));
+        console.log(`✅ Connected to Stock/MF MCP Server. Loaded ${mcpTools.length} tools.`);
+    } catch (error) {
+        console.error("❌ Failed to connect to Python MCP Server:", error.message);
+    }
+}
+
+// Call this on server start
+connectToMCPServer();
 // ==========================================
 // START: RAG & EMBEDDING LOGIC (ADD THIS)
 // ==========================================
@@ -193,7 +224,7 @@ app.use("/api/auth", authLimiter);
 // Middleware
 app.use(
   cors({
-    origin: ["http://localhost:3000", "http://127.0.0.1:5500"],
+    origin: ["http://localhost:5000", "http://127.0.0.1:5500"],
     methods: ["GET", "POST", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
@@ -1911,18 +1942,81 @@ For non-financial queries, provide clear redirection to appropriate sources.
 •⁠  ⁠Do not attempt to answer non-financial queries under any circumstances
 `;
 
-      const completion = await openai.chat.completions.create({
-        model: "gpt-4.1",
-        messages: [
+      // --- START OF UPDATED LOGIC ---
+      
+      // 1. Prepare the full message history
+      const requestMessages = [
           { role: "system", content: systemPrompt },
           ...conversationMessages,
           { role: "user", content: processedMessage },
-        ],
+      ];
+
+      // 2. Call OpenAI with MCP Tools enabled
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4.1", // Ensure this model supports tool calling (e.g., gpt-4-turbo)
+        messages: requestMessages,
         max_tokens: maxTokens,
         temperature: 0.65,
+        tools: mcpTools.length > 0 ? mcpTools : undefined, // Inject the tools we loaded globally
+        tool_choice: "auto",
       });
 
       let aiResponse = completion.choices[0].message.content;
+      const toolCalls = completion.choices[0].message.tool_calls;
+
+      // 3. Handle Tool Execution (If AI wants to check Stocks/MFs)
+      if (toolCalls) {
+        console.log(`🤖 AI requested ${toolCalls.length} tool(s)`);
+        
+        // Add the assistant's "intent" to call a tool to the history
+        requestMessages.push(completion.choices[0].message);
+
+        for (const toolCall of toolCalls) {
+          const toolName = toolCall.function.name;
+          const toolArgs = JSON.parse(toolCall.function.arguments);
+          
+          console.log(`🔨 Executing MCP Tool: ${toolName}`);
+          
+          let toolResultContent;
+          try {
+            // Execute the tool via your Python MCP Server
+            // Ensure mcpClient is defined globally as per previous steps
+            const result = await mcpClient.callTool({
+              name: toolName,
+              arguments: toolArgs
+            });
+            
+            // Extract the text content from the MCP result
+            toolResultContent = Array.isArray(result.content) 
+              ? result.content.map(c => c.text).join("\n") 
+              : JSON.stringify(result.content);
+              
+          } catch (error) {
+            console.error(`❌ Tool execution failed: ${error.message}`);
+            toolResultContent = `Error: Failed to fetch data for ${toolName}.`;
+          }
+
+          // Add the tool's result back to the conversation history
+          requestMessages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            name: toolName,
+            content: toolResultContent
+          });
+        }
+
+        // 4. Get Final Answer (AI reads the tool results and generates the response)
+        const secondResponse = await openai.chat.completions.create({
+          model: "gpt-4.1",
+          messages: requestMessages,
+          max_tokens: maxTokens,
+          temperature: 0.65,
+        });
+
+        aiResponse = secondResponse.choices[0].message.content;
+      }
+      
+      // --- END OF UPDATED LOGIC ---
 
       aiResponse = stripHashtags(aiResponse);
 
@@ -2660,7 +2754,7 @@ const localIP = Object.values(networkInterfaces)
   .flat()
   .find((iface) => iface.family === "IPv4" && !iface.internal).address;
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on:`);
   console.log(`→ Local: http://localhost:${PORT}`);

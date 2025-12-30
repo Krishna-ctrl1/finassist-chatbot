@@ -1,0 +1,7 @@
+fastmcp
+yfinance
+mftool
+python-dotenv
+pandas
+matplotlib
+deprecated
