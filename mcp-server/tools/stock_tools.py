@@ -25,6 +25,7 @@ def register_stock_tools(mcp):
             # Smart symbol resolution
             resolved_symbol, resolution_message = await symbol_resolver.smart_resolve(symbol, context="indian")
             
+            currency = "{currency}" if resolved_symbol.upper().endswith(".NS") or resolved_symbol.upper().endswith(".BO") else "$"
             if not resolved_symbol:
                 return f"🔍 **Symbol Resolution Failed for '{symbol}'**\n\n{resolution_message}"
             
@@ -37,24 +38,25 @@ def register_stock_tools(mcp):
             quote = await stock_service.get_stock_quote(resolved_symbol)
             
             # Format the response nicely
-            change_symbol = "📈" if quote.change >= 0 else "📉"
+            currency = "{currency}" if quote.symbol.upper().endswith(".NS") or quote.symbol.upper().endswith(".BO") else "$"
+                change_symbol = "📈" if quote.change >= 0 else "📉"
             change_sign = "+" if quote.change >= 0 else ""
             
             result = f"""{resolution_info}📊 **{quote.symbol} Stock Quote**
 
-**Price:** ₹{quote.price:.2f} {change_symbol}
+**Price:** {currency}{quote.price:.2f} {change_symbol}
 **Change:** {change_sign}{quote.change:.2f} ({change_sign}{quote.change_percent:.2f}%)
 **Volume:** {quote.volume:,}"""
             
             if quote.market_cap:
                 if quote.market_cap >= 1e12:
-                    market_cap_str = f"₹{quote.market_cap/1e12:.2f}T"
+                    market_cap_str = f"{currency}{quote.market_cap/1e12:.2f}T"
                 elif quote.market_cap >= 1e9:
-                    market_cap_str = f"₹{quote.market_cap/1e9:.2f}B"
+                    market_cap_str = f"{currency}{quote.market_cap/1e9:.2f}B"
                 elif quote.market_cap >= 1e7:
-                    market_cap_str = f"₹{quote.market_cap/1e7:.2f}Cr"
+                    market_cap_str = f"{currency}{quote.market_cap/1e7:.2f}Cr"
                 else:
-                    market_cap_str = f"₹{quote.market_cap:,.0f}"
+                    market_cap_str = f"{currency}{quote.market_cap:,.0f}"
                 result += f"\n**Market Cap:** {market_cap_str}"
             
             return result
@@ -78,6 +80,7 @@ def register_stock_tools(mcp):
             # Smart symbol resolution
             resolved_symbol, resolution_message = await symbol_resolver.smart_resolve(symbol, context="indian")
             
+            currency = "{currency}" if resolved_symbol.upper().endswith(".NS") or resolved_symbol.upper().endswith(".BO") else "$"
             if not resolved_symbol:
                 return f"🔍 **Symbol Resolution Failed for '{symbol}'**\n\n{resolution_message}"
             
@@ -107,9 +110,9 @@ def register_stock_tools(mcp):
 **Total Records:** {history['total_records']} days
 
 **Price Summary:**
-• **Current:** ₹{latest:.2f}
-• **High:** ₹{highest:.2f}
-• **Low:** ₹{lowest:.2f}
+• **Current:** {currency}{latest:.2f}
+• **High:** {currency}{highest:.2f}
+• **Low:** {currency}{lowest:.2f}
 • **Total Return:** {total_return:+.2f}%
 
 **Sample Recent Data:**"""
@@ -120,7 +123,7 @@ def register_stock_tools(mcp):
                 date_str = record.get('Date', 'N/A')
                 if hasattr(date_str, 'strftime'):
                     date_str = date_str.strftime('%Y-%m-%d')
-                result += f"\n• {date_str}: Open ₹{record['Open']:.2f}, Close ₹{record['Close']:.2f}, Vol {int(record.get('Volume', 0)):,}"
+                result += f"\n• {date_str}: Open {currency}{record['Open']:.2f}, Close {currency}{record['Close']:.2f}, Vol {int(record.get('Volume', 0)):,}"
             
             return result
             
@@ -142,6 +145,7 @@ def register_stock_tools(mcp):
             # Smart symbol resolution
             resolved_symbol, resolution_message = await symbol_resolver.smart_resolve(symbol, context="indian")
             
+            currency = "{currency}" if resolved_symbol.upper().endswith(".NS") or resolved_symbol.upper().endswith(".BO") else "$"
             if not resolved_symbol:
                 return f"🔍 **Symbol Resolution Failed for '{symbol}'**\n\n{resolution_message}"
             
@@ -165,13 +169,13 @@ def register_stock_tools(mcp):
             if info.get('market_cap'):
                 market_cap = info['market_cap']
                 if market_cap >= 1e12:
-                    market_cap_str = f"₹{market_cap/1e12:.2f}T"
+                    market_cap_str = f"{currency}{market_cap/1e12:.2f}T"
                 elif market_cap >= 1e9:
-                    market_cap_str = f"₹{market_cap/1e9:.2f}B"
+                    market_cap_str = f"{currency}{market_cap/1e9:.2f}B"
                 elif market_cap >= 1e7:
-                    market_cap_str = f"₹{market_cap/1e7:.2f}Cr"
+                    market_cap_str = f"{currency}{market_cap/1e7:.2f}Cr"
                 else:
-                    market_cap_str = f"₹{market_cap:,.0f}"
+                    market_cap_str = f"{currency}{market_cap:,.0f}"
                 result += f"\n• **Market Cap:** {market_cap_str}"
 
             result += "\n\n**Financial Metrics:**"
@@ -185,7 +189,7 @@ def register_stock_tools(mcp):
             if info.get('price_to_book'):
                 result += f"\n• **P/B Ratio:** {info['price_to_book']:.2f}"
             if info.get('eps'):
-                result += f"\n• **EPS:** ₹{info['eps']:.2f}"
+                result += f"\n• **EPS:** {currency}{info['eps']:.2f}"
             if info.get('beta'):
                 result += f"\n• **Beta:** {info['beta']:.2f}"
             if info.get('dividend_yield'):
@@ -193,8 +197,8 @@ def register_stock_tools(mcp):
 
             result += "\n\n**Price Range (52-week):**"
             if info.get('fifty_two_week_high') and info.get('fifty_two_week_low'):
-                result += f"\n• **High:** ₹{info['fifty_two_week_high']:.2f}"
-                result += f"\n• **Low:** ₹{info['fifty_two_week_low']:.2f}"
+                result += f"\n• **High:** {currency}{info['fifty_two_week_high']:.2f}"
+                result += f"\n• **Low:** {currency}{info['fifty_two_week_low']:.2f}"
 
             if info.get('average_volume'):
                 result += f"\n\n**Average Volume:** {info['average_volume']:,}"
@@ -246,22 +250,23 @@ def register_stock_tools(mcp):
             result = f"{resolution_info}📊 **Multiple Stock Quotes ({len(quotes)} stocks)**\n\n"
             
             for quote in quotes:
+                currency = "{currency}" if quote.symbol.upper().endswith(".NS") or quote.symbol.upper().endswith(".BO") else "$"
                 change_symbol = "📈" if quote.change >= 0 else "📉"
                 change_sign = "+" if quote.change >= 0 else ""
                 
                 result += f"**{quote.symbol}**\n"
-                result += f"• Price: ₹{quote.price:.2f} {change_symbol} {change_sign}{quote.change:.2f} ({change_sign}{quote.change_percent:.2f}%)\n"
+                result += f"• Price: {currency}{quote.price:.2f} {change_symbol} {change_sign}{quote.change:.2f} ({change_sign}{quote.change_percent:.2f}%)\n"
                 result += f"• Volume: {quote.volume:,}\n"
                 
                 if quote.market_cap:
                     if quote.market_cap >= 1e12:
-                        market_cap_str = f"₹{quote.market_cap/1e12:.2f}T"
+                        market_cap_str = f"{currency}{quote.market_cap/1e12:.2f}T"
                     elif quote.market_cap >= 1e9:
-                        market_cap_str = f"₹{quote.market_cap/1e9:.2f}B"
+                        market_cap_str = f"{currency}{quote.market_cap/1e9:.2f}B"
                     elif quote.market_cap >= 1e7:
-                        market_cap_str = f"₹{quote.market_cap/1e7:.2f}Cr"
+                        market_cap_str = f"{currency}{quote.market_cap/1e7:.2f}Cr"
                     else:
-                        market_cap_str = f"₹{quote.market_cap:,.0f}"
+                        market_cap_str = f"{currency}{quote.market_cap:,.0f}"
                     result += f"• Market Cap: {market_cap_str}\n"
                 
                 result += "\n"
@@ -332,6 +337,7 @@ def register_stock_tools(mcp):
         try:
             stock_service = StockService()
             dividends = await stock_service.get_stock_dividends(symbol)
+            currency = "{currency}" if symbol.upper().endswith(".NS") or symbol.upper().endswith(".BO") else "$"
             
             if not dividends or len(dividends) == 0:
                 return f"💰 No dividend history found for {symbol.upper()}"
@@ -344,18 +350,18 @@ def register_stock_tools(mcp):
             total_recent = sum(div['amount'] for div in recent_dividends)
             
             result += f"**Recent Dividend Summary (last {len(recent_dividends)} payments):**\n"
-            result += f"• **Total Amount:** ₹{total_recent:.2f}\n"
-            result += f"• **Average per Payment:** ₹{total_recent/len(recent_dividends):.2f}\n\n"
+            result += f"• **Total Amount:** {currency}{total_recent:.2f}\n"
+            result += f"• **Average per Payment:** {currency}{total_recent/len(recent_dividends):.2f}\n\n"
             
             result += "**Recent Dividend Payments:**\n"
             for div in recent_dividends:
-                result += f"• **{div['date']}:** ₹{div['amount']:.2f}\n"
+                result += f"• **{div['date']}:** {currency}{div['amount']:.2f}\n"
             
             # Show yearly summary if we have enough data
             if len(dividends) > 5:
                 result += "\n**Yearly Summary (approx):**\n"
                 yearly_total = sum(div['amount'] for div in dividends[-12:]) if len(dividends) >= 12 else total_recent
-                result += f"• **Annual Dividend (estimated):** ₹{yearly_total:.2f}\n"
+                result += f"• **Annual Dividend (estimated):** {currency}{yearly_total:.2f}\n"
             
             return result
             
@@ -433,11 +439,12 @@ def register_stock_tools(mcp):
         try:
             stock_service = StockService()
             fast_info = await stock_service.get_stock_fast_info(symbol)
+            currency = "{currency}" if symbol.upper().endswith(".NS") or symbol.upper().endswith(".BO") else "$"
             
             result = f"⚡ **Quick Info for {symbol.upper()}**\n\n"
             
             if fast_info.get('last_price'):
-                result += f"**Current Price:** ₹{fast_info['last_price']:.2f}\n"
+                result += f"**Current Price:** {currency}{fast_info['last_price']:.2f}\n"
             
             if fast_info.get('previous_close'):
                 change = fast_info['last_price'] - fast_info['previous_close']
@@ -447,24 +454,24 @@ def register_stock_tools(mcp):
                 result += f"**Change:** {change_sign}{change:.2f} ({change_sign}{change_percent:.2f}%) {change_symbol}\n"
             
             if fast_info.get('open'):
-                result += f"**Open:** ₹{fast_info['open']:.2f}\n"
+                result += f"**Open:** {currency}{fast_info['open']:.2f}\n"
             
             if fast_info.get('day_high') and fast_info.get('day_low'):
-                result += f"**Day Range:** ₹{fast_info['day_low']:.2f} - ₹{fast_info['day_high']:.2f}\n"
+                result += f"**Day Range:** {currency}{fast_info['day_low']:.2f} - {currency}{fast_info['day_high']:.2f}\n"
             
             if fast_info.get('year_high') and fast_info.get('year_low'):
-                result += f"**52W Range:** ₹{fast_info['year_low']:.2f} - ₹{fast_info['year_high']:.2f}\n"
+                result += f"**52W Range:** {currency}{fast_info['year_low']:.2f} - {currency}{fast_info['year_high']:.2f}\n"
             
             if fast_info.get('market_cap'):
                 market_cap = fast_info['market_cap']
                 if market_cap >= 1e12:
-                    market_cap_str = f"₹{market_cap/1e12:.2f}T"
+                    market_cap_str = f"{currency}{market_cap/1e12:.2f}T"
                 elif market_cap >= 1e9:
-                    market_cap_str = f"₹{market_cap/1e9:.2f}B"
+                    market_cap_str = f"{currency}{market_cap/1e9:.2f}B"
                 elif market_cap >= 1e7:
-                    market_cap_str = f"₹{market_cap/1e7:.2f}Cr"
+                    market_cap_str = f"{currency}{market_cap/1e7:.2f}Cr"
                 else:
-                    market_cap_str = f"₹{market_cap:,.0f}"
+                    market_cap_str = f"{currency}{market_cap:,.0f}"
                 result += f"**Market Cap:** {market_cap_str}\n"
             
             if fast_info.get('shares'):
@@ -495,6 +502,7 @@ def register_stock_tools(mcp):
         try:
             stock_service = StockService()
             income_stmt = await stock_service.get_income_statement(symbol)
+            currency = "{currency}" if symbol.upper().endswith(".NS") or symbol.upper().endswith(".BO") else "$"
             
             if not income_stmt:
                 return f"📊 No income statement data found for {symbol.upper()}"
@@ -526,17 +534,17 @@ def register_stock_tools(mcp):
                     value = income_stmt.get(period, {}).get(metric_key)
                     if value is not None:
                         if 'EPS' in metric_name:
-                            row_data.append(f"₹{value:.2f}")
+                            row_data.append(f"{currency}{value:.2f}")
                         else:
                             # Convert to millions/crores for readability
                             if abs(value) >= 1e9:
-                                row_data.append(f"₹{value/1e9:.1f}B")
+                                row_data.append(f"{currency}{value/1e9:.1f}B")
                             elif abs(value) >= 1e7:
-                                row_data.append(f"₹{value/1e7:.1f}Cr")
+                                row_data.append(f"{currency}{value/1e7:.1f}Cr")
                             elif abs(value) >= 1e6:
-                                row_data.append(f"₹{value/1e6:.1f}M")
+                                row_data.append(f"{currency}{value/1e6:.1f}M")
                             else:
-                                row_data.append(f"₹{value:,.0f}")
+                                row_data.append(f"{currency}{value:,.0f}")
                     else:
                         row_data.append("N/A")
                 
@@ -580,6 +588,7 @@ def register_stock_tools(mcp):
         try:
             stock_service = StockService()
             balance_sheet = await stock_service.get_balance_sheet(symbol)
+            currency = "{currency}" if symbol.upper().endswith(".NS") or symbol.upper().endswith(".BO") else "$"
             
             if not balance_sheet:
                 return f"📊 No balance sheet data found for {symbol.upper()}"
@@ -613,13 +622,13 @@ def register_stock_tools(mcp):
                     if value is not None:
                         # Convert to millions/crores for readability
                         if abs(value) >= 1e9:
-                            row_data.append(f"₹{value/1e9:.1f}B")
+                            row_data.append(f"{currency}{value/1e9:.1f}B")
                         elif abs(value) >= 1e7:
-                            row_data.append(f"₹{value/1e7:.1f}Cr")
+                            row_data.append(f"{currency}{value/1e7:.1f}Cr")
                         elif abs(value) >= 1e6:
-                            row_data.append(f"₹{value/1e6:.1f}M")
+                            row_data.append(f"{currency}{value/1e6:.1f}M")
                         else:
-                            row_data.append(f"₹{value:,.0f}")
+                            row_data.append(f"{currency}{value:,.0f}")
                     else:
                         row_data.append("N/A")
                 
@@ -672,6 +681,7 @@ def register_stock_tools(mcp):
         try:
             stock_service = StockService()
             cashflow = await stock_service.get_cashflow_statement(symbol)
+            currency = "{currency}" if symbol.upper().endswith(".NS") or symbol.upper().endswith(".BO") else "$"
             
             if not cashflow:
                 return f"📊 No cash flow data found for {symbol.upper()}"
@@ -704,13 +714,13 @@ def register_stock_tools(mcp):
                     if value is not None:
                         # Convert to millions/crores for readability
                         if abs(value) >= 1e9:
-                            row_data.append(f"₹{value/1e9:.1f}B")
+                            row_data.append(f"{currency}{value/1e9:.1f}B")
                         elif abs(value) >= 1e7:
-                            row_data.append(f"₹{value/1e7:.1f}Cr")
+                            row_data.append(f"{currency}{value/1e7:.1f}Cr")
                         elif abs(value) >= 1e6:
-                            row_data.append(f"₹{value/1e6:.1f}M")
+                            row_data.append(f"{currency}{value/1e6:.1f}M")
                         else:
-                            row_data.append(f"₹{value:,.0f}")
+                            row_data.append(f"{currency}{value:,.0f}")
                     else:
                         row_data.append("N/A")
                 
@@ -732,7 +742,7 @@ def register_stock_tools(mcp):
                     result += f"• **Operating Cash Flow:** Strong cash generation\n" if operating_cf > 0 else f"• **Operating Cash Flow:** Negative cash from operations\n"
                 
                 if free_cf and operating_cf:
-                    result += f"• **Free Cash Flow:** {'Positive' if free_cf > 0 else 'Negative'} (₹{abs(free_cf)/1e7:.1f}Cr)\n"
+                    result += f"• **Free Cash Flow:** {'Positive' if free_cf > 0 else 'Negative'} ({currency}{abs(free_cf)/1e7:.1f}Cr)\n"
                 
                 if capex and operating_cf and capex != 0:
                     capex_ratio = abs(capex) / operating_cf * 100 if operating_cf > 0 else 0
@@ -757,6 +767,7 @@ def register_stock_tools(mcp):
         try:
             stock_service = StockService()
             earnings = await stock_service.get_earnings_data(symbol)
+            currency = "{currency}" if symbol.upper().endswith(".NS") or symbol.upper().endswith(".BO") else "$"
             
             if not earnings:
                 return f"📈 No earnings data found for {symbol.upper()}"
@@ -779,21 +790,21 @@ def register_stock_tools(mcp):
                     # Format values
                     if earnings_val != 'N/A' and earnings_val is not None:
                         if abs(earnings_val) >= 1e9:
-                            earnings_str = f"₹{earnings_val/1e9:.2f}B"
+                            earnings_str = f"{currency}{earnings_val/1e9:.2f}B"
                         elif abs(earnings_val) >= 1e7:
-                            earnings_str = f"₹{earnings_val/1e7:.2f}Cr"
+                            earnings_str = f"{currency}{earnings_val/1e7:.2f}Cr"
                         else:
-                            earnings_str = f"₹{earnings_val/1e6:.1f}M"
+                            earnings_str = f"{currency}{earnings_val/1e6:.1f}M"
                     else:
                         earnings_str = "N/A"
                     
                     if revenue_val != 'N/A' and revenue_val is not None:
                         if abs(revenue_val) >= 1e9:
-                            revenue_str = f"₹{revenue_val/1e9:.2f}B"
+                            revenue_str = f"{currency}{revenue_val/1e9:.2f}B"
                         elif abs(revenue_val) >= 1e7:
-                            revenue_str = f"₹{revenue_val/1e7:.2f}Cr"
+                            revenue_str = f"{currency}{revenue_val/1e7:.2f}Cr"
                         else:
-                            revenue_str = f"₹{revenue_val/1e6:.1f}M"
+                            revenue_str = f"{currency}{revenue_val/1e6:.1f}M"
                     else:
                         revenue_str = "N/A"
                     
@@ -815,21 +826,21 @@ def register_stock_tools(mcp):
                     # Format values
                     if earnings_val != 'N/A' and earnings_val is not None:
                         if abs(earnings_val) >= 1e9:
-                            earnings_str = f"₹{earnings_val/1e9:.2f}B"
+                            earnings_str = f"{currency}{earnings_val/1e9:.2f}B"
                         elif abs(earnings_val) >= 1e7:
-                            earnings_str = f"₹{earnings_val/1e7:.2f}Cr"
+                            earnings_str = f"{currency}{earnings_val/1e7:.2f}Cr"
                         else:
-                            earnings_str = f"₹{earnings_val/1e6:.1f}M"
+                            earnings_str = f"{currency}{earnings_val/1e6:.1f}M"
                     else:
                         earnings_str = "N/A"
                     
                     if revenue_val != 'N/A' and revenue_val is not None:
                         if abs(revenue_val) >= 1e9:
-                            revenue_str = f"₹{revenue_val/1e9:.2f}B"
+                            revenue_str = f"{currency}{revenue_val/1e9:.2f}B"
                         elif abs(revenue_val) >= 1e7:
-                            revenue_str = f"₹{revenue_val/1e7:.2f}Cr"
+                            revenue_str = f"{currency}{revenue_val/1e7:.2f}Cr"
                         else:
-                            revenue_str = f"₹{revenue_val/1e6:.1f}M"
+                            revenue_str = f"{currency}{revenue_val/1e6:.1f}M"
                     else:
                         revenue_str = "N/A"
                     
@@ -895,17 +906,17 @@ def register_stock_tools(mcp):
                 
                 for earning in upcoming[:5]:  # Show next 5
                     date_str = earning['date']
-                    eps_est = f"₹{earning['eps_estimate']:.2f}" if earning.get('eps_estimate') else "N/A"
-                    eps_actual = f"₹{earning['eps_actual']:.2f}" if earning.get('eps_actual') else "TBD"
+                    eps_est = f"{currency}{earning['eps_estimate']:.2f}" if earning.get('eps_estimate') else "N/A"
+                    eps_actual = f"{currency}{earning['eps_actual']:.2f}" if earning.get('eps_actual') else "TBD"
                     revenue_est = earning.get('revenue_estimate', 'N/A')
                     
                     if revenue_est != 'N/A' and revenue_est is not None:
                         if abs(revenue_est) >= 1e9:
-                            revenue_str = f"₹{revenue_est/1e9:.2f}B"
+                            revenue_str = f"{currency}{revenue_est/1e9:.2f}B"
                         elif abs(revenue_est) >= 1e7:
-                            revenue_str = f"₹{revenue_est/1e7:.2f}Cr"
+                            revenue_str = f"{currency}{revenue_est/1e7:.2f}Cr"
                         else:
-                            revenue_str = f"₹{revenue_est/1e6:.1f}M"
+                            revenue_str = f"{currency}{revenue_est/1e6:.1f}M"
                     else:
                         revenue_str = "N/A"
                     
@@ -923,8 +934,8 @@ def register_stock_tools(mcp):
                     eps_est = earning.get('eps_estimate')
                     eps_actual = earning.get('eps_actual')
                     
-                    eps_est_str = f"₹{eps_est:.2f}" if eps_est is not None else "N/A"
-                    eps_actual_str = f"₹{eps_actual:.2f}" if eps_actual is not None else "N/A"
+                    eps_est_str = f"{currency}{eps_est:.2f}" if eps_est is not None else "N/A"
+                    eps_actual_str = f"{currency}{eps_actual:.2f}" if eps_actual is not None else "N/A"
                     
                     # Calculate surprise
                     if eps_est is not None and eps_actual is not None and eps_est != 0:
@@ -945,7 +956,7 @@ def register_stock_tools(mcp):
                 next_earning = upcoming[0]
                 result += f"\n**📌 Next Earnings:** {next_earning['date']}"
                 if next_earning.get('eps_estimate'):
-                    result += f" (Est. EPS: ₹{next_earning['eps_estimate']:.2f})"
+                    result += f" (Est. EPS: {currency}{next_earning['eps_estimate']:.2f})"
             
             return result
             
@@ -1065,7 +1076,7 @@ def register_stock_tools(mcp):
                     stock_service = StockService()
                     quote = await stock_service.get_stock_quote(resolved_symbol)
                     result += f"**Quick Verification:**\n"
-                    result += f"• **Current Price:** ₹{quote.price:.2f}\n"
+                    result += f"• **Current Price:** {currency}{quote.price:.2f}\n"
                     result += f"• **Symbol:** {quote.symbol}\n"
                 except:
                     result += f"**Note:** Symbol resolved but couldn't fetch current price (may be after market hours)\n"

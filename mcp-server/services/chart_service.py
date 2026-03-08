@@ -5,7 +5,50 @@ import pandas as pd
 import yfinance as yf
 import base64
 import io
-from datetime import datetime
+import os
+import finnhub
+from datetime import datetime, timedelta
+
+def get_finnhub_client():
+    api_key = os.environ.get('FINNHUB_API_KEY')
+    return finnhub.Client(api_key=api_key) if api_key else None
+
+def get_hybrid_history(symbol: str, period: str) -> pd.DataFrame:
+    """Fetch historical data using hybrid Finnhub/yfinance approach"""
+    is_indian = symbol.upper().endswith('.NS') or symbol.upper().endswith('.BO')
+    finnhub_client = get_finnhub_client()
+    
+    # Map periods to Finnhub resolutions and timestamps
+    # yfinance periods: "1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"
+    now_int = int(datetime.now().timestamp())
+    days_map = {"1d": 1, "5d": 5, "1mo": 30, "3mo": 90, "6mo": 180, "1y": 365, "2y": 730, "5y": 1825}
+    days = days_map.get(period, 365)
+    start_int = int((datetime.now() - timedelta(days=days)).timestamp())
+    
+    resolution = "D"
+    if days <= 5:
+        resolution = "60"
+    
+    if finnhub_client and not is_indian:
+        try:
+            res = finnhub_client.stock_candles(symbol, resolution, start_int, now_int)
+            if res and res.get('s') == 'ok':
+                df = pd.DataFrame({
+                    'Open': res['o'],
+                    'High': res['h'],
+                    'Low': res['l'],
+                    'Close': res['c'],
+                    'Volume': res['v']
+                }, index=pd.to_datetime(res['t'], unit='s'))
+                df.index.name = 'Date'
+                if not df.empty:
+                    return df
+        except Exception as e:
+            print(f"Finnhub history failed for {symbol}: {e}")
+            
+    # Fallback to yfinance
+    ticker = yf.Ticker(symbol)
+    return ticker.history(period=period)
 
 class ChartService:
     """Service for generating matplotlib stock charts"""
@@ -14,9 +57,9 @@ class ChartService:
     async def create_stock_chart(cls, symbol: str, period: str = "1y") -> str:
         """Create a price chart for a single stock using matplotlib"""
         try:
-            # Fetch stock data
-            ticker = yf.Ticker(symbol)
-            hist = ticker.history(period=period)
+            # Fetch stock data using hybrid approach
+            hist = get_hybrid_history(symbol, period)
+            currency = "₹" if symbol.upper().endswith(".NS") or symbol.upper().endswith(".BO") else "$"
             
             if hist.empty:
                 raise ValueError(f"No data available for {symbol}")
@@ -40,7 +83,7 @@ class ChartService:
             
             # Format price chart
             ax1.set_title(f'{symbol.upper()} Stock Price ({period.upper()})', fontsize=16, fontweight='bold')
-            ax1.set_ylabel('Price (₹)', fontsize=12)
+            ax1.set_ylabel(f'Price ({currency})', fontsize=12)
             ax1.legend(loc='upper left')
             ax1.grid(True, alpha=0.3)
             
@@ -86,11 +129,11 @@ class ChartService:
             
             stock_data = {}
             
-            # Fetch and normalize data for each stock
+            # Fetch and normalize data for each stock using hybrid approach
             for i, symbol in enumerate(symbols):
                 try:
-                    ticker = yf.Ticker(symbol)
-                    hist = ticker.history(period=period)
+                    hist = get_hybrid_history(symbol, period)
+            currency = "₹" if symbol.upper().endswith(".NS") or symbol.upper().endswith(".BO") else "$"
                     
                     if hist.empty:
                         print(f"Warning: No data for {symbol}")
@@ -158,6 +201,63 @@ class ChartService:
             raise ValueError(f"Error creating comparison chart: {str(e)}")
     
     @classmethod
+    async def create_mutual_fund_chart(cls, scheme_code: str, period: str = "1y") -> str:
+        """Create a NAV chart for a mutual fund using mftool"""
+        try:
+            from mftool import Mftool
+            mf = Mftool()
+            data = mf.get_scheme_historical_nav(scheme_code, as_json=False)
+            
+            if not data or 'data' not in data or not data['data']:
+                raise ValueError(f"No historical data available for scheme {scheme_code}")
+            
+            scheme_name = data.get('meta', {}).get('scheme_name', f'Scheme {scheme_code}')
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(data['data'])
+            df['date'] = pd.to_datetime(df['date'], format='%d-%m-%Y')
+            df['nav'] = pd.to_numeric(df['nav'])
+            df.set_index('date', inplace=True)
+            df.sort_index(inplace=True)
+            
+            # Filter by period if needed based on days mapping
+            days_map = {"1mo": 30, "3mo": 90, "6mo": 180, "1y": 365, "3y": 1095, "5y": 1825}
+            days = days_map.get(period, 365)
+            start_date = datetime.now() - timedelta(days=days)
+            df = df[df.index >= start_date]
+            
+            if df.empty:
+                raise ValueError(f"No data available in the requested period {period}")
+                
+            # Setup chart style
+            cls._setup_chart_style()
+            
+            # Create figure
+            fig, ax = plt.subplots(figsize=(12, 6))
+            
+            # Price chart
+            ax.plot(df.index, df['nav'], linewidth=2.5, color='#4ECDC4', label='NAV')
+            ax.fill_between(df.index, df['nav'], alpha=0.3, color='#4ECDC4')
+            
+            # Format chart
+            ax.set_title(f'{scheme_name} ({period.upper()})', fontsize=16, fontweight='bold', pad=20)
+            ax.set_ylabel('NAV (₹)', fontsize=12)
+            ax.legend(loc='upper left')
+            ax.grid(True, alpha=0.3)
+            
+            # Format x-axis dates
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+            ax.xaxis.set_major_locator(mdates.MonthLocator(interval=max(1, days // 150)))
+            
+            plt.tight_layout()
+            
+            # Convert to base64
+            return cls._save_chart_as_base64()
+            
+        except Exception as e:
+            raise ValueError(f"Error creating chart for mutual fund {scheme_code}: {str(e)}")
+
+    @classmethod
     def _setup_chart_style(cls):
         """Setup consistent chart styling"""
         # Use a more widely available style
@@ -197,9 +297,9 @@ class ChartService:
     async def create_candlestick_chart(cls, symbol: str, period: str = "3mo") -> str:
         """Create a candlestick chart for detailed price action analysis"""
         try:
-            # Fetch stock data
-            ticker = yf.Ticker(symbol)
-            hist = ticker.history(period=period)
+            # Fetch stock data using hybrid approach
+            hist = get_hybrid_history(symbol, period)
+            currency = "₹" if symbol.upper().endswith(".NS") or symbol.upper().endswith(".BO") else "$"
             
             if hist.empty:
                 raise ValueError(f"No data available for {symbol}")
@@ -228,7 +328,7 @@ class ChartService:
             # Format chart
             ax.set_title(f'{symbol.upper()} Candlestick Chart ({period.upper()})', 
                         fontsize=16, fontweight='bold')
-            ax.set_ylabel('Price (₹)', fontsize=12)
+            ax.set_ylabel(f'Price ({currency})', fontsize=12)
             ax.set_xlabel('Date', fontsize=12)
             ax.grid(True, alpha=0.3)
             
@@ -250,9 +350,9 @@ class ChartService:
     async def create_volume_analysis_chart(cls, symbol: str, period: str = "6mo") -> str:
         """Create a volume analysis chart with price overlay"""
         try:
-            # Fetch stock data
-            ticker = yf.Ticker(symbol)
-            hist = ticker.history(period=period)
+            # Fetch stock data using hybrid approach
+            hist = get_hybrid_history(symbol, period)
+            currency = "₹" if symbol.upper().endswith(".NS") or symbol.upper().endswith(".BO") else "$"
             
             if hist.empty:
                 raise ValueError(f"No data available for {symbol}")
@@ -271,7 +371,7 @@ class ChartService:
             ax1.plot(hist.index, hist['VWAP'], linewidth=2, color='#A23B72', label='VWAP', alpha=0.8)
             
             ax1.set_title(f'{symbol.upper()} Volume Analysis ({period.upper()})', fontsize=16, fontweight='bold')
-            ax1.set_ylabel('Price (₹)', fontsize=12)
+            ax1.set_ylabel(f'Price ({currency})', fontsize=12)
             ax1.legend()
             ax1.grid(True, alpha=0.3)
             

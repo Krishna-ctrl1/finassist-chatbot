@@ -47,12 +47,13 @@ document.addEventListener("DOMContentLoaded", function () {
     toggleProfileDropdown: typeof toggleProfileDropdown,
     showAccountSettings: typeof showAccountSettings
   });
-  
+
   showAuthScreen();
   initializeTheme();
   checkAuthStatus();
   setupEventListeners();
-  
+  initializeVoiceFunctionality();
+
   // Force attach global functions immediately
   attachGlobalFunctions();
 });
@@ -115,7 +116,7 @@ function setupEventListeners() {
       targetClass: e.target.className,
       targetText: e.target.textContent?.trim(),
     });
-    
+
     // Check if clicked element or its parents have the skip-upload-btn class
     const skipButton = e.target.closest('.skip-upload-btn');
     if (skipButton) {
@@ -125,7 +126,7 @@ function setupEventListeners() {
       skipFileUpload();
       return;
     }
-    
+
     // Check if clicked element or its parents have the create-ticket-btn class
     const createButton = e.target.closest('.create-ticket-btn');
     if (createButton) {
@@ -482,8 +483,8 @@ function showNotification(message, type = "info") {
 
     const iconClass = type === 'success' ? 'fa-check-circle' :
       type === 'error' ? 'fa-exclamation-circle' :
-      type === 'warning' ? 'fa-exclamation-triangle' :
-      'fa-info-circle';
+        type === 'warning' ? 'fa-exclamation-triangle' :
+          'fa-info-circle';
 
     notification.innerHTML = `
       <div class="notification-content">
@@ -803,28 +804,28 @@ function toggleSidebar(event) {
 // Close sidebar and restore body scroll
 function closeSidebar() {
   if (!elements.sidebar) return;
-  
+
   const overlay = document.getElementById('sidebarOverlay');
   const chatScreen = document.getElementById('chatScreen');
-  
+
   // Remove active class from sidebar
   elements.sidebar.classList.remove("active");
-  
+
   // Restore body scroll
   document.body.style.overflow = '';
-  
+
   // Hide overlay
   if (overlay) {
     overlay.classList.remove('active');
     overlay.style.opacity = '0';
     overlay.style.visibility = 'hidden';
   }
-  
+
   // Update chat screen state for mobile
   if (window.innerWidth <= 768 && chatScreen) {
     chatScreen.classList.add('sidebar-collapsed');
   }
-  
+
   // Force remove any lingering overlay classes
   if (overlay) {
     overlay.classList.remove('active');
@@ -833,11 +834,11 @@ function closeSidebar() {
     overlay.style.setProperty('visibility', 'hidden', 'important');
     overlay.style.setProperty('pointer-events', 'none', 'important');
   }
-  
+
   // Ensure body scroll is restored
   document.body.style.removeProperty('overflow');
   document.body.classList.remove('sidebar-open');
-  
+
   console.log('Sidebar closed properly');
 }
 
@@ -1071,7 +1072,16 @@ function appendMessage(sender, message, animate = true, skipScroll = false) {
 
 function formatMessage(message) {
   if (!message) return '';
-  // Basic formatting - convert newlines to <br> and preserve spacing
+  // Enhanced formatting with marked and DOMPurify if available
+  if (window.marked && window.DOMPurify) {
+    try {
+      const html = marked.parse(message);
+      return DOMPurify.sanitize(html);
+    } catch (e) {
+      console.error("Markdown parsing failed", e);
+    }
+  }
+  // Basic formatting fallback
   return sanitizeInput(message)
     .replace(/\n/g, '<br>')
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Bold text
@@ -1178,7 +1188,8 @@ async function sendMessage() {
       body: JSON.stringify({
         chatId: currentChatId,
         title,
-        message
+        message,
+        stream: true // Request streaming
       }),
     });
 
@@ -1193,35 +1204,65 @@ async function sendMessage() {
       throw new Error(`Failed to send message: ${response.status}`);
     }
 
-    const chat = await response.json();
-    console.log("Message sent successfully");
+    console.log("Streaming response started");
 
-    // Update current chat ID
-    currentChatId = chat._id;
+    // Hide typing indicator once stream starts
+    if (elements.typingIndicator) {
+      elements.typingIndicator.style.display = "none";
+    }
 
-    // Add AI response (get the last message that's from assistant or bot)
-    const aiResponses = chat.messages.filter(msg => msg.sender === "assistant" || msg.sender === "bot");
-    const lastAiResponse = aiResponses[aiResponses.length - 1];
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let aiMessageDiv = null;
+    let fullResponse = "";
 
-    if (lastAiResponse) {
-      setTimeout(() => {
-        // Check if the response is a structured object for document upload modal
-        if (typeof lastAiResponse.content === 'object' && lastAiResponse.content.type === 'document_upload_modal') {
-          // Show the modal description as a regular message first
-          const modalConfig = lastAiResponse.content.modalConfig;
-          const displayMessage = `${modalConfig.description}\n\nYou can upload up to ${modalConfig.maxFiles} files (max ${modalConfig.maxFileSize} each).\nSupported formats: ${modalConfig.allowedTypes.join(', ')}`;
-          appendMessage("bot", displayMessage);
-          
-          // Then trigger the file upload interface
-          setTimeout(() => {
-            showFileUploadInterface();
-          }, 500);
-        } else {
-          // Handle regular text messages
-          const messageContent = typeof lastAiResponse.content === 'string' ? lastAiResponse.content : JSON.stringify(lastAiResponse.content);
-          appendMessage("bot", messageContent);
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      const chunkStr = decoder.decode(value, { stream: true });
+      const lines = chunkStr.split("\n");
+
+      for (const line of lines) {
+        if (line.trim().startsWith("data: ")) {
+          const dataStr = line.trim().slice(6);
+          if (dataStr === "[DONE]") continue;
+
+          try {
+            const data = JSON.parse(dataStr);
+            if (data.chatId) {
+              currentChatId = data.chatId; // Update chat ID
+            }
+            if (data.chunk) {
+              if (!aiMessageDiv) {
+                // Initialize empty bot message
+                aiMessageDiv = appendMessage("bot", "", true);
+              }
+              fullResponse += data.chunk;
+              const bubble = aiMessageDiv.querySelector(".message-bubble");
+              if (bubble) {
+                bubble.innerHTML = formatMessage(fullResponse);
+              }
+              scrollToBottom();
+            }
+            if (data.type === "document_upload_modal") {
+              const modalConfig = data.modalConfig;
+              const displayMessage = `${modalConfig.description}\n\nYou can upload up to ${modalConfig.maxFiles} files (max ${modalConfig.maxFileSize} each).\nSupported formats: ${modalConfig.allowedTypes.join(', ')}`;
+              appendMessage("bot", displayMessage);
+              setTimeout(() => {
+                showFileUploadInterface();
+              }, 500);
+            }
+          } catch (e) {
+            console.error("Stream parse error", e, dataStr);
+          }
         }
-      }, 800); // Slightly longer delay for better UX
+      }
+    }
+
+    // Call TTS after streaming finishes if voice is enabled
+    if (fullResponse && window.voiceOutputActive && typeof playTTS === 'function') {
+      playTTS(fullResponse);
     }
 
     // Reload chat history to update sidebar
@@ -1303,13 +1344,13 @@ function startNewChat() {
 // Handle window resize for responsive behavior
 const handleWindowResize = debounce(function () {
   const chatScreen = document.getElementById('chatScreen');
-  
+
   if (window.innerWidth > 768 && elements.sidebar) {
     // Desktop behavior
     elements.sidebar.classList.remove('active');
     elements.sidebar.classList.remove('collapsed');
     document.body.style.overflow = '';
-    
+
     // Hide header elements when sidebar is visible on desktop
     if (chatScreen) chatScreen.classList.remove('sidebar-collapsed');
 
@@ -1338,10 +1379,10 @@ window.addEventListener('resize', handleWindowResize);
 // Add smooth scrolling to messages
 function scrollToBottom(smooth = true) {
   if (!elements.chatMessages) return;
-  
+
   // Use smooth scrolling only when appropriate (not for initial loads or mobile)
   const shouldUseSmooth = smooth && !isMobileDevice() && elements.chatMessages.children.length < 100;
-  
+
   if (elements.chatMessages.scrollTo && shouldUseSmooth) {
     elements.chatMessages.scrollTo({
       top: elements.chatMessages.scrollHeight,
@@ -1355,8 +1396,8 @@ function scrollToBottom(smooth = true) {
 
 // Helper function to detect mobile devices
 function isMobileDevice() {
-  return /iPhone|iPad|iPod|Android|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
-         window.innerWidth <= 768;
+  return /iPhone|iPad|iPod|Android|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+    window.innerWidth <= 768;
 }
 
 // Optimized message rendering for better performance with large chat histories
@@ -1371,7 +1412,7 @@ async function renderMessagesOptimized(messages) {
 
   const isLargeChat = messages.length > 50;
   const isMobile = isMobileDevice();
-  
+
   if (isLargeChat && isMobile) {
     // For large chats on mobile, render in chunks to prevent UI blocking
     await renderMessagesInChunks(messages);
@@ -1387,27 +1428,27 @@ async function renderMessagesOptimized(messages) {
 async function renderMessagesInChunks(messages) {
   const chunkSize = 10; // Render 10 messages at a time
   const chunks = [];
-  
+
   // Split messages into chunks
   for (let i = 0; i < messages.length; i += chunkSize) {
     chunks.push(messages.slice(i, i + chunkSize));
   }
-  
+
   // Render each chunk with a small delay
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
-    
+
     // Render chunk
     chunk.forEach(message => {
       appendMessage(message.sender, message.content, false, true); // no animation, skip scroll
     });
-    
+
     // Show progress for large chats
     if (chunks.length > 5) {
       const progress = Math.round(((i + 1) / chunks.length) * 100);
       console.log(`Rendering messages: ${progress}%`);
     }
-    
+
     // Small delay to prevent UI blocking, except for the last chunk
     if (i < chunks.length - 1) {
       await new Promise(resolve => setTimeout(resolve, 10));
@@ -1734,15 +1775,15 @@ function initializeProgressiveEnhancements() {
     console.error('Application error:', event.error);
     // Only show error notification for critical errors, not minor UI errors
     const errorMessage = event.error?.message || event.message || '';
-    const isUIError = errorMessage.includes('ProfileDropdown') || 
-                     errorMessage.includes('dropdown') ||
-                     errorMessage.includes('Cannot read property') ||
-                     errorMessage.includes('null is not an object') ||
-                     errorMessage.includes('classList') ||
-                     errorMessage.includes('toggle') ||
-                     errorMessage.includes('closest') ||
-                     errorMessage.includes('undefined');
-    
+    const isUIError = errorMessage.includes('ProfileDropdown') ||
+      errorMessage.includes('dropdown') ||
+      errorMessage.includes('Cannot read property') ||
+      errorMessage.includes('null is not an object') ||
+      errorMessage.includes('classList') ||
+      errorMessage.includes('toggle') ||
+      errorMessage.includes('closest') ||
+      errorMessage.includes('undefined');
+
     if (!isUIError) {
       showNotification('Something went wrong. Please refresh the page.', 'error');
     } else {
@@ -1779,7 +1820,7 @@ function updateProfileDropdown(user) {
   if (profileName) profileName.textContent = sanitizeInput(user.name);
   if (profileEmail) profileEmail.textContent = sanitizeInput(user.email || 'user@example.com');
   if (profileAvatar) profileAvatar.textContent = sanitizeInput(user.name.charAt(0).toUpperCase());
-  
+
   // Update landing area profile dropdown
   const landingProfileName = document.getElementById('landingProfileName');
   const landingProfileEmail = document.getElementById('landingProfileEmail');
@@ -1804,13 +1845,13 @@ const ProfileDropdown = {
   // Set up all event listeners
   setupEventListeners() {
     console.log('🔧 Setting up ProfileDropdown event listeners');
-    
+
     // Close dropdown when clicking outside
     document.addEventListener('click', (e) => this.handleOutsideClick(e));
 
     // Set up menu item listeners
     this.setupMenuItemListeners();
-    
+
     console.log('✅ ProfileDropdown event listeners set up successfully');
   },
 
@@ -1821,23 +1862,23 @@ const ProfileDropdown = {
         event.preventDefault();
         event.stopPropagation();
       }
-      
+
       const dropdownId = context === 'chat' ? 'profileDropdown' : 'landingProfileDropdown';
       const userMenuId = context === 'chat' ? 'chatUserMenu' : 'landingUserMenu';
-      
+
       const dropdown = document.getElementById(dropdownId);
       const userMenu = document.getElementById(userMenuId);
-      
+
       if (!dropdown) {
         console.warn(`ProfileDropdown: ${dropdownId} not found`);
         return;
       }
 
       const isActive = dropdown.classList.contains('active');
-      
+
       // Close all dropdowns first
       this.closeAll();
-      
+
       // If it wasn't active, open it
       if (!isActive) {
         dropdown.classList.add('active');
@@ -1857,7 +1898,7 @@ const ProfileDropdown = {
     const landingDropdown = document.getElementById('landingProfileDropdown');
     const chatUserMenu = document.getElementById('chatUserMenu');
     const landingUserMenu = document.getElementById('landingUserMenu');
-    
+
     if (chatDropdown) {
       chatDropdown.classList.remove('active');
     }
@@ -1883,12 +1924,12 @@ const ProfileDropdown = {
     const isClickInsideUserMenu = event.target.closest('.user-menu');
     const isClickInsideDropdown = event.target.closest('.profile-dropdown');
     const isClickInsideMenuItem = event.target.closest('.profile-menu-item');
-    
+
     // Only close if clicked completely outside the dropdown area
     if (!isClickInsideUserMenu && !isClickInsideDropdown) {
       this.closeAll();
     }
-    
+
     // Don't close when clicking menu items (let the item handlers decide)
     if (isClickInsideMenuItem) {
       event.stopPropagation();
@@ -1900,14 +1941,14 @@ const ProfileDropdown = {
     document.addEventListener('click', (e) => {
       const menuItem = e.target.closest('.profile-menu-item');
       if (!menuItem) return;
-      
+
       // Prevent event propagation to avoid closing dropdown immediately
       e.preventDefault();
       e.stopPropagation();
-      
+
       const action = menuItem.getAttribute('data-action');
       console.log(`🔧 Menu item clicked: ${action}`);
-      
+
       switch (action) {
         case 'account-settings':
           this.handleAccountSettings();
@@ -1952,7 +1993,7 @@ const ProfileDropdown = {
 // Function to attach global functions
 function attachGlobalFunctions() {
   console.log('📌 Attaching global functions...');
-  
+
   // Make functions globally available for onclick handlers
   window.switchToSignup = switchToSignup;
   window.switchToLogin = switchToLogin;
@@ -1966,9 +2007,9 @@ function attachGlobalFunctions() {
   window.searchChats = searchChats;
   window.openChatFromLanding = openChatFromLanding;
   window.closeChatToLanding = closeChatToLanding;
-  
+
   // Profile dropdown functions (properly bound)
-  window.toggleProfileDropdown = function(event, context) {
+  window.toggleProfileDropdown = function (event, context) {
     try {
       return ProfileDropdown.toggle(event, context);
     } catch (error) {
@@ -1976,7 +2017,7 @@ function attachGlobalFunctions() {
       return false;
     }
   };
-  window.showAccountSettings = function() {
+  window.showAccountSettings = function () {
     try {
       return ProfileDropdown.handleAccountSettings();
     } catch (error) {
@@ -1984,10 +2025,10 @@ function attachGlobalFunctions() {
       return false;
     }
   };
-  
+
   // Make ProfileDropdown globally accessible
   window.ProfileDropdown = ProfileDropdown;
-  
+
   console.log('✅ Global functions attached:', {
     toggleProfileDropdown: typeof window.toggleProfileDropdown,
     showAccountSettings: typeof window.showAccountSettings,
@@ -2389,11 +2430,11 @@ function removeFile(index) {
 
 async function skipFileUpload() {
   console.log('🎫 skipFileUpload() called!');
-  
+
   // Create ticket without attachments by directly calling the ticket creation API
   const skipButton = document.querySelector('.skip-upload-btn');
   console.log('🎫 Skip button found:', !!skipButton);
-  
+
   if (!elements.chatMessages) {
     showNotification('Unable to find ticket information. Please start over.', 'error');
     return;
@@ -2493,7 +2534,7 @@ async function skipFileUpload() {
     ticketData = {};
 
     showNotification(`Ticket ${result.ticket.ticket_id} created successfully!`, 'success');
-    
+
     // Optional: Reload chat history to show the updated ticket in sidebar (but don't reload the current chat)
     setTimeout(() => {
       loadChatHistory();
@@ -2639,7 +2680,7 @@ Is there anything else I can help you with regarding your investments or account
     ticketData = {};
 
     showNotification(`Ticket ${result.ticket.ticket_id} created successfully!`, 'success');
-    
+
     // Optional: Reload chat history to show the updated ticket in sidebar (but don't reload the current chat)
     setTimeout(() => {
       loadChatHistory();
@@ -2715,7 +2756,7 @@ function showFileUploadInterface() {
       handleFileSelection(e.target);
       updateCreateButton();
     });
-    
+
     // Auto-trigger file upload dialog immediately
     setTimeout(() => {
       fileInput.click();
@@ -2812,14 +2853,14 @@ function initializeSpeechRecognition() {
     console.warn('Speech recognition not supported in this browser');
     return null;
   }
-  
+
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   const recognition = new SpeechRecognition();
-  
+
   recognition.continuous = true;
   recognition.interimResults = true;
   recognition.lang = 'en-US';
-  
+
   return recognition;
 }
 
@@ -2829,7 +2870,7 @@ function initializeSpeechSynthesis() {
     console.warn('Speech synthesis not supported in this browser');
     return null;
   }
-  
+
   return window.speechSynthesis;
 }
 
@@ -2850,30 +2891,30 @@ function speakText(text) {
 
   // Stop any current speech before starting new one
   stopSpeech();
-  
+
   // Clean the text for better speech synthesis
   const cleanText = cleanTextForSpeech(text);
-  
+
   const utterance = new SpeechSynthesisUtterance(cleanText);
-  
+
   // Configure speech settings
   utterance.rate = 0.9; // Slightly slower for better comprehension
   utterance.pitch = 1.0;
   utterance.volume = 0.8;
-  
+
   // Try to use a more natural voice if available
   const voices = speechSynthesis.getVoices();
-  const preferredVoice = voices.find(voice => 
-    voice.name.includes('Google') || 
+  const preferredVoice = voices.find(voice =>
+    voice.name.includes('Google') ||
     voice.name.includes('Natural') ||
     voice.name.includes('Enhanced') ||
     (voice.lang.startsWith('en') && voice.localService === false)
   ) || voices.find(voice => voice.lang.startsWith('en'));
-  
+
   if (preferredVoice) {
     utterance.voice = preferredVoice;
   }
-  
+
   // Event handlers
   utterance.onstart = () => {
     console.log('Speech synthesis started');
@@ -2883,7 +2924,7 @@ function speakText(text) {
       elements.wavesBtn.classList.add('speaking');
     }
   };
-  
+
   utterance.onend = () => {
     console.log('Speech synthesis ended');
     currentUtterance = null;
@@ -2892,7 +2933,7 @@ function speakText(text) {
       elements.wavesBtn.classList.remove('speaking');
     }
   };
-  
+
   utterance.onerror = (event) => {
     console.error('Speech synthesis error:', event.error);
     currentUtterance = null;
@@ -2900,7 +2941,7 @@ function speakText(text) {
       elements.wavesBtn.classList.remove('speaking');
     }
   };
-  
+
   // Speak the text
   speechSynthesis.speak(utterance);
 }
@@ -2929,7 +2970,7 @@ function cleanTextForSpeech(text) {
 // Toggle voice input function
 function toggleVoiceInput() {
   if (!elements.voiceBtn || !elements.sendBtn || !elements.messageInput) return;
-  
+
   if (!isVoiceInputActive) {
     startVoiceInput();
   } else {
@@ -2947,19 +2988,19 @@ function startVoiceInput() {
     }
     setupSpeechRecognitionEvents();
   }
-  
+
   try {
     // Store the original input value before starting
     originalInputValue = elements.messageInput.value;
     currentTranscript = '';
-    
+
     recognition.start();
     isVoiceInputActive = true;
     updateVoiceInputUI(true);
-    
+
     // Start audio visualization
     startAudioVisualization();
-    
+
     showNotification('Listening... Speak now', 'info');
   } catch (error) {
     console.error('Error starting voice recognition:', error);
@@ -2973,76 +3014,76 @@ function stopVoiceInput() {
     recognition.stop();
   }
   isVoiceInputActive = false;
-  
+
   // Stop audio visualization
   stopAudioVisualization();
-  
+
   // Reset voice input variables if cancelling
   if (!currentTranscript.trim()) {
     currentTranscript = '';
     originalInputValue = '';
   }
-  
+
   updateVoiceInputUI(false);
 }
 
 // Update UI for voice input state
 function updateVoiceInputUI(isActive) {
   if (!elements.voiceBtn || !elements.sendBtn) return;
-  
+
   if (isActive) {
     // Change mic button to X (cancel) button
     elements.voiceBtn.innerHTML = '<i class="fas fa-times" aria-hidden="true"></i>';
     elements.voiceBtn.setAttribute('title', 'Cancel voice input');
     elements.voiceBtn.setAttribute('aria-label', 'Cancel voice input');
     elements.voiceBtn.classList.add('recording');
-    
+
     // Change send button to checkmark
     elements.sendBtn.innerHTML = '<i class="fas fa-check" aria-hidden="true"></i>';
     elements.sendBtn.setAttribute('title', 'Accept voice input');
     elements.sendBtn.setAttribute('aria-label', 'Accept voice input');
     elements.sendBtn.classList.add('voice-confirm');
     elements.sendBtn.disabled = false;
-    
+
     // Add visual feedback for active state
     elements.voiceBtn.style.background = 'var(--red)';
     elements.voiceBtn.style.color = 'white';
     elements.sendBtn.style.background = 'var(--green)';
     elements.sendBtn.style.color = 'white';
-    
+
     // Add live sound waves visualization to textarea
     elements.messageInput.classList.add('voice-active');
     elements.messageInput.placeholder = 'Listening... Speak now';
-    
+
     // Create audio wave visualization container
     createAudioWaveContainer();
-    
+
   } else {
     // Reset mic button
     elements.voiceBtn.innerHTML = '<i class="fas fa-microphone" aria-hidden="true"></i>';
     elements.voiceBtn.setAttribute('title', 'Voice input');
     elements.voiceBtn.setAttribute('aria-label', 'Voice input');
     elements.voiceBtn.classList.remove('recording');
-    
+
     // Reset send button
     elements.sendBtn.innerHTML = '<i class="fas fa-paper-plane" aria-hidden="true"></i>';
     elements.sendBtn.setAttribute('title', 'Send message');
     elements.sendBtn.setAttribute('aria-label', 'Send message');
     elements.sendBtn.classList.remove('voice-confirm');
-    
+
     // Reset visual feedback
     elements.voiceBtn.style.background = '';
     elements.voiceBtn.style.color = '';
     elements.sendBtn.style.background = '';
     elements.sendBtn.style.color = '';
-    
+
     // Remove voice active state from textarea
     elements.messageInput.classList.remove('voice-active');
     elements.messageInput.placeholder = 'Send a message...';
-    
+
     // Remove audio wave visualization
     removeAudioWaveContainer();
-    
+
     // Update send button state
     updateSendButtonState();
   }
@@ -3051,40 +3092,40 @@ function updateVoiceInputUI(isActive) {
 // Setup speech recognition events
 function setupSpeechRecognitionEvents() {
   if (!recognition) return;
-  
+
   recognition.onstart = () => {
     console.log('Voice recognition started');
     isRecording = true;
   };
-  
+
   recognition.onresult = (event) => {
     let interimTranscript = '';
     let finalTranscript = '';
-    
+
     // Process all results to get complete transcripts
     for (let i = 0; i < event.results.length; i++) {
       const transcript = event.results[i][0].transcript;
-      
+
       if (event.results[i].isFinal) {
         finalTranscript += transcript;
       } else {
         interimTranscript += transcript;
       }
     }
-    
+
     // Store the transcript separately - DON'T update the input field during recording
     // Only update the stored transcript for when user confirms
     currentTranscript = finalTranscript + (interimTranscript ? ' ' + interimTranscript : '');
-    
+
     console.log('Current transcript:', currentTranscript); // For debugging
-    
+
     // The textarea will only show live waves animation, no text updates during recording
   };
-  
+
   recognition.onerror = (event) => {
     console.error('Voice recognition error:', event.error);
     let errorMessage = 'Voice input error';
-    
+
     switch (event.error) {
       case 'no-speech':
         errorMessage = 'No speech detected. Please try again.';
@@ -3101,15 +3142,15 @@ function setupSpeechRecognitionEvents() {
       default:
         errorMessage = 'Voice input failed. Please try again.';
     }
-    
+
     showNotification(errorMessage, 'error');
     stopVoiceInput();
   };
-  
+
   recognition.onend = () => {
     console.log('Voice recognition ended');
     isRecording = false;
-    
+
     if (isVoiceInputActive) {
       // Recognition ended but we're still in voice input mode
       // Clean up the interim indicator
@@ -3125,22 +3166,22 @@ function setupSpeechRecognitionEvents() {
 function createAudioWaveContainer() {
   // Remove existing container if any
   removeAudioWaveContainer();
-  
+
   const inputContainer = elements.messageInput.parentElement;
   if (!inputContainer) return;
-  
+
   const waveContainer = document.createElement('div');
   waveContainer.id = 'audioWaveContainer';
   waveContainer.className = 'audio-wave-container';
-  
+
   // Create canvas for audio visualization
   const canvas = document.createElement('canvas');
   canvas.id = 'audioWaveCanvas';
   canvas.className = 'audio-wave-canvas';
-  
+
   waveContainer.appendChild(canvas);
   inputContainer.appendChild(waveContainer);
-  
+
   // Position the container over the input
   positionAudioWaveContainer();
 }
@@ -3155,12 +3196,12 @@ function removeAudioWaveContainer() {
 function positionAudioWaveContainer() {
   const waveContainer = document.getElementById('audioWaveContainer');
   const inputElement = elements.messageInput;
-  
+
   if (!waveContainer || !inputElement) return;
-  
+
   const inputRect = inputElement.getBoundingClientRect();
   const containerRect = inputElement.parentElement.getBoundingClientRect();
-  
+
   waveContainer.style.position = 'absolute';
   waveContainer.style.left = `${inputRect.left - containerRect.left}px`;
   waveContainer.style.top = `${inputRect.top - containerRect.top}px`;
@@ -3173,32 +3214,32 @@ function positionAudioWaveContainer() {
 async function startAudioVisualization() {
   try {
     // Get user media for audio visualization
-    audioStream = await navigator.mediaDevices.getUserMedia({ 
+    audioStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true
-      } 
+      }
     });
-    
+
     // Create audio context
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
     analyser = audioContext.createAnalyser();
     microphone = audioContext.createMediaStreamSource(audioStream);
-    
+
     // Configure analyser
     analyser.fftSize = 256;
     analyser.smoothingTimeConstant = 0.8;
-    
+
     const bufferLength = analyser.frequencyBinCount;
     dataArray = new Uint8Array(bufferLength);
-    
+
     // Connect microphone to analyser
     microphone.connect(analyser);
-    
+
     // Start visualization
     visualizeAudio();
-    
+
   } catch (error) {
     console.error('Error accessing microphone for visualization:', error);
     // Continue without visualization if microphone access fails
@@ -3211,19 +3252,19 @@ function stopAudioVisualization() {
     cancelAnimationFrame(animationId);
     animationId = null;
   }
-  
+
   // Stop audio stream
   if (audioStream) {
     audioStream.getTracks().forEach(track => track.stop());
     audioStream = null;
   }
-  
+
   // Close audio context
   if (audioContext) {
     audioContext.close();
     audioContext = null;
   }
-  
+
   // Reset variables
   analyser = null;
   microphone = null;
@@ -3234,80 +3275,80 @@ function visualizeAudio() {
   if (!analyser || !dataArray || !isVoiceInputActive) {
     return;
   }
-  
+
   const canvas = document.getElementById('audioWaveCanvas');
   if (!canvas) return;
-  
+
   const ctx = canvas.getContext('2d');
   const containerRect = canvas.parentElement.getBoundingClientRect();
-  
+
   // Set canvas size
   canvas.width = containerRect.width;
   canvas.height = containerRect.height;
-  
+
   // Get audio data
   analyser.getByteFrequencyData(dataArray);
-  
+
   // Clear canvas
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  
+
   // Calculate average volume
   let sum = 0;
   for (let i = 0; i < dataArray.length; i++) {
     sum += dataArray[i];
   }
   const average = sum / dataArray.length;
-  
+
   // Create wave visualization (moving from right to left)
   const waveHeight = Math.max(2, (average / 255) * (canvas.height * 0.6));
   const numBars = 40;
   const barWidth = 3;
   const barSpacing = 2;
   const totalWidth = numBars * (barWidth + barSpacing);
-  
+
   // Animate bars from right to left
   const time = Date.now() * 0.005;
-  
+
   ctx.fillStyle = getComputedStyle(document.documentElement)
     .getPropertyValue('--green').trim() || '#10a37f';
-  
+
   for (let i = 0; i < numBars; i++) {
     // Create wave effect with different frequencies
     const frequency1 = Math.sin(time + i * 0.3) * 0.5;
     const frequency2 = Math.sin(time * 1.5 + i * 0.2) * 0.3;
     const frequency3 = Math.sin(time * 0.8 + i * 0.4) * 0.2;
-    
+
     // Combine audio data with wave animation
     const audioInfluence = (dataArray[i * 2] || 0) / 255;
-    const combinedHeight = Math.max(2, 
-      waveHeight * (0.3 + audioInfluence * 0.7) * 
+    const combinedHeight = Math.max(2,
+      waveHeight * (0.3 + audioInfluence * 0.7) *
       (1 + frequency1 + frequency2 + frequency3)
     );
-    
+
     // Position from right to left
     const x = canvas.width - totalWidth + i * (barWidth + barSpacing);
     const y = (canvas.height - combinedHeight) / 2;
-    
+
     // Add opacity based on position (fade from right to left)
     const opacity = Math.max(0.2, 1 - (i / numBars) * 0.8);
     ctx.globalAlpha = opacity;
-    
+
     // Draw bar with rounded edges
     ctx.beginPath();
     ctx.roundRect(x, y, barWidth, combinedHeight, barWidth / 2);
     ctx.fill();
   }
-  
+
   // Reset opacity
   ctx.globalAlpha = 1;
-  
+
   // Continue animation
   animationId = requestAnimationFrame(visualizeAudio);
 }
 
 // Add polyfill for roundRect if not supported
 if (!CanvasRenderingContext2D.prototype.roundRect) {
-  CanvasRenderingContext2D.prototype.roundRect = function(x, y, width, height, radius) {
+  CanvasRenderingContext2D.prototype.roundRect = function (x, y, width, height, radius) {
     this.beginPath();
     this.moveTo(x + radius, y);
     this.lineTo(x + width - radius, y);
@@ -3327,26 +3368,26 @@ function handleSendButtonClick() {
   if (isVoiceInputActive) {
     // Accept voice input and populate text field with transcript
     stopVoiceInput();
-    
+
     // Apply the stored transcript to the input field
     if (elements.messageInput && currentTranscript.trim()) {
       // Combine original value with the voice transcript
       const finalText = originalInputValue + (originalInputValue ? ' ' : '') + currentTranscript.trim();
       elements.messageInput.value = finalText;
-      
+
       // Auto-resize textarea
       elements.messageInput.style.height = 'auto';
       const newHeight = Math.min(elements.messageInput.scrollHeight, 120);
       elements.messageInput.style.height = newHeight + 'px';
-      
+
       // Update send button state
       updateSendButtonState();
-      
+
       showNotification('Voice input applied. You can edit the text before sending.', 'success');
     } else {
       showNotification('No voice input detected. Please try again.', 'warning');
     }
-    
+
     // Reset voice input variables
     currentTranscript = '';
     originalInputValue = '';
@@ -3370,7 +3411,7 @@ function initializeVoiceFunctionality() {
       elements.voiceBtn.style.display = 'none';
     }
   }
-  
+
   // Initialize speech synthesis if supported
   if ('speechSynthesis' in window) {
     speechSynthesis = initializeSpeechSynthesis();
@@ -3386,7 +3427,7 @@ function initializeVoiceFunctionality() {
 // Toggle voice output function for waves button
 function toggleVoiceOutput() {
   if (!elements.wavesBtn) return;
-  
+
   // Initialize speech synthesis if not already done
   if (!speechSynthesis) {
     speechSynthesis = initializeSpeechSynthesis();
@@ -3395,9 +3436,9 @@ function toggleVoiceOutput() {
       return;
     }
   }
-  
+
   const isActive = elements.wavesBtn.classList.contains('active');
-  
+
   if (isActive) {
     // Deactivate voice output
     isVoiceOutputEnabled = false;
@@ -3411,7 +3452,7 @@ function toggleVoiceOutput() {
     elements.wavesBtn.classList.add('active');
     showNotification('Voice output enabled - bot responses will be spoken aloud', 'success');
   }
-  
+
   // Add visual feedback
   elements.wavesBtn.style.transform = 'scale(0.95)';
   setTimeout(() => {
@@ -3432,7 +3473,7 @@ function toggleChatView() {
   } else {
     chatScreen.style.display = "flex";
     launcher.innerHTML = `<i class="fas fa-times"></i>`;
-    
+
     // Optional: focus the message input after showing chat
     const input = document.getElementById("messageInput");
     if (input) setTimeout(() => input.focus(), 100);
@@ -3449,22 +3490,22 @@ function openChatFromLanding() {
   // Add launcher-mode class to properly handle layout
   chatScreen.classList.add("launcher-mode");
   chatScreen.style.display = "flex";
-  
+
   // Show the chat widget that was hidden
   if (chatWidget) {
     chatWidget.classList.remove("hidden");
   }
-  
+
   // Show the close button in launcher mode
   if (closeBtn) {
     closeBtn.style.display = "flex";
   }
-  
+
   // Hide the floating launcher
   if (launcher) {
     launcher.style.display = "none";
   }
-  
+
   // Focus the message input after a short delay
   setTimeout(() => {
     const messageInput = document.getElementById("messageInput");
@@ -3485,17 +3526,17 @@ function closeChatToLanding() {
   // Remove launcher-mode class
   chatScreen.classList.remove("launcher-mode");
   chatScreen.style.display = "none";
-  
+
   // Hide the chat widget
   if (chatWidget) {
     chatWidget.classList.add("hidden");
   }
-  
+
   // Hide the close button when leaving launcher mode
   if (closeBtn) {
     closeBtn.style.display = "none";
   }
-  
+
   // Show the floating launcher again
   if (launcher) {
     launcher.style.display = "flex";
@@ -3504,31 +3545,31 @@ function closeChatToLanding() {
 
 function showLandingArea(user) {
   console.log("Showing landing area for user:", user.name);
-  
+
   // Hide other screens
   if (elements.authScreen) elements.authScreen.style.display = "none";
   if (elements.chatScreen) elements.chatScreen.style.display = "none";
-  
+
   // Show landing area
   const landingArea = document.getElementById("landingArea");
   if (landingArea) {
     landingArea.classList.remove("hidden");
     landingArea.style.display = "block";
-    
+
     // Update user info in landing header
     const landingUserName = document.getElementById("landingUserName");
     const landingUserInitials = document.getElementById("landingUserInitials");
-    
+
     if (landingUserName) {
       landingUserName.textContent = sanitizeInput(user.name);
     }
     if (landingUserInitials) {
       landingUserInitials.textContent = sanitizeInput(user.name.charAt(0).toUpperCase());
     }
-    
+
     // Also update profile dropdown in landing area
     updateProfileDropdown(user);
-    
+
     // Ensure ProfileDropdown is initialized and available for landing area
     setTimeout(() => {
       try {
@@ -3549,10 +3590,10 @@ function showLandingArea(user) {
         console.error('Error checking ProfileDropdown availability:', error);
       }
     }, 100);
-    
+
     // Load real dashboard data
     loadDashboardData();
-    
+
     // Show floating launcher after a delay
     setTimeout(() => {
       showFloatingLauncher();
@@ -3578,7 +3619,7 @@ async function loadDashboardData() {
 
     const result = await response.json();
     console.log('Dashboard data loaded:', result.data);
-    
+
     if (result.success && result.data) {
       updateLandingAreaWithData(result.data);
     }
@@ -3595,61 +3636,61 @@ function updateLandingAreaWithData(data) {
     const portfolioValue = document.querySelector('.portfolio-value .value');
     const portfolioChange = document.querySelector('.portfolio-value .change');
     const assetItems = document.querySelectorAll('.asset-item');
-    
+
     if (portfolioValue && data.portfolio) {
       portfolioValue.textContent = `₹${formatCurrency(data.portfolio.totalValue)}`;
     }
-    
+
     if (portfolioChange && data.portfolio) {
       const changeClass = data.portfolio.returnPercentage >= 0 ? 'positive' : 'negative';
       portfolioChange.className = `change ${changeClass}`;
       portfolioChange.textContent = `${data.portfolio.returnPercentage >= 0 ? '+' : ''}${data.portfolio.returnPercentage.toFixed(1)}%`;
     }
-    
+
     // Update asset breakdown
     if (assetItems.length >= 2 && data.portfolio.assets.length >= 2) {
       assetItems[0].querySelector('.asset-value').textContent = `₹${formatCurrency(data.portfolio.assets[0]?.value || 0)}`;
       assetItems[1].querySelector('.asset-value').textContent = `₹${formatCurrency(data.portfolio.assets[1]?.value || 0)}`;
     }
-    
+
     // Update SIP data
     const sipTotal = document.querySelector('.sip-total .value');
     const sipItems = document.querySelectorAll('.sip-item');
-    
+
     if (sipTotal && data.sip) {
       sipTotal.textContent = `₹${formatCurrency(data.sip.totalMonthlyInvestment)}`;
     }
-    
+
     if (sipItems.length >= 2 && data.sip.activeSIPs.length >= 2) {
       sipItems[0].querySelector('.sip-name').textContent = data.sip.activeSIPs[0]?.name || 'Investment 1';
       sipItems[0].querySelector('.sip-amount').textContent = `₹${formatCurrency(data.sip.activeSIPs[0]?.amount || 0)}`;
       sipItems[1].querySelector('.sip-name').textContent = data.sip.activeSIPs[1]?.name || 'Investment 2';
       sipItems[1].querySelector('.sip-amount').textContent = `₹${formatCurrency(data.sip.activeSIPs[1]?.amount || 0)}`;
     }
-    
+
     // Update recent transactions
     const transactionItems = document.querySelectorAll('.transaction-item');
-    
+
     if (transactionItems.length >= 3 && data.transactions.length >= 3) {
       for (let i = 0; i < Math.min(3, data.transactions.length); i++) {
         const transaction = data.transactions[i];
         const item = transactionItems[i];
-        
+
         item.querySelector('.transaction-type').textContent = transaction.type;
         item.querySelector('.transaction-date').textContent = formatTransactionDate(transaction.date);
-        
+
         const amountEl = item.querySelector('.transaction-amount');
         amountEl.textContent = `${transaction.isCredit ? '+' : '-'}₹${formatCurrency(transaction.amount)}`;
         amountEl.className = `transaction-amount ${transaction.isCredit ? 'credit' : 'debit'}`;
       }
     }
-    
+
     // Update market data
     const niftyValue = document.querySelector('.index-item:first-child .index-value');
     const niftyChange = document.querySelector('.index-item:first-child .index-change');
     const sensexValue = document.querySelector('.index-item:last-child .index-value');
     const sensexChange = document.querySelector('.index-item:last-child .index-change');
-    
+
     if (niftyValue && data.market?.nifty) {
       niftyValue.textContent = data.market.nifty.value.toFixed(2);
       if (niftyChange) {
@@ -3658,7 +3699,7 @@ function updateLandingAreaWithData(data) {
         niftyChange.textContent = `${data.market.nifty.change >= 0 ? '+' : ''}${data.market.nifty.change}%`;
       }
     }
-    
+
     if (sensexValue && data.market?.sensex) {
       sensexValue.textContent = data.market.sensex.value.toFixed(2);
       if (sensexChange) {
@@ -3667,21 +3708,21 @@ function updateLandingAreaWithData(data) {
         sensexChange.textContent = `${data.market.sensex.change >= 0 ? '+' : ''}${data.market.sensex.change}%`;
       }
     }
-    
+
     // Update goals
     const goalItems = document.querySelectorAll('.goal-item');
-    
+
     if (goalItems.length >= 2 && data.goals.length >= 2) {
       for (let i = 0; i < Math.min(2, data.goals.length); i++) {
         const goal = data.goals[i];
         const item = goalItems[i];
-        
+
         item.querySelector('.goal-name').textContent = goal.name;
         item.querySelector('.goal-progress').textContent = `₹${formatCurrency(goal.current)} / ₹${formatCurrency(goal.target)}`;
         item.querySelector('.progress-fill').style.width = `${goal.progress}%`;
       }
     }
-    
+
     console.log('Landing area updated with real data');
   } catch (error) {
     console.error('Error updating landing area with data:', error);
@@ -3689,24 +3730,31 @@ function updateLandingAreaWithData(data) {
 }
 
 // Helper functions for formatting
-function formatCurrency(amount) {
-  if (amount >= 10000000) { // 1 crore
-    return `${(amount / 10000000).toFixed(1)}Cr`;
-  } else if (amount >= 100000) { // 1 lakh
-    return `${(amount / 100000).toFixed(1)}L`;
-  } else if (amount >= 1000) { // 1 thousand
-    return `${(amount / 1000).toFixed(1)}K`;
+function formatCurrency(amount, currency = 'USD') {
+  if (amount === null || amount === undefined) return '0';
+  const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+  if (isNaN(num)) return '0';
+
+  if (currency === 'INR') {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 0
+    }).format(num);
   } else {
-    return amount.toFixed(0);
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: 0
+    }).format(num);
   }
 }
-
 function formatTransactionDate(dateString) {
   const date = new Date(dateString);
   const now = new Date();
   const diffTime = Math.abs(now - date);
   const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-  
+
   if (diffDays === 0) return 'Today';
   if (diffDays === 1) return 'Yesterday';
   if (diffDays <= 7) return `${diffDays} days ago`;
@@ -3719,23 +3767,23 @@ function showFloatingLauncher() {
   if (!launcher) return;
 
   launcher.style.display = "flex"; // Show button
-  
+
   // Add initial text content to launcher
   launcher.innerHTML = `
     <i class="fas fa-comment-dots"></i>
     <span class="launcher-text">Need help with finance?</span>
   `;
-  
+
   // Auto-expand animation after login
   setTimeout(() => {
     launcher.classList.add("expanded");
-    
+
     // Auto-contract after 5 seconds if user doesn't interact
     setTimeout(() => {
       if (!launcher.matches(':hover')) {
         launcher.classList.remove("expanded");
         launcher.classList.add("contracting");
-        
+
         // Remove contracting class after animation
         setTimeout(() => {
           launcher.classList.remove("contracting");
@@ -3751,5 +3799,99 @@ function showFloatingLauncher() {
     setTimeout(() => {
       tooltip.style.opacity = "0";
     }, 4000);
+  }
+}
+
+// ==========================================
+// VOICE ASSISTANT FUNCTIONALITY
+// ==========================================
+
+window.voiceOutputActive = false;
+
+function playTTS(text) {
+  const audio = document.getElementById("ttsAudio");
+  if (!audio || !authToken) return;
+
+  // Use backend endpoint to get audio blob
+  fetch(`${API_BASE}/tts`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${authToken}`
+    },
+    body: JSON.stringify({ text })
+  })
+    .then(res => {
+      if (!res.ok) throw new Error("TTS request failed");
+      return res.blob();
+    })
+    .then(blob => {
+      const url = URL.createObjectURL(blob);
+      audio.src = url;
+      audio.play();
+    })
+    .catch(err => console.error("TTS error:", err));
+}
+
+function stopTTS() {
+  const audio = document.getElementById("ttsAudio");
+  if (audio) {
+    audio.pause();
+    audio.currentTime = 0;
+  }
+}
+
+function initializeVoiceFunctionality() {
+  if (elements.wavesBtn) {
+    elements.wavesBtn.addEventListener("click", () => {
+      window.voiceOutputActive = !window.voiceOutputActive;
+      elements.wavesBtn.classList.toggle("active", window.voiceOutputActive);
+      if (window.voiceOutputActive) {
+        showNotification("Voice output enabled", "success");
+      } else {
+        showNotification("Voice output disabled", "info");
+        stopTTS();
+      }
+    });
+  }
+
+  if (elements.voiceBtn) {
+    elements.voiceBtn.addEventListener("click", () => {
+      if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        showNotification("Speech recognition is not supported in your browser.", "error");
+        return;
+      }
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+
+      elements.voiceBtn.classList.add("recording");
+      elements.voiceBtn.style.color = "var(--error)";
+      showNotification("Listening...", "info");
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        if (elements.messageInput) {
+          elements.messageInput.value = transcript;
+          updateSendButtonState();
+          sendMessage();
+        }
+      };
+
+      recognition.onerror = (event) => {
+        console.error("Speech recognition error", event.error);
+        showNotification("Error listening. Please try again.", "error");
+        elements.voiceBtn.classList.remove("recording");
+        elements.voiceBtn.style.color = "";
+      };
+
+      recognition.onend = () => {
+        elements.voiceBtn.classList.remove("recording");
+        elements.voiceBtn.style.color = "";
+      };
+
+      recognition.start();
+    });
   }
 }

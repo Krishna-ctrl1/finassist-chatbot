@@ -1,5 +1,10 @@
 from mftool import Mftool
 from fastmcp import FastMCP
+from typing import Annotated
+from pydantic import Field
+from mcp.types import ImageContent
+from models import RichToolDescription
+from services.chart_service import ChartService
 
 mf = Mftool()
 
@@ -22,3 +27,28 @@ def register_mutual_fund_tools(mcp: FastMCP):
             return str(list(matches.items())[:10])
         except Exception as e:
             return f"Error: {e}"
+
+    CREATE_MF_CHART_DESCRIPTION = RichToolDescription(
+        description="Generate a historical NAV chart for a mutual fund. Optimized for visualizing fund performance over time.",
+        use_when="When user wants to see a chart, graph, or visualization of a mutual fund's NAV.",
+        side_effects="Creates and returns a PNG chart image showing historical NAV data."
+    )
+
+    @mcp.tool(description=CREATE_MF_CHART_DESCRIPTION.model_dump_json())
+    async def create_mutual_fund_chart(
+        scheme_code: Annotated[str, Field(description="The mutual fund scheme code (e.g., '119551')")],
+        period: Annotated[str, Field(description="Time period (1mo, 3mo, 6mo, 1y, 3y, 5y)")] = "1y"
+    ) -> list[ImageContent]:
+        """Generate a historical NAV chart for a mutual fund"""
+        try:
+            chart_service = ChartService()
+            chart_base64 = await chart_service.create_mutual_fund_chart(scheme_code, period)
+            
+            return [ImageContent(
+                type="image",
+                mimeType="image/png", 
+                data=chart_base64
+            )]
+        except Exception as e:
+            error_message = f"❌ Error generating chart for scheme {scheme_code}: {str(e)}"
+            raise ValueError(error_message)

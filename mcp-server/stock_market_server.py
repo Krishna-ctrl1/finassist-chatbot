@@ -15,6 +15,7 @@ from tools.analysis_tools import register_analysis_tools
 from tools.screening_tools import register_screening_tools
 from tools.info_tools import register_info_tools
 from tools.mutual_fund_tools import register_mutual_fund_tools # Ensure this is here
+from tools.web_search import register_web_search_tools
 
 # --- Load environment variables ---
 load_dotenv()
@@ -39,11 +40,12 @@ register_analysis_tools(mcp)
 register_screening_tools(mcp)
 register_info_tools(mcp)
 register_mutual_fund_tools(mcp)
+register_web_search_tools(mcp)
 
 # --- Run MCP Server ---
 async def main():
     try:
-        port = int(os.environ.get("PORT", 8087))
+        port = int(os.environ.get("MCP_PORT", 8087))
         host = "0.0.0.0"
         
         print(f"📈 Starting Stock Market MCP server on http://{host}:{port}")

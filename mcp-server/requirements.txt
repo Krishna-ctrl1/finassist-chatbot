@@ -5,3 +5,5 @@ python-dotenv
 pandas
 matplotlib
 deprecated
+duckduckgo-search
+finnhub-python

@@ -1,14 +1,50 @@
 from typing import List
 import yfinance as yf
 import pandas as pd
+import finnhub
+import os
 from models import StockQuote
 
+def get_finnhub_client():
+    api_key = os.environ.get('FINNHUB_API_KEY')
+    return finnhub.Client(api_key=api_key) if api_key else None
+
 class StockService:
-    """Service for yfinance-powered stock operations"""
+    """Service for hybrid Finnhub & yfinance-powered stock operations"""
     
     @classmethod
     async def get_stock_quote(cls, symbol: str) -> StockQuote:
-        """Get current stock quote for a symbol using yfinance"""
+        """Get current stock quote for a symbol using Finnhub (live) or yfinance"""
+        is_indian = symbol.upper().endswith('.NS') or symbol.upper().endswith('.BO')
+        finnhub_client = get_finnhub_client()
+        
+        # Try Finnhub first for live data
+        if finnhub_client and not is_indian:
+            try:
+                res = finnhub_client.quote(symbol)
+                if res and res.get('c') and res.get('c') > 0:
+                    market_cap = None
+                    volume = 0
+                    try:
+                        ticker = yf.Ticker(symbol)
+                        info = ticker.fast_info
+                        market_cap = info.get('marketCap', None)
+                        volume = info.get('lastVolume', 0)
+                    except:
+                        pass
+                        
+                    return StockQuote(
+                        symbol=symbol.upper(),
+                        price=float(res['c']),
+                        change=float(res.get('d', res['c'] - res.get('pc', res['c']))),
+                        change_percent=float(res.get('dp', 0)),
+                        volume=int(volume),
+                        market_cap=market_cap
+                    )
+            except Exception as e:
+                print(f"Finnhub quote failed for {symbol}: {e}")
+                
+        # Fallback to yfinance
         try:
             ticker = yf.Ticker(symbol)
             info = ticker.info

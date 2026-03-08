@@ -31,7 +31,7 @@ try {
   faqData = [];
 }
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY; 
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const openai = new OpenAI({
   apiKey: OPENAI_API_KEY,
 });
@@ -40,27 +40,27 @@ let mcpClient = null;
 let mcpTools = [];
 
 async function connectToMCPServer() {
-    try {
-        // This URL must match where your Python server runs (default 3000)
-        const transport = new SSEClientTransport(new URL("http://localhost:3000/sse"));
-        mcpClient = new Client({ name: "FinAssist-App", version: "1.0" }, { capabilities: { tools: {} } });
+  try {
+    // This URL must match where your Python server runs (default 8087)
+    const transport = new SSEClientTransport(new URL("http://localhost:8087/sse"));
+    mcpClient = new Client({ name: "FinAssist-App", version: "1.0" }, { capabilities: { tools: {} } });
 
-        await mcpClient.connect(transport);
-        const result = await mcpClient.listTools();
+    await mcpClient.connect(transport);
+    const result = await mcpClient.listTools();
 
-        // Format tools for OpenAI
-        mcpTools = result.tools.map(tool => ({
-            type: "function",
-            function: {
-                name: tool.name,
-                description: tool.description,
-                parameters: tool.inputSchema
-            }
-        }));
-        console.log(`✅ Connected to Stock/MF MCP Server. Loaded ${mcpTools.length} tools.`);
-    } catch (error) {
-        console.error("❌ Failed to connect to Python MCP Server:", error.message);
-    }
+    // Format tools for OpenAI
+    mcpTools = result.tools.map(tool => ({
+      type: "function",
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.inputSchema
+      }
+    }));
+    console.log(`✅ Connected to Stock/MF MCP Server. Loaded ${mcpTools.length} tools.`);
+  } catch (error) {
+    console.error("❌ Failed to connect to Python MCP Server:", error.message);
+  }
 }
 
 // Call this on server start
@@ -91,7 +91,7 @@ async function generateFAQEmbeddings() {
     console.log("⚠️  Skipping Embeddings: No OPENAI_API_KEY found.");
     return;
   }
-  
+
   // Check if FAQ data exists
   if (!faqData || faqData.length === 0) {
     console.log("⚠️  Skipping Embeddings: No FAQ data loaded.");
@@ -99,9 +99,9 @@ async function generateFAQEmbeddings() {
   }
 
   console.log("🔄 Generating Embeddings for FAQs... This may take a moment.");
-  
+
   // Prepare input text: Combined Category + Question + Answer
-  const inputs = faqData.map(item => 
+  const inputs = faqData.map(item =>
     `Category: ${item["Category "] || item.Category || 'General'}. Question: ${item.Question}. Answer: ${item.Answer}`
   );
 
@@ -153,7 +153,7 @@ async function retrieveRelevantFAQs(query, topK = 3) {
 
     // Filter by relevance threshold (0.3) and get top K
     return scoredFAQs
-      .filter(item => item.score > 0.3) 
+      .filter(item => item.score > 0.3)
       .sort((a, b) => b.score - a.score)
       .slice(0, topK)
       .map(item => item.content);
@@ -472,15 +472,15 @@ async function getUserData(customerId) {
     return {
       customer: customer
         ? {
-            ...customer,
-            email: customer.email || "unknown@email.com",
-          }
+          ...customer,
+          email: customer.email || "unknown@email.com",
+        }
         : {
-            name: "Unknown",
-            id: "Unknown",
-            rayi_customer_id: "Unknown",
-            email: "unknown@email.com",
-          },
+          name: "Unknown",
+          id: "Unknown",
+          rayi_customer_id: "Unknown",
+          email: "unknown@email.com",
+        },
       customerDetail: customerDetail || null,
       folios: folios || [],
       investments: null,
@@ -565,9 +565,9 @@ async function classifyQueryWithAI(message, conversationHistory = []) {
     const contextInfo =
       conversationHistory.length > 0
         ? `\n\nCONVERSATION CONTEXT:\nPrevious messages: ${conversationHistory
-            .slice(-5)
-            .map((msg) => `${msg.role}: ${msg.content}`)
-            .join("\n")}`
+          .slice(-5)
+          .map((msg) => `${msg.role}: ${msg.content}`)
+          .join("\n")}`
         : "";
 
     const classificationPrompt = `You are a query classifier for a financial advisor AI assistant. 
@@ -706,10 +706,10 @@ function searchFAQs(query) {
 
   return matchedFAQ
     ? {
-        question: matchedFAQ.Question,
-        answer: matchedFAQ.Answer,
-        category: matchedFAQ["Category "] || "General",
-      }
+      question: matchedFAQ.Question,
+      answer: matchedFAQ.Answer,
+      category: matchedFAQ["Category "] || "General",
+    }
     : null;
 }
 
@@ -735,9 +735,9 @@ async function handleTicketCreationFlow(message, chat, customerId) {
     (msg) => {
       const contentStr = getContentAsString(msg.content);
       return contentStr.includes("Step 1 of 4") ||
-             contentStr.includes("Step 2 of 4") ||
-             contentStr.includes("Step 3 of 4") ||
-             contentStr.includes("Step 4 of 4");
+        contentStr.includes("Step 2 of 4") ||
+        contentStr.includes("Step 3 of 4") ||
+        contentStr.includes("Step 4 of 4");
     }
   );
 
@@ -852,7 +852,7 @@ Please choose one of the following options:`,
             action: "open_upload"
           },
           {
-            id: "continue_without_documents", 
+            id: "continue_without_documents",
             text: "Continue without Documents",
             type: "secondary",
             action: "skip_upload"
@@ -1090,15 +1090,15 @@ async function createTicket(ticketData) {
     try {
       const db = mongoClient.db("financeai");
       const ticketsCollection = db.collection("tickets");
-      
+
       const mongoTicket = {
         ...payload,
         _id: undefined, // Let MongoDB generate the _id
       };
-      
+
       const result = await ticketsCollection.insertOne(mongoTicket);
       console.log(`Ticket ${ticketId} saved to MongoDB with _id: ${result.insertedId}`);
-      
+
       // Add the MongoDB _id to the payload
       payload.mongo_id = result.insertedId;
     } catch (mongoError) {
@@ -1118,7 +1118,7 @@ async function createTicket(ticketData) {
 app.get("/api/test-rag", async (req, res) => {
   const { query } = req.query;
   if (!query) return res.status(400).json({ error: "Query parameter required" });
-  
+
   try {
     const results = await retrieveRelevantFAQs(query, 5);
     res.json({ query, results });
@@ -1127,10 +1127,32 @@ app.get("/api/test-rag", async (req, res) => {
   }
 });
 
+// Text-to-Speech Route (OpenAI)
+app.post("/api/tts", authenticateToken, async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ error: "Text is required" });
+
+    const mp3Response = await openai.audio.speech.create({
+      model: "tts-1",
+      voice: "alloy",
+      input: text,
+    });
+
+    const buffer = Buffer.from(await mp3Response.arrayBuffer());
+
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.send(buffer);
+  } catch (error) {
+    console.error("TTS error:", error);
+    res.status(500).json({ error: "Failed to synthesize speech" });
+  }
+});
+
 // Chat Route
 app.post("/api/chat", authenticateToken, async (req, res) => {
   try {
-    const { message, chatId } = req.body;
+    const { message, chatId, stream } = req.body;
     const customerId = req.user.customerId || req.user.id;
     const userId = new ObjectId(req.user._id);
 
@@ -1188,7 +1210,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
 
     const conversationMessages = chat.messages.map((msg) => {
       const content = msg.processedContent || msg.content;
-      
+
       // Ensure content is always a string
       let processedContent;
       if (typeof content === 'string') {
@@ -1202,7 +1224,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       } else {
         processedContent = String(content || '');
       }
-      
+
       return {
         role: msg.sender === "user" ? "user" : "assistant",
         content: processedContent,
@@ -1255,12 +1277,10 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
             msg.content.toLowerCase().includes("hey")
         );
       const aiResponse = previousGreeting
-        ? `Hey ${
-            userData.customer?.name || "friend"
-          }, great to catch up again! Ready to dive into your finances, SIPs, or got something new on your mind?`
-        : `Hi ${
-            userData.customer?.name || "there"
-          }! I’m your go-to financial buddy—excited to help with your money matters or SIPs. What’s up?`;
+        ? `Hey ${userData.customer?.name || "friend"
+        }, great to catch up again! Ready to dive into your finances, SIPs, or got something new on your mind?`
+        : `Hi ${userData.customer?.name || "there"
+        }! I’m your go-to financial buddy—excited to help with your money matters or SIPs. What’s up?`;
 
       const assistantMessage = {
         sender: "bot",
@@ -1307,14 +1327,14 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
           return String(content || '');
         }
       };
-      
+
       const lastBotMessageContent = lastBotMessage ? getContentAsString(lastBotMessage.content) : '';
       const isInTicketWorkflow = lastBotMessage &&
         (lastBotMessageContent.includes("Step 1 of 4") ||
-         lastBotMessageContent.includes("Step 2 of 4") ||
-         lastBotMessageContent.includes("Step 3 of 4") ||
-         lastBotMessageContent.includes("Step 4 of 4") ||
-         lastBotMessageContent.includes("Would you like to proceed with creating a support ticket?"));
+          lastBotMessageContent.includes("Step 2 of 4") ||
+          lastBotMessageContent.includes("Step 3 of 4") ||
+          lastBotMessageContent.includes("Step 4 of 4") ||
+          lastBotMessageContent.includes("Would you like to proceed with creating a support ticket?"));
 
       if (isInTicketWorkflow) {
         console.log('Affirmative response in ticket workflow, processing through ticket handler');
@@ -1367,13 +1387,11 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
             userData.investmentPerformance.slice(0, 3).forEach((perf) => {
               const fund =
                 userData.mutualFunds.find((f) => f.id === perf.mf_id) || {};
-              contextualResponse += `- ${
-                fund.name || perf.mf_id || "Fund"
-              }: ₹${(perf.current_value || 0).toLocaleString("en-IN")}, ${
-                perf.cagr || 0
-              }% CAGR (as of ${new Date(
-                perf.date || new Date()
-              ).toLocaleDateString("en-IN")})\n`;
+              contextualResponse += `- ${fund.name || perf.mf_id || "Fund"
+                }: ₹${(perf.current_value || 0).toLocaleString("en-IN")}, ${perf.cagr || 0
+                }% CAGR (as of ${new Date(
+                  perf.date || new Date()
+                ).toLocaleDateString("en-IN")})\n`;
             });
             contextualResponse += `**Disclaimer**: Past performance does not guarantee future results.\nWhich fund would you like more details on?`;
           } else {
@@ -1393,9 +1411,8 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
               userData.mutualFunds.map((fund) => fund.category || "Unknown")
             ),
           ];
-          contextualResponse = `Your portfolio spans ${
-            assetTypes.length
-          } asset types: ${assetTypes.join(", ")}.\n`;
+          contextualResponse = `Your portfolio spans ${assetTypes.length
+            } asset types: ${assetTypes.join(", ")}.\n`;
           if (mutualFundCategories.length > 0) {
             contextualResponse += `Fund categories: ${mutualFundCategories.join(
               ", "
@@ -1403,13 +1420,11 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
           }
           contextualResponse +=
             assetTypes.length < 3
-              ? `Consider adding ${
-                  !mutualFundCategories.includes("Equity")
-                    ? "equity funds, "
-                    : ""
-                }${
-                  !mutualFundCategories.includes("Debt") ? "debt funds, " : ""
-                }or FDs for better diversification.\n`
+              ? `Consider adding ${!mutualFundCategories.includes("Equity")
+                ? "equity funds, "
+                : ""
+              }${!mutualFundCategories.includes("Debt") ? "debt funds, " : ""
+              }or FDs for better diversification.\n`
               : `Your portfolio is well-diversified.\n`;
           contextualResponse += `**Disclaimer**: Diversification reduces risk but consult an advisor for tailored advice.\nWant fund recommendations?`;
         } else if (lowerLastBotMessage.includes("cancelled/paused orders")) {
@@ -1424,8 +1439,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
                 (order) =>
                   `- ID: ${order.id}, ₹${parseFloat(
                     order.amount
-                  ).toLocaleString("en-IN")}, ${
-                    order.payment_status
+                  ).toLocaleString("en-IN")}, ${order.payment_status
                   } (${new Date(
                     order.created_at || order.date
                   ).toLocaleDateString("en-IN")})`
@@ -1440,20 +1454,17 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
         ) {
           contextualResponse +=
             userData.orders?.length > 0
-              ? `Your portfolio: ${
-                  userData.orders.length
-                } orders, total ₹${userData.orders
-                  .reduce(
-                    (sum, order) => sum + (parseFloat(order.amount) || 0),
-                    0
-                  )
-                  .toLocaleString("en-IN")}. Example: Order ID ${
-                  userData.orders[0].id
-                }, ₹${parseFloat(userData.orders[0].amount).toLocaleString(
-                  "en-IN"
-                )}, ${
-                  userData.orders[0].payment_status
-                }.\nDig into a specific order?`
+              ? `Your portfolio: ${userData.orders.length
+              } orders, total ₹${userData.orders
+                .reduce(
+                  (sum, order) => sum + (parseFloat(order.amount) || 0),
+                  0
+                )
+                .toLocaleString("en-IN")}. Example: Order ID ${userData.orders[0].id
+              }, ₹${parseFloat(userData.orders[0].amount).toLocaleString(
+                "en-IN"
+              )}, ${userData.orders[0].payment_status
+              }.\nDig into a specific order?`
               : `No orders yet.\nExplore investment options?`;
         }
         // Handle SIPs follow-up
@@ -1466,15 +1477,13 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
             userData.sips.slice(0, 3).forEach((sip) => {
               const fund =
                 userData.mutualFunds.find((f) => f.id === sip.mf_id) || {};
-              contextualResponse += `- SIP ID: ${
-                sip.sip_id
-              }, Fund: ${fund.name || sip.mf_id || "Unknown"}, ₹${parseFloat(
-                sip.amount
-              ).toLocaleString("en-IN")} (${
-                sip.frequency
-              }, Started: ${new Date(sip.start_date).toLocaleDateString(
-                "en-IN"
-              )})\n`;
+              contextualResponse += `- SIP ID: ${sip.sip_id
+                }, Fund: ${fund.name || sip.mf_id || "Unknown"}, ₹${parseFloat(
+                  sip.amount
+                ).toLocaleString("en-IN")} (${sip.frequency
+                }, Started: ${new Date(sip.start_date).toLocaleDateString(
+                  "en-IN"
+                )})\n`;
             });
             contextualResponse += `Want more details on a specific SIP?`;
           } else {
@@ -1531,7 +1540,7 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
           return String(content || '');
         }
       };
-      
+
       const lastBotMessageContent2 = lastBotMessage ? getContentAsString2(lastBotMessage.content) : '';
       if (
         lastBotMessage &&
@@ -1626,67 +1635,60 @@ Please provide a brief title for your issue (e.g., "Unable to complete payment",
       // 1. Retrieve ONLY relevant FAQs (Top 4) using the new RAG function
       const relevantFAQs = await retrieveRelevantFAQs(processedMessage, 4);
       console.log("🔹 RAG Retrieved", relevantFAQs.length, "relevant FAQs for query:", processedMessage);
-      
+
       // 2. Format them for the AI Prompt
-      const ragContent = relevantFAQs.length > 0 
+      const ragContent = relevantFAQs.length > 0
         ? relevantFAQs.map(faq => `Q: ${faq.Question}\nA: ${faq.Answer}`).join("\n\n")
         : "No specific FAQ matched. Answer based on general financial knowledge.";
 
       let userDataString = `
-Customer: ${userData.customer?.name || "Unknown"} (ID: ${
-        userData.customer?.id || "Unknown"
-      }, RAYI ID: ${userData.customer?.rayi_customer_id || "Unknown"})
+Customer: ${userData.customer?.name || "Unknown"} (ID: ${userData.customer?.id || "Unknown"
+        }, RAYI ID: ${userData.customer?.rayi_customer_id || "Unknown"})
 Email: ${userData.customer?.email || "unknown@email.com"}
 Orders: ${userData.orders?.length || 0} orders
-${
-  userData.orders?.length > 0
-    ? userData.orders
-        .map(
-          (order) =>
-            `- Order ID: ${order.id}, Amount: ₹${parseFloat(
-              order.amount
-            ).toLocaleString("en-IN")}, Status: ${
-              order.payment_status
-            }, Type: ${order.investment_type || "General"}, Date: ${new Date(
-              order.created_at || order.date
-            ).toLocaleDateString("en-IN")}`
-        )
-        .join("\n")
-    : "No orders available yet."
-}
+${userData.orders?.length > 0
+          ? userData.orders
+            .map(
+              (order) =>
+                `- Order ID: ${order.id}, Amount: ₹${parseFloat(
+                  order.amount
+                ).toLocaleString("en-IN")}, Status: ${order.payment_status
+                }, Type: ${order.investment_type || "General"}, Date: ${new Date(
+                  order.created_at || order.date
+                ).toLocaleDateString("en-IN")}`
+            )
+            .join("\n")
+          : "No orders available yet."
+        }
 Folios: ${userData.folios?.length || 0} folios
-${
-  userData.folios?.length > 0
-    ? userData.folios
-        .map((folio) => `- Folio: ${folio.folio_number}, MF ID: ${folio.mf_id}`)
-        .join("\n")
-    : "No folios available yet."
-}
+${userData.folios?.length > 0
+          ? userData.folios
+            .map((folio) => `- Folio: ${folio.folio_number}, MF ID: ${folio.mf_id}`)
+            .join("\n")
+          : "No folios available yet."
+        }
 SIPs: ${userData.sips?.length || 0} SIPs
-${
-  userData.sips?.length > 0
-    ? userData.sips
-        .map(
-          (sip) =>
-            `- SIP ID: ${sip.sip_id}, Fund ID: ${sip.mf_id}, Amount: ₹${parseFloat(
-              sip.amount
-            ).toLocaleString("en-IN")}, Frequency: ${sip.frequency}, Status: ${
-              sip.status
-            }, Start Date: ${new Date(sip.start_date).toLocaleDateString(
-              "en-IN"
-            )}${sip.end_date ? `, End Date: ${new Date(sip.end_date).toLocaleDateString("en-IN")}` : ""}`
-        )
-        .join("\n")
-    : "No SIPs available yet."
-}
+${userData.sips?.length > 0
+          ? userData.sips
+            .map(
+              (sip) =>
+                `- SIP ID: ${sip.sip_id}, Fund ID: ${sip.mf_id}, Amount: ₹${parseFloat(
+                  sip.amount
+                ).toLocaleString("en-IN")}, Frequency: ${sip.frequency}, Status: ${sip.status
+                }, Start Date: ${new Date(sip.start_date).toLocaleDateString(
+                  "en-IN"
+                )}${sip.end_date ? `, End Date: ${new Date(sip.end_date).toLocaleDateString("en-IN")}` : ""}`
+            )
+            .join("\n")
+          : "No SIPs available yet."
+        }
 Mutual Funds: ${userData.mutualFunds?.length || 0} funds
-${
-  userData.mutualFunds?.length > 0
-    ? userData.mutualFunds
-        .map((fund) => `- Fund: ${fund.name || fund.scheme_code}`)
-        .join("\n")
-    : "No mutual funds available yet."
-}
+${userData.mutualFunds?.length > 0
+          ? userData.mutualFunds
+            .map((fund) => `- Fund: ${fund.name || fund.scheme_code}`)
+            .join("\n")
+          : "No mutual funds available yet."
+        }
 `;
 
       systemPrompt = `
@@ -1742,29 +1744,27 @@ You are authorized to discuss:
 - Mutual Funds Invested: ${userData.mutualFundsInvested?.length || 0}
 
 **CRITICAL ORDER INFORMATION:**
-${
-  userData.orders && userData.orders.length > 0
-    ? `The user has ${userData.orders.length} order(s). Details:
+${userData.orders && userData.orders.length > 0
+          ? `The user has ${userData.orders.length} order(s). Details:
 ${userData.orders
-  .map(
-    (order) => `- Order ID: ${order.id}
+            .map(
+              (order) => `- Order ID: ${order.id}
   - Amount: ₹${order.amount}
   - Payment Status: ${order.payment_status}
   - Investment ID: ${order.investment_id}
 `
-  )
-  .join("")}
+            )
+            .join("")}
 Order Details Count: ${userData.orderDetails?.length || 0}`
-    : "The user currently has no orders in the system."
-}
+          : "The user currently has no orders in the system."
+        }
 
 **CRITICAL SIP INFORMATION:**
-${
-  userData.sips && userData.sips.length > 0
-    ? `The user has ${userData.sips.length} SIP(s). Details:
+${userData.sips && userData.sips.length > 0
+          ? `The user has ${userData.sips.length} SIP(s). Details:
 ${userData.sips
-  .map(
-    (sip) => `- SIP ID: ${sip.sip_id}
+            .map(
+              (sip) => `- SIP ID: ${sip.sip_id}
   - Fund ID: ${sip.mf_id}
   - Amount: ₹${sip.amount}
   - Frequency: ${sip.frequency}
@@ -1773,46 +1773,37 @@ ${userData.sips
   - End Date: ${sip.end_date ? new Date(sip.end_date).toLocaleDateString("en-IN") : "Ongoing"}
   - Folio Number: ${sip.folio_number}
 `
-  )
-  .join("")}`
-    : "The user currently has no SIPs in the system."
-}
+            )
+            .join("")}`
+          : "The user currently has no SIPs in the system."
+        }
 
 **Detailed Financial Data (from getUserData):**
-- Customer Detail: ${
-        userData.customerDetail
+- Customer Detail: ${userData.customerDetail
           ? JSON.stringify(userData.customerDetail)
           : "No customer details available"
-      }
-- Folios: ${userData.folios?.length || 0} folios (${
-        JSON.stringify(userData.folios) || "No folios"
-      })
-- SIPs: ${userData.sips?.length || 0} SIPs (${
-        JSON.stringify(userData.sips) || "No SIPs"
-      })
-- Performance Summary: ${
-        userData.performanceSummary
+        }
+- Folios: ${userData.folios?.length || 0} folios (${JSON.stringify(userData.folios) || "No folios"
+        })
+- SIPs: ${userData.sips?.length || 0} SIPs (${JSON.stringify(userData.sips) || "No SIPs"
+        })
+- Performance Summary: ${userData.performanceSummary
           ? JSON.stringify(userData.performanceSummary)
           : "No performance summary"
-      }
-- Investment Performance: ${
-        userData.investmentPerformance?.length || 0
-      } records (${
-        JSON.stringify(userData.investmentPerformance) || "No performance data"
-      })
-- Investment Returns: ${userData.investmentReturns?.length || 0} records (${
-        JSON.stringify(userData.investmentReturns) || "No returns data"
-      })
-- Mutual Funds: ${userData.mutualFunds?.length || 0} funds (${
-        JSON.stringify(userData.mutualFunds) || "No mutual funds"
-      })
+        }
+- Investment Performance: ${userData.investmentPerformance?.length || 0
+        } records (${JSON.stringify(userData.investmentPerformance) || "No performance data"
+        })
+- Investment Returns: ${userData.investmentReturns?.length || 0} records (${JSON.stringify(userData.investmentReturns) || "No returns data"
+        })
+- Mutual Funds: ${userData.mutualFunds?.length || 0} funds (${JSON.stringify(userData.mutualFunds) || "No mutual funds"
+        })
 - Bank Accounts: ${JSON.stringify(userData.bankAccounts) || "No bank accounts"}
 - UPI Accounts: ${JSON.stringify(userData.upiAccounts) || "No UPI accounts"}
 - Cards: ${JSON.stringify(userData.cards) || "No cards"}
-- Mutual Funds Invested: ${
-        JSON.stringify(userData.mutualFundsInvested) ||
+- Mutual Funds Invested: ${JSON.stringify(userData.mutualFundsInvested) ||
         "No mutual funds invested"
-      }
+        }
 
 **FAQ DATA ACCESS:**
 - You have access to a set of Frequently Asked Questions (FAQs) stored in faqData.
@@ -1935,25 +1926,25 @@ Before sending any response, verify:
 
 **GOAL**: Be the most accurate, helpful, and professionally formatted financial advisor AI, delivering definitive answers with complete supporting data from getUserData, using assumptions when necessary, and ensuring actionable financial advice.
 
-For non-financial queries, provide clear redirection to appropriate sources.
+For questions that require current events, live news, or real-time web knowledge to answer accurately, you MUST use the provided Web Search tools.
 
-*NON-FINANCIAL QUERIES:*
-•⁠  ⁠If the query does not contain financial-related terms (e.g., "mutual fund," "stock," "portfolio," "investment," "order," "folio," "bank," "return," "NAV", "sip"), respond: "This query is outside my financial advisory scope. Please provide a finance-related question."
-•⁠  ⁠Do not attempt to answer non-financial queries under any circumstances
-`;
+*STRICT NON-FINANCIAL QUERIES RULE:*
+You are a specialized Financial Assistant. You must prioritize questions related to finance, investing, stock markets, mutual funds, personal wealth, or economics. 
+However, you must ALSO be helpful and flexible. If a user asks to "compare" items, asks about their portfolio, or gives a short vague query, ALWAYS do your best to answer it using the available data or tools. 
+If the user asks an obviously non-financial query (like coding, sports, history), politely remind them: "I specialize in finance, but..." and then provide a very brief, helpful answer anyway. Do NOT aggressively refuse to answer.`;
 
       // --- START OF UPDATED LOGIC ---
-      
+
       // 1. Prepare the full message history
       const requestMessages = [
-          { role: "system", content: systemPrompt },
-          ...conversationMessages,
-          { role: "user", content: processedMessage },
+        { role: "system", content: systemPrompt },
+        ...conversationMessages,
+        { role: "user", content: processedMessage },
       ];
 
-      // 2. Call OpenAI with MCP Tools enabled
+      // 2. Call OpenAI with MCP Tools enabled (No streaming for the tool-call detection phase)
       const completion = await openai.chat.completions.create({
-        model: "gpt-4.1", // Ensure this model supports tool calling (e.g., gpt-4-turbo)
+        model: "gpt-4o", // Upgraded model for better tool calling and speed
         messages: requestMessages,
         max_tokens: maxTokens,
         temperature: 0.65,
@@ -1964,33 +1955,45 @@ For non-financial queries, provide clear redirection to appropriate sources.
       let aiResponse = completion.choices[0].message.content;
       const toolCalls = completion.choices[0].message.tool_calls;
 
+      let toolImageUrls = [];
+
       // 3. Handle Tool Execution (If AI wants to check Stocks/MFs)
       if (toolCalls) {
         console.log(`🤖 AI requested ${toolCalls.length} tool(s)`);
-        
+
         // Add the assistant's "intent" to call a tool to the history
         requestMessages.push(completion.choices[0].message);
 
         for (const toolCall of toolCalls) {
           const toolName = toolCall.function.name;
           const toolArgs = JSON.parse(toolCall.function.arguments);
-          
+
           console.log(`🔨 Executing MCP Tool: ${toolName}`);
-          
+
           let toolResultContent;
           try {
             // Execute the tool via your Python MCP Server
-            // Ensure mcpClient is defined globally as per previous steps
             const result = await mcpClient.callTool({
               name: toolName,
               arguments: toolArgs
             });
-            
-            // Extract the text content from the MCP result
-            toolResultContent = Array.isArray(result.content) 
-              ? result.content.map(c => c.text).join("\n") 
-              : JSON.stringify(result.content);
-              
+
+            if (result.content && result.content.length > 0) {
+              const imageContent = result.content.find(c => c.type === "image");
+              if (imageContent) {
+                // Intercept the image, save it to our array to render manually later
+                toolImageUrls.push(`data:${imageContent.mimeType};base64,${imageContent.data}`);
+                toolResultContent = `Chart generated successfully and displayed to the user. Do not try to describe the visual chart yourself. Just provide a brief financial summary based on the request.`;
+              } else {
+                // Standard text response
+                toolResultContent = Array.isArray(result.content)
+                  ? result.content.map(c => c.text).join("\n")
+                  : JSON.stringify(result.content);
+              }
+            } else {
+              toolResultContent = "No data returned from tool.";
+            }
+
           } catch (error) {
             console.error(`❌ Tool execution failed: ${error.message}`);
             toolResultContent = `Error: Failed to fetch data for ${toolName}.`;
@@ -2004,57 +2007,115 @@ For non-financial queries, provide clear redirection to appropriate sources.
             content: toolResultContent
           });
         }
+      }
 
-        // 4. Get Final Answer (AI reads the tool results and generates the response)
-        const secondResponse = await openai.chat.completions.create({
-          model: "gpt-4.1",
+      // 4. Handle Streaming vs Non-Streaming Final Response
+      if (req.body.stream) {
+        // Setup SSE Headers
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Connection", "keep-alive");
+
+        // Inject the images right away before the AI starts typing
+        let fullStreamedContent = "";
+        if (toolImageUrls.length > 0) {
+          const imageTags = toolImageUrls.map(url => `<br><img src="${url}" alt="Generated Chart" style="max-width: 100%; border-radius: 8px; margin: 10px 0; border: 1px solid var(--border);"><br>`).join("");
+          fullStreamedContent += imageTags;
+          res.write(`data: ${JSON.stringify({ chunk: imageTags })}\n\n`);
+        }
+
+        const streamResponse = await openai.chat.completions.create({
+          model: "gpt-4o",
           messages: requestMessages,
           max_tokens: maxTokens,
           temperature: 0.65,
+          stream: true,
         });
 
-        aiResponse = secondResponse.choices[0].message.content;
-      }
-      
-      // --- END OF UPDATED LOGIC ---
-
-      aiResponse = stripHashtags(aiResponse);
-
-      if (
-        aiResponse.length < 100 &&
-        queryType !== "GREETING" &&
-        queryType !== "NON-FINANCIAL" 
-      ) {
-        aiResponse +=
-          "\n\nAnything else you’d like to explore about your finances, SIPs, or investments?";
-      }
-
-      const assistantMessage = {
-        sender: "bot",
-        content: aiResponse,
-        timestamp: new Date(),
-      };
-
-      chat.messages.push(assistantMessage);
-      chat.updatedAt = new Date();
-
-      if (chat._id) {
-        await chatsCollection.updateOne(
-          { _id: chat._id },
-          {
-            $set: {
-              messages: chat.messages,
-              updatedAt: chat.updatedAt,
-            },
-            $inc: { __v: 1 },
+        for await (const chunk of streamResponse) {
+          const chunkContent = chunk.choices[0]?.delta?.content || "";
+          if (chunkContent) {
+            fullStreamedContent += chunkContent;
+            res.write(`data: ${JSON.stringify({ chunk: chunkContent })}\n\n`);
           }
-        );
-      } else {
-        const result = await chatsCollection.insertOne(chat);
-        chat._id = result.insertedId;
-      }
+        }
 
-      res.json(chat);
+        aiResponse = stripHashtags(fullStreamedContent);
+
+        if (aiResponse.length < 100 && queryType !== "GREETING" && queryType !== "NON-FINANCIAL") {
+          const followup = "\n\nAnything else you’d like to explore about your finances, SIPs, or investments?";
+          aiResponse += followup;
+          res.write(`data: ${JSON.stringify({ chunk: followup })}\n\n`);
+        }
+
+        const assistantMessage = {
+          sender: "bot",
+          content: aiResponse,
+          timestamp: new Date(),
+        };
+
+        chat.messages.push(assistantMessage);
+        chat.updatedAt = new Date();
+
+        if (chat._id) {
+          await chatsCollection.updateOne(
+            { _id: chat._id },
+            { $set: { messages: chat.messages, updatedAt: chat.updatedAt }, $inc: { __v: 1 } }
+          );
+        } else {
+          const result = await chatsCollection.insertOne(chat);
+          chat._id = result.insertedId;
+        }
+
+        // Send final signal with chat ID
+        res.write(`data: ${JSON.stringify({ final: true, chatId: chat._id })}\n\n`);
+        res.write("data: [DONE]\n\n");
+        return res.end();
+      } else {
+        // Non-streaming execution
+        if (toolCalls) {
+          const secondResponse = await openai.chat.completions.create({
+            model: "gpt-4o",
+            messages: requestMessages,
+            max_tokens: maxTokens,
+            temperature: 0.65,
+          });
+          aiResponse = secondResponse.choices[0].message.content;
+        }
+
+        // If tools returned images, prepend them to the AI's final text
+        if (toolImageUrls.length > 0) {
+          const imageTags = toolImageUrls.map(url => `<br><img src="${url}" alt="Generated Chart" style="max-width: 100%; border-radius: 8px; margin: 10px 0; border: 1px solid var(--border);"><br>`).join("");
+          aiResponse = imageTags + "\n" + aiResponse;
+        }
+
+        aiResponse = stripHashtags(aiResponse);
+
+        if (aiResponse.length < 100 && queryType !== "GREETING" && queryType !== "NON-FINANCIAL") {
+          aiResponse += "\n\nAnything else you’d like to explore about your finances, SIPs, or investments?";
+        }
+
+        const assistantMessage = {
+          sender: "bot",
+          content: aiResponse,
+          timestamp: new Date(),
+        };
+
+        chat.messages.push(assistantMessage);
+        chat.updatedAt = new Date();
+
+        if (chat._id) {
+          await chatsCollection.updateOne(
+            { _id: chat._id },
+            { $set: { messages: chat.messages, updatedAt: chat.updatedAt }, $inc: { __v: 1 } }
+          );
+        } else {
+          const result = await chatsCollection.insertOne(chat);
+          chat._id = result.insertedId;
+        }
+
+        res.json(chat);
+      }
     }
   } catch (error) {
     console.error("Chat processing error:", error);

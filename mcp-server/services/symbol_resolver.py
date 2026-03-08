@@ -120,7 +120,25 @@ class SymbolResolver:
             'jp morgan': 'JPM',
             'bank of america': 'BAC',
             'american express': 'AXP',
-            'amex': 'AXP'
+            'amex': 'AXP',
+            
+            # Explicit Indian Companies (Overrides CSV)
+            'reliance': 'RELIANCE.NS',
+            'reliance industries': 'RELIANCE.NS',
+            'sbi': 'SBIN.NS',
+            'state bank of india': 'SBIN.NS',
+            'hdfc': 'HDFCBANK.NS',
+            'hdfc bank': 'HDFCBANK.NS',
+            'tcs': 'TCS.NS',
+            'tata consultancy services': 'TCS.NS',
+            'infosys': 'INFY.NS',
+            'infy': 'INFY.NS',
+            'wipro': 'WIPRO.NS',
+            'icici': 'ICICIBANK.NS',
+            'icici bank': 'ICICIBANK.NS',
+            'axis bank': 'AXISBANK.NS',
+            'kotak': 'KOTAKBANK.NS',
+            'kotak mahindra': 'KOTAKBANK.NS',
         }
     
     @property 
@@ -164,16 +182,7 @@ class SymbolResolver:
         original_query = query
         normalized_query = self.normalize_input(query)
         
-        # Step 1: Check if it's already a valid symbol
-        try:
-            ticker = yf.Ticker(query.upper())
-            info = ticker.info
-            if info and info.get('symbol'):
-                return query.upper(), [], f"✅ Symbol '{query.upper()}' is valid"
-        except:
-            pass
-        
-        # Step 2: Check direct mapping for common companies
+        # Step 1: Check direct mapping FIRST so explicit Indian stocks bypass the global check
         stock_mapping = self.stock_mapping
         
         if normalized_query in stock_mapping:
@@ -184,6 +193,15 @@ class SymbolResolver:
         if query.lower() in stock_mapping:
             resolved_symbol = stock_mapping[query.lower()]
             return resolved_symbol, [], f"✅ Resolved '{original_query}' to '{resolved_symbol}'"
+            
+        # Step 2: Check if it's already a valid generic symbol (now happens AFTER mapping)
+        try:
+            ticker = yf.Ticker(query.upper())
+            info = ticker.info
+            if info and info.get('symbol'):
+                return query.upper(), [], f"✅ Symbol '{query.upper()}' is valid"
+        except:
+            pass
         
         # Step 3: Enhanced partial matching in mapping
         best_match = None
