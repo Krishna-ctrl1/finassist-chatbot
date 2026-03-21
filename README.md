@@ -47,6 +47,9 @@ Auto-generates structured support tickets directly from chat context. Extracts t
 ### 9️⃣ Voice Support
 Integrated Google Cloud Text-to-Speech allowing users to set voice preferences, safely converting text replies to rich audio, and auto-reading chat answers.
 
+### 🔟 Live Market Data & Dynamic Charting
+Integrates 38+ real-time market tools using yfinance, finnhub and mftool to fetch exact live NAVs, stock quotes, detailed financial statements, and dynamically stream base64-encoded historical performance charts directly into the chat.
+
 ## 🎨 UI/UX System
 
 Our interface is engineered for a premium, native feel:
