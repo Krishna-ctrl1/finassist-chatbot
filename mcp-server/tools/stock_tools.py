@@ -39,7 +39,7 @@ def register_stock_tools(mcp):
             
             # Format the response nicely
             currency = "{currency}" if quote.symbol.upper().endswith(".NS") or quote.symbol.upper().endswith(".BO") else "$"
-                change_symbol = "📈" if quote.change >= 0 else "📉"
+            change_symbol = "📈" if quote.change >= 0 else "📉"
             change_sign = "+" if quote.change >= 0 else ""
             
             result = f"""{resolution_info}📊 **{quote.symbol} Stock Quote**

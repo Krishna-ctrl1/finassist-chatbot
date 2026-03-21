@@ -133,7 +133,7 @@ class ChartService:
             for i, symbol in enumerate(symbols):
                 try:
                     hist = get_hybrid_history(symbol, period)
-            currency = "₹" if symbol.upper().endswith(".NS") or symbol.upper().endswith(".BO") else "$"
+                    currency = "₹" if symbol.upper().endswith(".NS") or symbol.upper().endswith(".BO") else "$"
                     
                     if hist.empty:
                         print(f"Warning: No data for {symbol}")

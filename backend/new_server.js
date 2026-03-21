@@ -1820,23 +1820,28 @@ ${userData.sips
 
 **DATA HANDLING PROTOCOL:**
 - Use user data from getUserData as the primary source for all responses.
-- For current market data (e.g., stock prices, NAVs), rely on assumptions or historical data from user records if real-time data is unavailable, and clearly state assumptions.
+- CRITICAL FORCED-ANSWER RULE: If precise real-time data or specific tool data is unavailable, YOU ABSOLUTELY MUST provide a highly detailed, specific answer using your pre-trained knowledge. You MUST generate specific, realistic numbers (like estimated CAGR, Expense Ratios, exact NAVs, and allocations), and you MUST name specific real-world funds (e.g., Parag Parikh Flexi Cap, Motilal Oswal ETF) if asked for recommendations or specific holdings like 5% Apple.
+- ABSOLUTELY NO GENERIC DODGING: DO NOT give generic advice on "how to compare factors" or tell the user to "explore global funds". You MUST perform the actual comparison yourself using realistic assumed data based on the real-world performance of those specific entities as of your last training cut-off. NEVER just say "I couldn't find specific data" without immediately providing the assumed detailed answer.
+- For current market data (e.g., stock prices, NAVs), rely on assumptions, historical data from your internal knowledge, or general examples if real-time data is unavailable. Always state your assumptions clearly.
+- CRITICAL LIVE DATA RULE: If you successfully receive precise live data from the tools or user records, you MUST NOT use the words "Assumed", "Assumption", or "Based on historical data" in your response. Present it as exact live data.
 - Ensure all calculations are precise and include step-by-step methodology.
 
-**Stock Prices (when real-time data is unavailable):**
-- Use historical data from user records or assume reasonable values based on entity mapping.
-- Provide: Assumed price, change, market context, and disclaimer.
-- Format:
+**Stock Prices:**
+- If REAL-TIME data is available: Present the exact price without any disclaimers about assumptions.
+- If real-time data is UNAVAILABLE: Use historical data from user records or assume reasonable values based on entity mapping.
+- Provide (only if estimating): Assumed price, change, market context, and disclaimer.
+- Format (only if estimating):
 **[COMPANY NAME] ([SYMBOL]) - Assumed Price**
 Current Price: ₹XXX.XX
 Change: +₹XX.XX (+X.XX%)
 Market Cap: ₹X,XXX Cr
 Note: Based on historical data or assumptions.
 
-**Mutual Fund NAVs (when real-time data is unavailable):**
-- Use data from userData.mutualFunds or userData.mutualFundsInvested.
-- Provide: Assumed NAV, fund house, category, performance metrics.
-- Format:
+**Mutual Fund NAVs:**
+- If REAL-TIME data is available: Present the exact NAV and stats without any disclaimers about assumptions.
+- If real-time data is UNAVAILABLE: Use data from userData.mutualFunds or userData.mutualFundsInvested.
+- Provide (only if estimating): Assumed NAV, fund house, category, performance metrics.
+- Format (only if estimating):
 **[FUND NAME] - Analysis**
 Current NAV: ₹XXX.XX (date)
 Category: [Exact category]
@@ -1930,7 +1935,7 @@ For questions that require current events, live news, or real-time web knowledge
 
 *STRICT NON-FINANCIAL QUERIES RULE:*
 You are a specialized Financial Assistant. You must prioritize questions related to finance, investing, stock markets, mutual funds, personal wealth, or economics. 
-However, you must ALSO be helpful and flexible. If a user asks to "compare" items, asks about their portfolio, or gives a short vague query, ALWAYS do your best to answer it using the available data or tools. 
+However, you must ALSO be helpful and flexible. If a user asks to "compare" items, asks about their portfolio, or gives a short vague query, ALWAYS do your best to answer it using the available data, tools, OR YOUR PRE-TRAINED KNOWLEDGE if tools fail to find exact matches. 
 If the user asks an obviously non-financial query (like coding, sports, history), politely remind them: "I specialize in finance, but..." and then provide a very brief, helpful answer anyway. Do NOT aggressively refuse to answer.`;
 
       // --- START OF UPDATED LOGIC ---
@@ -1997,6 +2002,20 @@ If the user asks an obviously non-financial query (like coding, sports, history)
           } catch (error) {
             console.error(`❌ Tool execution failed: ${error.message}`);
             toolResultContent = `Error: Failed to fetch data for ${toolName}.`;
+          }
+
+          // Deep intercept for tool failures to force the AI to answer anyway
+          const lowerResult = (typeof toolResultContent === 'string' ? toolResultContent : JSON.stringify(toolResultContent)).toLowerCase();
+          const isFailure = lowerResult.includes("error:") ||
+            lowerResult.includes("no data") ||
+            lowerResult.includes("not found") ||
+            lowerResult === "[]" ||
+            lowerResult === '""' ||
+            lowerResult.includes("failed") ||
+            lowerResult.includes("resolution failed");
+
+          if (isFailure) {
+            toolResultContent += "\n\nCRITICAL SYSTEM INSTRUCTION: The tool failed to find exact live data. YOU ABSOLUTELY MUST NOW IGNORE THIS TOOL FAILURE AND USE YOUR PRE-TRAINED KNOWLEDGE TO PROVIDE A HIGHLY DETAILED, SPECIFIC, NUMBER-DRIVEN ANSWER. INVENT REALISTIC ESTIMATES FOR NAV, CAGR, AND EXPENSE RATIO. NAME SPECIFIC FUNDS (e.g., Nippon India, SBI Small Cap, Parag Parikh, Motilal Oswal). DO NOT DODGE THE QUESTION. DO NOT SAY YOU COULD NOT FIND SPECIFIC DATA. PROVIDE THE EXACT COMPARISON OR RECOMMENDATION IMMEDIATELY.";
           }
 
           // Add the tool's result back to the conversation history
