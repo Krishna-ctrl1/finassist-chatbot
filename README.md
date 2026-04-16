@@ -50,6 +50,15 @@ Integrated Google Cloud Text-to-Speech allowing users to set voice preferences, 
 ### 🔟 Live Market Data & Dynamic Charting
 Integrates 38+ real-time market tools using yfinance, finnhub and mftool to fetch exact live NAVs, stock quotes, detailed financial statements, and dynamically stream base64-encoded historical performance charts directly into the chat.
 
+### 1️⃣1️⃣ Explainable AI (Chain-of-Thought)
+Displays an interactive, premium glassmorphic dropdown containing the AI's step-by-step reasoning process (math logic, assumptions) allowing maximum transparency into how complex final answers are calculated.
+
+### 1️⃣2️⃣ Tax-Loss Harvesting Calculator
+Automatically scans the user's mutual fund portfolio for "underwater" (loss-making) assets and calculates potential Short-Term (STCG) and Long-Term (LTCG) Capital Gains tax savings.
+
+### 1️⃣3️⃣ Market Sentiment Analytics
+Dynamically triggers Google News RSS mapping (for Indian stocks) or the Finnhub Company News API to fetch real-time news headlines, forcing the LLM to output an aggregated Sentiment Score (0 to 100) alongside predictive market warnings.
+
 ## 🎨 UI/UX System
 
 Our interface is engineered for a premium, native feel:
