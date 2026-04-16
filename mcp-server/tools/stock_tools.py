@@ -295,12 +295,17 @@ def register_stock_tools(mcp):
 
     @mcp.tool(description=GET_STOCK_NEWS_DESCRIPTION.model_dump_json())
     async def get_stock_news(
-        symbol: Annotated[str, Field(description="Stock symbol (e.g., RELIANCE.NS, TCS.BO for Indian stocks)")]
+        symbol: Annotated[str, Field(description="Stock symbol or Company name (e.g., Reliance, AAPL, TCS)")]
     ) -> str:
-        """Get latest news for a stock using yfinance"""
+        """Get latest news for a stock using Finnhub/yfinance/RSS"""
         try:
+            resolved_symbol, resolution_message = await symbol_resolver.smart_resolve(symbol, context="indian")
+            
+            if not resolved_symbol:
+                return f"🔍 **Symbol Resolution Failed for '{symbol}'**\n\n{resolution_message}"
+            
             stock_service = StockService()
-            news = await stock_service.get_stock_news(symbol)
+            news = await stock_service.get_stock_news(resolved_symbol)
             
             if not news:
                 return f"📰 No recent news found for {symbol.upper()}"

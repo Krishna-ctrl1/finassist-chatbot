@@ -146,24 +146,76 @@ class StockService:
 
     @classmethod
     async def get_stock_news(cls, symbol: str) -> list:
-        """Get latest news for a stock using yfinance"""
+        """Get latest news for a stock using Finnhub, Google RSS, or yfinance"""
         try:
+            is_indian = symbol.upper().endswith('.NS') or symbol.upper().endswith('.BO')
+            formatted_news = []
+            
+            # 1. Try Finnhub for global stocks
+            finnhub_client = get_finnhub_client()
+            if finnhub_client and not is_indian:
+                import datetime
+                end_date = datetime.datetime.now().strftime('%Y-%m-%d')
+                start_date = (datetime.datetime.now() - datetime.timedelta(days=7)).strftime('%Y-%m-%d')
+                try:
+                    res = finnhub_client.company_news(symbol, _from=start_date, to=end_date)
+                    if res:
+                        for article in res[:5]:
+                            formatted_news.append({
+                                'title': article.get('headline', 'No title'),
+                                'publisher': article.get('source', 'Finnhub'),
+                                'link': article.get('url', ''),
+                                'publish_time': datetime.datetime.fromtimestamp(article.get('datetime', 0)).strftime('%Y-%m-%d %H:%M:%S') if article.get('datetime') else 'Unknown',
+                                'summary': article.get('summary', '')[:200]
+                            })
+                        return formatted_news
+                except Exception as e:
+                    print(f"Finnhub news failed for {symbol}: {e}")
+
+            # 2. Try Google News RSS for Indian stocks
+            if is_indian:
+                try:
+                    import feedparser
+                    import urllib.parse
+                    # Extract the company name from the ticker to search
+                    try:
+                        ticker = yf.Ticker(symbol)
+                        company_name = ticker.info.get('shortName', symbol.split('.')[0])
+                    except:
+                        company_name = symbol.split('.')[0]
+                        
+                    query = urllib.parse.quote(f"{company_name} stock news")
+                    url = f"https://news.google.com/rss/search?q={query}&hl=en-IN&gl=IN&ceid=IN:en"
+                    feed = feedparser.parse(url)
+                    
+                    if getattr(feed, 'entries', []):
+                        for entry in feed.entries[:5]:
+                            formatted_news.append({
+                                'title': entry.title,
+                                'publisher': entry.source.title if hasattr(entry, 'source') else 'Google News',
+                                'link': entry.link,
+                                'publish_time': entry.published if hasattr(entry, 'published') else 'Unknown',
+                                'summary': getattr(entry, 'description', '')[:200]
+                            })
+                        if formatted_news:
+                            return formatted_news
+                except Exception as e:
+                    print(f"Google News RSS failed for {symbol}: {e}")
+                    
+            # 3. Absolute Fallback: yfinance
             ticker = yf.Ticker(symbol)
             news = ticker.news
             
             if not news:
                 return []
             
-            # Format news data
-            formatted_news = []
             for article in news:
                 formatted_news.append({
                     'title': article.get('title', 'No title'),
                     'publisher': article.get('publisher', 'Unknown'),
                     'link': article.get('link', ''),
                     'publish_time': article.get('providerPublishTime', 'Unknown'),
-                    'type': article.get('type', 'Unknown'),
-                    'summary': article.get('summary', '')
+                    'summary': article.get('summary', '')[:200]
                 })
             
             return formatted_news

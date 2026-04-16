@@ -1,0 +1,53 @@
+# FinAssist Chatbot: Comprehensive Testing Guide
+
+To thoroughly test your chatbot and ensure all capabilities—from basic data retrieval to advanced analytical features—are functioning correctly, try asking the following queries. They are grouped by feature and complexity.
+
+## 1. Basic Account & Portfolio (User Data Test)
+These queries test whether the chatbot correctly fetches and parses the `userData` (Orders, SIPs, Folios, etc.):
+- *"What is my name and email registered with you?"*
+- *"Show me my most recent orders."*
+- *"How many active SIPs do I have right now?"*
+- *"What is the total amount I have invested so far?"*
+- *"List all my mutual fund folios."*
+
+## 2. General Knowledge & RAG (FAQ Test)
+These queries test the bot's ability to search the internal FAQs before resorting to general pre-trained knowledge:
+- *"What is a Mutual Fund?"*
+- *"How does compounding work?"*
+- *"What is the difference between an SIP and a Lumpsum investment?"*
+- *"Is it safe to invest in the stock market?"*
+
+## 3. Explainable AI & Math (Chain-of-Thought Test)
+These queries trigger the new **Glassmorphic `<thought>` accordion**. They force the AI to perform step-by-step calculations.
+- *"If I start an SIP of ₹10,000 per month for the next 15 years, assuming an annual return of 12%, what will my final corpus be?"*
+- *"Calculate the absolute return on my portfolio if I invested ₹50,000 and it is now worth ₹65,000."*
+- *"If I have a lumpsum of ₹1,00,000, how many years will it take to double at a 15% CAGR?"*
+- *"I want to save ₹20 Lakhs in 5 years. How much should my monthly SIP be assuming 10% returns?"*
+
+## 4. Tax-Loss Harvesting (Optimization Test)
+These queries test the newly injected backend utility that scans for underwater investments and calculates potential STCG/LTCG tax savings.
+- *"Do I have any tax-loss harvesting opportunities in my portfolio?"*
+- *"Can you check if I have any underwater investments that I can sell to offset capital gains?"*
+- *"How can I optimize my current investments regarding taxes?"*
+- *"I want to reduce my tax liability. Is my portfolio eligible for tax-loss harvesting?"*
+
+## 5. Live Web Search & Sentiment Analytics (News Test)
+These queries trigger the `search_web` python MCP tool and force the LLM to output a **Sentiment Score (0-100)**.
+- *"Fetch the latest news for Reliance Industries. What is the current market sentiment?"*
+- *"Give me a sentiment score for Apple stock based on today's headlines."*
+- *"Is there any bad news about HDFC bank recently? Please provide the sentiment score."*
+- *"Summarize the latest market news for SBI and tell me if the sentiment is bullish or bearish."*
+
+## 6. Financial Tools & Live Data Retrieval (MCP Test)
+These queries test the Python Server tools (Stock tools, mutual fund tools).
+- *"Compare the performance of Parag Parikh Flexi Cap and Motilal Oswal midcap."*
+- *"What are the top 5 stock holdings inside the SBI Small Cap fund?"*
+- *"Show me the historical price chart for Tata Motors."* (if charting tool is implemented).
+- *"What is the current estimated NAV of the Nippon India Growth Fund?"*
+
+---
+### 💡 Testing Pro-Tip
+While testing, pay close attention to the **Chat UI**. Make sure that:
+1. The AI responses are direct and professional.
+2. The **"AI Reasoning Process"** accordion drops down smoothly with a glassmorphic background when mathematical questions are asked.
+3. The responses use the Indian Rupee symbol (₹) and proper formatting.

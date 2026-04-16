@@ -1899,6 +1899,12 @@ body {
   display: flex;
   background: linear-gradient(135deg, var(--primary), var(--secondary));
   color: white;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .message.user .message-avatar {
