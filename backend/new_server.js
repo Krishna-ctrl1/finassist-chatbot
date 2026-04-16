@@ -713,6 +713,62 @@ function searchFAQs(query) {
     : null;
 }
 
+// Function to calculate potential Tax-Loss Harvesting savings
+function calculateTaxLossHarvesting(investmentPerformance, investmentReturns) {
+  if (!investmentPerformance && !investmentReturns) return null;
+  
+  let totalUnrealizedLoss = 0;
+  let underwaterFundsCount = 0;
+  
+  // Try to find performance details showing loss
+  if (Array.isArray(investmentPerformance)) {
+    investmentPerformance.forEach(item => {
+      const invested = parseFloat(item.invested_value || item.invested_amount || item.total_investment || 0);
+      const current = parseFloat(item.current_value || item.current_amount || 0);
+      
+      if (invested > current && current > 0) {
+        totalUnrealizedLoss += (invested - current);
+        underwaterFundsCount++;
+      }
+    });
+  }
+  
+  if (totalUnrealizedLoss === 0 && Array.isArray(investmentReturns)) {
+    investmentReturns.forEach(item => {
+      const invested = parseFloat(item.invested_value || item.total_investment || 0);
+      const current = parseFloat(item.current_value || 0);
+      if (invested > current && current > 0) {
+        totalUnrealizedLoss += (invested - current);
+        underwaterFundsCount++;
+      } else if (item.absolute_return < 0 || (item.percentage_return && item.percentage_return < 0)) {
+        let loss = 0;
+        if (item.absolute_return) {
+          loss = Math.abs(parseFloat(item.absolute_return));
+        } else if (invested > 0) {
+           loss = invested * Math.abs(parseFloat(item.percentage_return)) / 100;
+        }
+        if (loss > 0) {
+           totalUnrealizedLoss += loss;
+           underwaterFundsCount++;
+        }
+      }
+    });
+  }
+  
+  if (totalUnrealizedLoss <= 0) return null;
+  
+  // Standard India tax slabs for calculation
+  const stcgSavings = totalUnrealizedLoss * 0.20; // 20%
+  const ltcgSavings = totalUnrealizedLoss * 0.125; // 12.5%
+  
+  return {
+    totalUnderwaterInvestmentLoss: totalUnrealizedLoss,
+    underwaterFundsCount,
+    potentialSTCGSavings: stcgSavings,
+    potentialLTCGSavings: ltcgSavings
+  };
+}
+
 // Function to handle ticket creation flow
 async function handleTicketCreationFlow(message, chat, customerId) {
   // Helper function to safely convert content to string
@@ -1636,12 +1692,19 @@ Please provide a brief title for your issue (e.g., "Unable to complete payment",
       const relevantFAQs = await retrieveRelevantFAQs(processedMessage, 4);
       console.log("🔹 RAG Retrieved", relevantFAQs.length, "relevant FAQs for query:", processedMessage);
 
+      // Tax-Loss Harvesting Calculation
+      const taxLossData = calculateTaxLossHarvesting(userData.investmentPerformance, userData.investmentReturns);
+      let taxLossInfo = taxLossData 
+        ? `\n**POTENTIAL TAX-LOSS HARVESTING SAVINGS DETECTED!**\n- Total Underwater Investment Losses: ₹${taxLossData.totalUnderwaterInvestmentLoss.toLocaleString("en-IN")}\n- Number of underwater funds: ${taxLossData.underwaterFundsCount}\n- Potential STCG Tax Savings (at 20%): ₹${taxLossData.potentialSTCGSavings.toLocaleString("en-IN")}\n- Potential LTCG Tax Savings (at 12.5%): ₹${taxLossData.potentialLTCGSavings.toLocaleString("en-IN")}\n*Advise the user to consider Tax-Loss Harvesting if they request optimization or loss management.*`
+        : "\nNo immediate tax-loss harvesting opportunities detected.";
+
       // 2. Format them for the AI Prompt
       const ragContent = relevantFAQs.length > 0
         ? relevantFAQs.map(faq => `Q: ${faq.Question}\nA: ${faq.Answer}`).join("\n\n")
         : "No specific FAQ matched. Answer based on general financial knowledge.";
 
       let userDataString = `
+      ${taxLossInfo}
 Customer: ${userData.customer?.name || "Unknown"} (ID: ${userData.customer?.id || "Unknown"
         }, RAYI ID: ${userData.customer?.rayi_customer_id || "Unknown"})
 Email: ${userData.customer?.email || "unknown@email.com"}
@@ -1936,7 +1999,21 @@ For questions that require current events, live news, or real-time web knowledge
 *STRICT NON-FINANCIAL QUERIES RULE:*
 You are a specialized Financial Assistant. You must prioritize questions related to finance, investing, stock markets, mutual funds, personal wealth, or economics. 
 However, you must ALSO be helpful and flexible. If a user asks to "compare" items, asks about their portfolio, or gives a short vague query, ALWAYS do your best to answer it using the available data, tools, OR YOUR PRE-TRAINED KNOWLEDGE if tools fail to find exact matches. 
-If the user asks an obviously non-financial query (like coding, sports, history), politely remind them: "I specialize in finance, but..." and then provide a very brief, helpful answer anyway. Do NOT aggressively refuse to answer.`;
+If the user asks an obviously non-financial query (like coding, sports, history), politely remind them: "I specialize in finance, but..." and then provide a very brief, helpful answer anyway. Do NOT aggressively refuse to answer.
+
+FORMATTING RULE UPDATE: You may use standard markdown (including clean tables, structured lists, and bold headers) to make the data highly readable and premium looking. Do not use blockquotes (>) for data.
+
+EXPLAINABLE AI - CHAIN-OF-THOUGHT DIRECTIVE:
+Recruiters and users want to see your internal reasoning. Before you provide your final answer, you MUST ALWAYS include a strict "Step-by-Step" internal reasoning format enclosed exactly within <thought> and </thought> tags. 
+Inside the <thought> tags, use the exact format:
+STEP 1: [Analyze the query]
+STEP 2: [Perform any necessary calculations or logic]
+STEP 3: [Formulate final response]
+The final user-facing response must be written AFTER the </thought> closing tag.
+
+FINANCIAL NEWS SENTIMENT INTEGRATION:
+When you fetch the latest news via the search_web tool, you MUST perform a sentiment analysis on the fetched headlines. 
+You must include in your response a "Sentiment Score" (0 to 100, where 0 is extremely bearish and 100 is extremely bullish) as part of the market summary.`;
 
       // --- START OF UPDATED LOGIC ---
 

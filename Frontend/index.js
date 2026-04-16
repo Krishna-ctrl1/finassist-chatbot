@@ -1072,20 +1072,52 @@ function appendMessage(sender, message, animate = true, skipScroll = false) {
 
 function formatMessage(message) {
   if (!message) return '';
+  
+  // Custom parsing for chain-of-thought inside <thought>...</thought>
+  let thoughtHtml = '';
+  const thoughtMatch = message.match(/<thought>([\s\S]*?)<\/thought>/i);
+  if (thoughtMatch) {
+    let thoughtContent = thoughtMatch[1].trim();
+    message = message.replace(/<thought>[\s\S]*?<\/thought>/i, '');
+    
+    thoughtContent = thoughtContent.replace(/\n/g, '<br>');
+    
+    thoughtHtml = `
+      <div class="glass-accordion thought-accordion" style="margin-bottom: 12px; border-radius: 12px; overflow: hidden; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: inherit;">
+        <div class="accordion-header" onclick="this.parentElement.classList.toggle('active')" style="padding: 10px 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; font-size: 0.9em; user-select: none;">
+          <div><i class="fas fa-brain" style="margin-right: 8px; color: var(--accent-light, #10a37f);"></i> <span style="font-weight: 500;">AI Reasoning Process</span></div>
+          <i class="fas fa-chevron-down toggle-icon" style="transition: transform 0.3s;"></i>
+        </div>
+        <div class="accordion-content" style="max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; background: rgba(0,0,0,0.02);">
+          <div style="padding: 0 15px 15px 15px; font-size: 0.85em; opacity: 0.9; line-height: 1.5;">
+            ${thoughtContent}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  let formattedMessage = '';
   // Enhanced formatting with marked and DOMPurify if available
   if (window.marked && window.DOMPurify) {
     try {
       const html = marked.parse(message);
-      return DOMPurify.sanitize(html);
+      formattedMessage = DOMPurify.sanitize(html);
     } catch (e) {
       console.error("Markdown parsing failed", e);
+      formattedMessage = sanitizeInput(message)
+        .replace(/\n/g, '<br>')
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>');
     }
+  } else {
+    // Basic formatting fallback
+    formattedMessage = sanitizeInput(message)
+      .replace(/\n/g, '<br>')
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Bold text
+      .replace(/\*(.*?)\*/g, '<em>$1</em>'); // Italic text
   }
-  // Basic formatting fallback
-  return sanitizeInput(message)
-    .replace(/\n/g, '<br>')
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Bold text
-    .replace(/\*(.*?)\*/g, '<em>$1</em>'); // Italic text
+  return thoughtHtml + formattedMessage;
 }
 
 // Global variables for request management

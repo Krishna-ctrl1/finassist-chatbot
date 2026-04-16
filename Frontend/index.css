@@ -3655,9 +3655,11 @@ body {
 }
 
 .message-bubble blockquote {
-  border-left: 3px solid var(--border);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--rounded);
   margin: 0.5rem 0;
-  padding-left: 1rem;
+  padding: 0.5rem 1rem;
   color: var(--text-muted);
 }
 
@@ -3806,4 +3808,14 @@ body {
 }
 .bg-decoration::after {
   background: radial-gradient(circle, rgba(59, 130, 246, 0.15) 0%, rgba(255,255,255,0) 70%) !important;
+}
+
+
+/* AI Chain of Thought Accordion */
+.thought-accordion.active .accordion-content {
+  max-height: 2000px !important;
+  padding-bottom: 15px !important;
+}
+.thought-accordion.active .toggle-icon {
+  transform: rotate(180deg);
 }
