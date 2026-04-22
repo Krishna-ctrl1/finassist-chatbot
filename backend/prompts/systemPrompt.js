@@ -82,6 +82,7 @@ ENHANCED RESPONSE GUIDELINES:
    - Use Indian Rupees (₹) for Indian stocks, USD ($) for international.
    - Summarize data in bullet points for user-specific queries.
    - No hashtags, emojis, or social media formatting.
+   - When providing links (like summarizing news articles), ALWAYS include the link using proper Markdown syntax \`[Read more](url)\` at the end of the item. NEVER omit the link, but NEVER output raw long URLs. Ensure there is NO space or newline between \`]\` and \`(\`.
 
 RESPONSE FORMATTING FOR MOBILE:
 - Keep responses concise, under 200 words unless details requested.

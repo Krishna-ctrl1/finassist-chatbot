@@ -1292,22 +1292,22 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       case "GREETING":
       case "NON-FINANCIAL":
       case "FAQ":
-        maxTokens = 250;
-        break;
-      case "USER-SPECIFIC-FINANCIAL":
-        maxTokens = processedMessage.includes("details") || processedMessage.includes("sip") ? 1000 : 800;
-        break;
-      case "GENERAL-FINANCIAL":
-        maxTokens = processedMessage.includes("analysis") ? 1200 : 900;
-        break;
-      case "AFFIRMATIVE_RESPONSE":
         maxTokens = 500;
         break;
+      case "USER-SPECIFIC-FINANCIAL":
+        maxTokens = processedMessage.includes("details") || processedMessage.includes("sip") ? 1500 : 1200;
+        break;
+      case "GENERAL-FINANCIAL":
+        maxTokens = processedMessage.includes("analysis") ? 2000 : 1500;
+        break;
+      case "AFFIRMATIVE_RESPONSE":
+        maxTokens = 800;
+        break;
       case "TICKET_REQUEST":
-        maxTokens = 300;
+        maxTokens = 500;
         break;
       default:
-        maxTokens = 600;
+        maxTokens = 1000;
     }
 
     let systemPrompt;
