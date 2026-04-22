@@ -177,6 +177,26 @@ class StockService:
                 try:
                     import feedparser
                     import urllib.parse
+                    import requests as _requests
+                    
+                    # Helper: resolve Google News redirect URLs to actual article URLs
+                    def _resolve_google_news_link(google_url: str) -> str:
+                        """Follow the Google News redirect to get the real article URL."""
+                        try:
+                            resp = _requests.head(google_url, allow_redirects=True, timeout=5)
+                            if resp.url and resp.url != google_url:
+                                return resp.url
+                        except Exception:
+                            pass
+                        # Fallback: strip the Google wrapper if possible
+                        if '/articles/' in google_url:
+                            try:
+                                resp = _requests.get(google_url, allow_redirects=True, timeout=5)
+                                return resp.url
+                            except Exception:
+                                pass
+                        return google_url  # Return original if resolution fails
+                    
                     # Extract the company name from the ticker to search
                     try:
                         ticker = yf.Ticker(symbol)
@@ -190,10 +210,14 @@ class StockService:
                     
                     if getattr(feed, 'entries', []):
                         for entry in feed.entries[:5]:
+                            # Resolve the Google redirect URL to actual article URL
+                            raw_link = getattr(entry, 'link', '')
+                            resolved_link = _resolve_google_news_link(raw_link) if raw_link else ''
+                            
                             formatted_news.append({
                                 'title': entry.title,
                                 'publisher': entry.source.title if hasattr(entry, 'source') else 'Google News',
-                                'link': entry.link,
+                                'link': resolved_link,
                                 'publish_time': entry.published if hasattr(entry, 'published') else 'Unknown',
                                 'summary': getattr(entry, 'description', '')[:200]
                             })

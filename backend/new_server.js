@@ -1256,6 +1256,68 @@ app.post("/api/chat", authenticateToken, async (req, res) => {
       content: msg.processedContent || msg.content,
     }));
 
+    // ─── TICKET WORKFLOW INTERCEPTION ───
+    // Check if we're in an active ticket creation flow BEFORE classifying.
+    // This prevents the classifier from misrouting ticket step responses
+    // (e.g., a description like "i want to know about stocks") as FAQ/GENERAL.
+    const getContentStr = (c) => {
+      if (typeof c === 'string') return c;
+      if (typeof c === 'object' && c !== null) {
+        if (c.type === 'document_upload_modal' && c.content) return c.content;
+        return JSON.stringify(c);
+      }
+      return String(c || '');
+    };
+
+    const lastBotMsg = [...chat.messages].reverse().find(m => m.sender === 'bot');
+    const lastBotContent = lastBotMsg ? getContentStr(lastBotMsg.content) : '';
+    
+    // Only intercept Steps 1-3 and the initial prompt.
+    // Step 4 (document upload) is handled entirely by the frontend's file upload UI.
+    const isActiveTicketFlow = lastBotContent.includes("Step 1 of 4") ||
+      lastBotContent.includes("Step 2 of 4") ||
+      lastBotContent.includes("Step 3 of 4") ||
+      lastBotContent.includes("Would you like to proceed with creating a support ticket?");
+
+    // Safety: if a ticket was already created in this chat, don't intercept
+    const ticketAlreadyCreated = chat.messages.some(m =>
+      m.sender === 'bot' && typeof m.content === 'string' &&
+      m.content.includes('Ticket Created Successfully')
+    );
+
+    if (isActiveTicketFlow && !ticketAlreadyCreated) {
+      console.log("🎫 Active ticket workflow detected — bypassing AI classification");
+
+      const ticketResponse = await handleTicketCreationFlow(
+        message,
+        chat,
+        customerId
+      );
+
+      let assistantMessage;
+      if (typeof ticketResponse === 'object' && ticketResponse.type === 'document_upload_modal') {
+        assistantMessage = { sender: "bot", content: ticketResponse, timestamp: new Date() };
+      } else {
+        assistantMessage = { sender: "bot", content: ticketResponse, timestamp: new Date() };
+      }
+
+      chat.messages.push(assistantMessage);
+      chat.updatedAt = new Date();
+
+      if (chat._id) {
+        await chatsCollection.updateOne(
+          { _id: chat._id },
+          { $set: { messages: chat.messages, updatedAt: chat.updatedAt }, $inc: { __v: 1 } }
+        );
+      } else {
+        const result = await chatsCollection.insertOne(chat);
+        chat._id = result.insertedId;
+      }
+
+      return res.json(chat);
+    }
+    // ─── END TICKET WORKFLOW INTERCEPTION ───
+
     const queryType = await classifyQueryWithAI(
       processedMessage,
       conversationContext

@@ -99,15 +99,8 @@ function setupEventListeners() {
     }
   });
 
-  document.addEventListener('click', function (e) {
-    if (e.target && e.target.classList.contains('create-ticket-btn')) {
-      e.preventDefault();
-      handleTicketCreation(e.target);
-    } else if (e.target && e.target.classList.contains('skip-upload-btn')) {
-      e.preventDefault();
-      skipFileUpload();
-    }
-  });
+  // Note: skip-upload-btn and create-ticket-btn click handling is done
+  // by the event delegation handler below (using .closest() for robustness).
 
   // Additional event delegation to handle dynamically created buttons
   document.addEventListener('click', function (e) {
@@ -1021,6 +1014,15 @@ async function deleteChat(chatId) {
 function appendMessage(sender, message, animate = true, skipScroll = false) {
   if (!elements.chatMessages) return;
 
+  // Handle object content (e.g., document_upload_modal from ticket flow)
+  if (typeof message === 'object' && message !== null) {
+    if (message.type === 'document_upload_modal') {
+      message = message.content || 'Document upload step';
+    } else {
+      message = typeof message === 'string' ? message : JSON.stringify(message);
+    }
+  }
+
   const messageDiv = document.createElement("div");
   messageDiv.className = `message ${sender}`;
 
@@ -1491,6 +1493,25 @@ async function renderMessagesOptimized(messages) {
     messages.forEach(message => {
       appendMessage(message.sender, message.content, false, true); // no animation, skip scroll
     });
+  }
+
+  // If the last bot message is a document_upload_modal and no ticket success follows,
+  // re-show the file upload interface so the user can continue their ticket flow.
+  const lastBotIdx = [...messages].reverse().findIndex(m => m.sender === 'bot');
+  if (lastBotIdx >= 0) {
+    const actualIdx = messages.length - 1 - lastBotIdx;
+    const lastBotMessage = messages[actualIdx];
+    const content = lastBotMessage.content;
+    const isModal = typeof content === 'object' && content !== null && content.type === 'document_upload_modal';
+    const hasTicketSuccess = messages.slice(actualIdx + 1).some(m => {
+      const c = typeof m.content === 'string' ? m.content : '';
+      return c.includes('Ticket Created Successfully');
+    });
+    if (isModal && !hasTicketSuccess) {
+      setTimeout(() => {
+        if (typeof showFileUploadInterface === 'function') showFileUploadInterface();
+      }, 300);
+    }
   }
 }
 
@@ -2587,17 +2608,16 @@ async function skipFileUpload() {
     const result = await response.json();
     console.log('Ticket created successfully (no attachments):', result);
 
-    // Show success message in chat immediately
-    const successMessage = `✅ **Ticket Created Successfully!**\n\n**Ticket ID:** ${result.ticket.ticket_id}\n**Title:** ${issueTitle}\n**Category:** ${category}\n**Status:** Open\n**Attachments:** None\n\nYour support ticket has been created and assigned to our team. You'll receive updates on the progress via email.\n\n**What's next?**\n- Our support team will review your ticket within 24 hours\n- You'll receive email notifications for any updates\n- You can reference your ticket using ID: ${result.ticket.ticket_id}\n\nIs there anything else I can help you with regarding your investments or account?`;
-
     // Clear the file upload interface
     const fileUploadContainer = document.querySelector('.file-upload-container');
     if (fileUploadContainer) {
       fileUploadContainer.remove();
     }
 
-    // Display success message in chat immediately
-    appendMessage('bot', successMessage);
+    // Reload the chat to show the server-pushed success message (avoid duplicates)
+    if (currentChatId) {
+      await loadChat(currentChatId);
+    }
 
     // Reset state
     selectedFiles = [];
@@ -2718,32 +2738,16 @@ async function handleTicketCreation(button) {
     const result = await response.json();
     console.log('Ticket created successfully:', result);
 
-    // Show success message in chat immediately
-    const successMessage = `✅ **Ticket Created Successfully!**
-
-**Ticket ID:** ${result.ticket.ticket_id}
-**Title:** ${issueTitle}
-**Category:** ${category}
-**Status:** Open
-**Attachments:** ${selectedFiles.length} file(s)
-
-Your support ticket has been created and assigned to our team. You'll receive updates on the progress via email.
-
-**What's next?**
-- Our support team will review your ticket within 24 hours
-- You'll receive email notifications for any updates
-- You can reference your ticket using ID: ${result.ticket.ticket_id}
-
-Is there anything else I can help you with regarding your investments or account?`;
-
     // Clear the file upload interface
     const fileUploadContainer = document.querySelector('.file-upload-container');
     if (fileUploadContainer) {
       fileUploadContainer.remove();
     }
 
-    // Display success message in chat immediately
-    appendMessage('bot', successMessage);
+    // Reload the chat to show the server-pushed success message (avoid duplicates)
+    if (currentChatId) {
+      await loadChat(currentChatId);
+    }
 
     // Reset state
     selectedFiles = [];

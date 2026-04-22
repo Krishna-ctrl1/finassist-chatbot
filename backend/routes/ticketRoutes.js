@@ -77,7 +77,7 @@ router.post("/create", authenticateToken, upload.array('attachments', 3), async 
       "KYC Related", 
       "Products Related",
       "Orders Related",
-      "Payment/Bank Accounts",
+      "Payments/Bank Accounts",
       "Account Related",
       "Others"
     ];
