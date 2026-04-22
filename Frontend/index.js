@@ -1236,6 +1236,44 @@ async function sendMessage() {
       throw new Error(`Failed to send message: ${response.status}`);
     }
 
+    const contentType = response.headers.get("content-type");
+    if (contentType && contentType.includes("application/json")) {
+      const chatData = await response.json();
+      currentChatId = chatData._id || chatData.id;
+      
+      if (elements.typingIndicator) {
+        elements.typingIndicator.style.display = "none";
+      }
+
+      if (chatData.messages && chatData.messages.length > 0) {
+        const lastMsg = chatData.messages[chatData.messages.length - 1];
+        if (lastMsg.sender === "bot") {
+          let botContent = lastMsg.content;
+          if (typeof botContent === 'object' && botContent.type === 'document_upload_modal') {
+             const modalConfig = botContent.modalConfig;
+             const displayMessage = `${modalConfig.description}\n\nYou can upload up to ${modalConfig.maxFiles} files (max ${modalConfig.maxFileSize} each).\nSupported formats: ${modalConfig.allowedTypes.join(', ')}`;
+             appendMessage("bot", displayMessage);
+             setTimeout(() => {
+                if (typeof showFileUploadInterface === 'function') showFileUploadInterface();
+             }, 500);
+          } else {
+             appendMessage("bot", typeof botContent === 'string' ? botContent : JSON.stringify(botContent));
+             if (typeof botContent === 'string' && window.voiceOutputActive && typeof playTTS === 'function') {
+               playTTS(botContent);
+             }
+          }
+        }
+      }
+      
+      if (typeof loadChatHistory === 'function') loadChatHistory();
+      
+      isSendingMessage = false;
+      if (elements.sendBtn) {
+        elements.sendBtn.disabled = false;
+      }
+      return;
+    }
+
     console.log("Streaming response started");
 
     // Hide typing indicator once stream starts

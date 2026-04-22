@@ -3825,3 +3825,7 @@ body {
 .thought-accordion.active .toggle-icon {
   transform: rotate(180deg);
 }
+
+.message-content { overflow-wrap: anywhere; word-break: break-word; }
+.message-content a { overflow-wrap: anywhere; word-break: break-word; }
+
