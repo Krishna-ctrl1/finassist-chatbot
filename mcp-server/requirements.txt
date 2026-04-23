@@ -7,3 +7,6 @@ matplotlib
 deprecated
 duckduckgo-search
 finnhub-python
+httpx
+feedparser
+requests

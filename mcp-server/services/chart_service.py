@@ -202,31 +202,59 @@ class ChartService:
     
     @classmethod
     async def create_mutual_fund_chart(cls, scheme_code: str, period: str = "1y") -> str:
-        """Create a NAV chart for a mutual fund using mftool"""
+        """Create a NAV chart for a mutual fund using MFAPI (with mftool fallback)"""
         try:
-            from mftool import Mftool
-            mf = Mftool()
-            data = mf.get_scheme_historical_nav(scheme_code, as_json=False)
-            
-            if not data or 'data' not in data or not data['data']:
-                raise ValueError(f"No historical data available for scheme {scheme_code}")
-            
-            scheme_name = data.get('meta', {}).get('scheme_name', f'Scheme {scheme_code}')
-            
-            # Convert to DataFrame
-            df = pd.DataFrame(data['data'])
-            df['date'] = pd.to_datetime(df['date'], format='%d-%m-%Y')
-            df['nav'] = pd.to_numeric(df['nav'])
-            df.set_index('date', inplace=True)
-            df.sort_index(inplace=True)
-            
-            # Filter by period if needed based on days mapping
+            data = None
+            scheme_name = f"Scheme {scheme_code}"
+
+            # Primary: Try MFAPI for historical data
+            try:
+                import httpx
+                async with httpx.AsyncClient(timeout=15) as client:
+                    resp = await client.get(f"https://api.mfapi.in/mf/{scheme_code}")
+                    resp.raise_for_status()
+                    api_data = resp.json()
+                    if api_data.get("status") == "SUCCESS" and api_data.get("data"):
+                        scheme_name = api_data.get("meta", {}).get("scheme_name", scheme_name)
+                        # Convert MFAPI format to DataFrame
+                        df = pd.DataFrame(api_data["data"])
+                        df['date'] = pd.to_datetime(df['date'], format='%d-%m-%Y')
+                        df['nav'] = pd.to_numeric(df['nav'])
+                        df.set_index('date', inplace=True)
+                        df.sort_index(inplace=True)
+                        data = df
+                        print(f"MFAPI: Loaded {len(df)} NAV records for {scheme_code}")
+            except Exception as api_err:
+                print(f"MFAPI chart data failed for {scheme_code}: {api_err}")
+
+            # Fallback: mftool
+            if data is None or data.empty:
+                print(f"Falling back to mftool for chart data for {scheme_code}...")
+                from mftool import Mftool
+                mf = Mftool()
+                raw = mf.get_scheme_historical_nav(scheme_code, as_json=False)
+                
+                if not raw or 'data' not in raw or not raw['data']:
+                    raise ValueError(f"No historical data available for scheme {scheme_code}")
+                
+                scheme_name = raw.get('meta', {}).get('scheme_name', scheme_name)
+                df = pd.DataFrame(raw['data'])
+                df['date'] = pd.to_datetime(df['date'], format='%d-%m-%Y')
+                df['nav'] = pd.to_numeric(df['nav'])
+                df.set_index('date', inplace=True)
+                df.sort_index(inplace=True)
+                data = df
+
+            if data is None or data.empty:
+                raise ValueError(f"No data available for scheme {scheme_code}")
+
+            # Filter by period
             days_map = {"1mo": 30, "3mo": 90, "6mo": 180, "1y": 365, "3y": 1095, "5y": 1825}
             days = days_map.get(period, 365)
             start_date = datetime.now() - timedelta(days=days)
-            df = df[df.index >= start_date]
+            data = data[data.index >= start_date]
             
-            if df.empty:
+            if data.empty:
                 raise ValueError(f"No data available in the requested period {period}")
                 
             # Setup chart style
@@ -236,8 +264,8 @@ class ChartService:
             fig, ax = plt.subplots(figsize=(12, 6))
             
             # Price chart
-            ax.plot(df.index, df['nav'], linewidth=2.5, color='#4ECDC4', label='NAV')
-            ax.fill_between(df.index, df['nav'], alpha=0.3, color='#4ECDC4')
+            ax.plot(data.index, data['nav'], linewidth=2.5, color='#4ECDC4', label='NAV')
+            ax.fill_between(data.index, data['nav'], alpha=0.3, color='#4ECDC4')
             
             # Format chart
             ax.set_title(f'{scheme_name} ({period.upper()})', fontsize=16, fontweight='bold', pad=20)
